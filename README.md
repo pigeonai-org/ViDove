@@ -143,6 +143,8 @@ Here's why:
    python3 entries/app.py
    ```
 
+   #### Updated 2024/3/3: we are happy to tell you that you could try to use RAG boosted translation by selecting is_assistant in the UI under the translation section.
+
 ### Launch with configs
   - Start with Youtube Link input:
     ```sh

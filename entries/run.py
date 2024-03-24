@@ -25,6 +25,7 @@ def parse_args():
     parser.add_argument("--srt_file", help="srt file input path here", default=None, type=str, required=False) # Deprecated
     # parser.add_argument("--continue", help="task_id that need to continue", default=None, type=str, required=False) # need implement
     parser.add_argument("--launch_cfg", help="launch config path", default='./configs/local_launch.yaml', type=str, required=False)
+    parser.add_argument("--is_assistant", help="is assistant mode", default=False, type=bool, required=False)
     parser.add_argument("--task_cfg", help="task config path", default='./configs/task_config.yaml', type=str, required=False)
     args = parser.parse_args()
 
@@ -48,6 +49,14 @@ if __name__ == "__main__":
     task_dir = local_dir.joinpath(f"task_{task_id}")
     task_dir.mkdir(parents=False, exist_ok=False)
     task_dir.joinpath("results").mkdir(parents=False, exist_ok=False)
+
+    # add is_assistant to task_cfg
+    task_cfg["is_assistant"] = args.is_assistant
+
+    # disable spell check and term correct for assistant mode
+    if args.is_assistant:
+        task_cfg["pre_process"]["spell_check"] = False
+        task_cfg["pre_process"]["term_correct"] = False
 
     # Task create
     if args.link is not None:

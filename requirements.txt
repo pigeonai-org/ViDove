@@ -19,7 +19,7 @@ multidict==6.0.4
 networkx==3.0
 numba==0.56.4
 numpy==1.23.5
-openai==0.27.2
+openai==1.13.3
 openai-whisper @ git+https://github.com/openai/whisper.git@6dea21fd7f7253bfe450f1e2512a0fe47ee2d258
 panda==0.3.1
 pandas==1.5.3
@@ -34,7 +34,7 @@ sympy==1.11.1
 tiktoken==0.3.1
 torch==2.0.0
 tqdm==4.65.0
-typing_extensions==4.5.0
+typing_extensions==4.8.0
 transformers
 urllib3==1.26.15
 yarl==1.8.2

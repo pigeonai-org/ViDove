@@ -1,4 +1,4 @@
-import openai
+from openai import OpenAI
 from pathlib import Path
 
 import logging
@@ -38,7 +38,9 @@ def get_transcript(method, src_srt_path, source_lang, audio_path, pre_load_asr_m
         
 def get_transcript_whisper_api(audio_path, source_lang, init_prompt):
     with open(audio_path, 'rb') as audio_file:
-        transcript = openai.Audio.transcribe(model="whisper-1", file=audio_file, response_format="srt", language=source_lang.lower(), prompt=init_prompt)
+        # client = openai.Client()
+        client = OpenAI()
+        transcript = client.audio.transcriptions.create(model="whisper-1", file=audio_file, response_format="srt", language=source_lang.lower(), prompt=init_prompt)
     return transcript
     
 def get_transcript_stable(audio_path, whisper_model, init_prompt, pre_load_asr_model = None):

@@ -11,7 +11,7 @@ import subprocess
 from src.srt_util.srt import SrtScript
 from src.srt_util.srt2ass import srt2ass
 from time import time, strftime, gmtime, sleep
-from src.translators.translation import get_translation, prompt_selector
+from src.translators.translator import Translator
 from src.ASR.ASR import get_transcript
 
 import shutil
@@ -98,6 +98,8 @@ class Task:
         logging.info("Post-process setting:")
         for key in self.post_setting:
             logging.info(f"{key}: {self.post_setting[key]}")
+        
+        self.translator = Translator(self.translation_model, self.source_lang, self.target_lang, self.field, self.task_id)
 
     @staticmethod
     def fromYoutubeLink(youtube_url, task_id, task_dir, task_cfg):
@@ -194,8 +196,8 @@ class Task:
         Handles the translation of the SRT script.
         """
         logging.info("---------------------Start Translation--------------------")
-        prompt = prompt_selector(self.source_lang, self.target_lang, self.field)
-        get_translation(self.SRT_Script, self.translation_model, self.task_id, prompt, self.translation_setting['chunk_size'])
+        self.translator.set_srt(self.SRT_Script)
+        self.translator.translate()
     
     # Module 4: perform srt post process steps
     def postprocess(self):
