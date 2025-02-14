@@ -1,7 +1,4 @@
-# Not recommended to use this class, use the basic_rag.py instead as the tavily search may give a lot unrelated results
-
-# This rag need to improved as there is no converation history management
-
+# RAG wtih dynamic knowledge base update
 import os
 from logging import Logger
 
@@ -22,7 +19,6 @@ from llama_index.core.retrievers import VectorIndexRetriever
 from llama_index.core.schema import Document
 from llama_index.embeddings.openai import OpenAIEmbedding
 
-
 # Setup the tavily API before using online search
 # Set up Tavily tool
 from tavily import TavilyClient
@@ -34,6 +30,17 @@ DATA_DIR = "domain_dict/SC2"
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 
 # text_qa_template
+# 爬取+数据处理
+TEST_URLS = [
+    "https://liquipedia.net/starcraft2/Definitions",
+    "https://liquipedia.net/starcraft2/Maps",
+    "https://liquipedia.net/starcraft2/Resources",
+    "https://liquipedia.net/starcraft2/Upgrades",
+    "https://liquipedia.net/starcraft2/Attributes",
+
+
+
+] # The length of the list should not exceed 20 (20 URLs Maxium)
 
 SYSTEM_PROMPT = (
     "You are a professional translator. your job is to translate texts in domain of {domain} from {source_language} to {target_language} \n"

@@ -14,8 +14,10 @@ from llama_index.core.chat_engine.types import (
     StreamingAgentChatResponse,
 )
 from llama_index.core.node_parser import SentenceSplitter
-from llama_index.embeddings.openai import OpenAIEmbedding
+from llama_index.embeddings.azure_openai import AzureOpenAIEmbedding
 from llama_index.llms.openai import OpenAI
+from llama_index.embeddings.openai import OpenAIEmbedding
+from llama_index.llms.azure_openai import AzureOpenAI
 
 from .abs_api_RAG import AbsApiRAG
 
@@ -47,10 +49,15 @@ class BasicRAG(AbsApiRAG):
         domain="starcraft2",
         llm_name: str = "gpt-4o-mini",
         embedding_name: str = "text-embedding-3-small",
+        is_azure: bool = False,
     ) -> None:
         super().__init__()
-        self.embeddings = OpenAIEmbedding(model=embedding_name)
-        self.llm = OpenAI(model=llm_name)
+        if is_azure:
+            self.embeddings = AzureOpenAIEmbedding(model=embedding_name)
+            self.llm = AzureOpenAI(model=llm_name)
+        else:
+            self.embeddings = OpenAIEmbedding(model=embedding_name)
+            self.llm = OpenAI(model=llm_name)
         self.system_prompt = SYSTEM_PROMPT.partial_format(
             source_lang=source_lang, target_lang=target_lang, domain=domain
         )
