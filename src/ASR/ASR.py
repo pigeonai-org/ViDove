@@ -1,19 +1,25 @@
-from openai import OpenAI
-from pathlib import Path
-from PIL import Image
-import cv2
 from collections import Counter
 from pathlib import Path
 
 import clip
-import logging
-import torch
+import cv2
 import stable_whisper
+import torch
+from PIL import Image
 from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
 
-def get_transcript(method, src_srt_path, source_lang, video_path , audio_path, client, task_logger, pre_load_asr_model = None):
 
-    is_trans = False # is trans flag 
+def get_transcript(
+    method,
+    src_srt_path,
+    source_lang,
+    video_path,
+    audio_path,
+    client,
+    task_logger,
+    pre_load_asr_model=None,
+):
+    is_trans = False  # is trans flag
 
     if not Path.exists(src_srt_path):
         # extract script from audio
@@ -23,73 +29,90 @@ def get_transcript(method, src_srt_path, source_lang, video_path , audio_path, c
 
         # process the audio by method
         if method == "whisper-api":
-            transcript = get_transcript_whisper_api(audio_path, source_lang, init_prompt, client)
+            transcript = get_transcript_whisper_api(
+                audio_path, source_lang, init_prompt, client
+            )
             is_trans = True
         elif method == "whisper-large-v3":
             transcript = get_transcript_whisper_large_v3(audio_path, pre_load_asr_model)
             is_trans = True
         elif method == "whisper-clips":
-            transcript = get_transcript_whisper_clips(video_path,audio_path,source_lang,client)
+            transcript = get_transcript_whisper_clips(
+                video_path, audio_path, source_lang, client
+            )
             is_trans = True
         elif "stable" in method:
             whisper_model = method.split("-")[2]
-            transcript = get_transcript_stable(audio_path, whisper_model, init_prompt, pre_load_asr_model)
+            transcript = get_transcript_stable(
+                audio_path, whisper_model, init_prompt, pre_load_asr_model
+            )
             is_trans = True
         else:
-            raise RuntimeError(f"unavaliable ASR inference method: {method}")   
-    
+            raise RuntimeError(f"unavaliable ASR inference method: {method}")
+
     # return transcript or None
-    if (is_trans == True):
-        return transcript    
-    else: 
+    if is_trans == True:
+        return transcript
+    else:
         return None
-        
+
+
 def get_transcript_whisper_api(audio_path, source_lang, init_prompt, client):
-    with open(audio_path, 'rb') as audio_file:
-        transcript = client.audio.transcriptions.create(model="whisper-1", file=audio_file, response_format="srt", language=source_lang.lower(), prompt=init_prompt)
+    with open(audio_path, "rb") as audio_file:
+        transcript = client.audio.transcriptions.create(
+            model="whisper-1",
+            file=audio_file,
+            response_format="srt",
+            language=source_lang.lower(),
+            prompt=init_prompt,
+        )
     return transcript
-    
-def get_transcript_stable(audio_path, whisper_model, init_prompt, pre_load_asr_model = None):
+
+
+def get_transcript_stable(
+    audio_path, whisper_model, init_prompt, pre_load_asr_model=None
+):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if pre_load_asr_model is not None:
         model = pre_load_asr_model
     else:
         model = stable_whisper.load_model(whisper_model, device)
-    transcript = model.transcribe(str(audio_path), regroup=False, initial_prompt=init_prompt)
+    transcript = model.transcribe(
+        str(audio_path), regroup=False, initial_prompt=init_prompt
+    )
     (
-        transcript
-        .split_by_punctuation(['.', '。', '?'])
-        .merge_by_gap(.15, max_words=3)
-        .merge_by_punctuation([' '])
-        .split_by_punctuation(['.', '。', '?'])
+        transcript.split_by_punctuation([".", "。", "?"])
+        .merge_by_gap(0.15, max_words=3)
+        .merge_by_punctuation([" "])
+        .split_by_punctuation([".", "。", "?"])
     )
     transcript = transcript.to_dict()
-    transcript = transcript['segments']
+    transcript = transcript["segments"]
     # after get the transcript, release the gpu resource
     torch.cuda.empty_cache()
 
     return transcript
-    
-def get_transcript_whisper_clips(video_path,audio_path,source_lang,client):
-    
+
+
+def get_transcript_whisper_clips(video_path, audio_path, source_lang, client):
     file_path = "src/ASR/categories_places365.txt"
 
     category_list = []
-    
+
     with open(file_path, "r") as file:
         for line in file:
             category_path = line.strip().split(" ")[0][3:]
             categories = category_path.split("/")
-            category_list=category_list+categories
+            category_list = category_list + categories
 
-    modified_category_list_2=[]
+    modified_category_list_2 = []
     for words in category_list:
-        categories=words.replace("_"," ")
+        categories = words.replace("_", " ")
         modified_category_list_2.append(categories)
 
-    category_database= list(set(modified_category_list_2))
+    category_database = list(set(modified_category_list_2))
     print(category_database)
-    
+
     # Load the CLIP model
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model, preprocess = clip.load("ViT-B/32", device=device)
@@ -140,7 +163,7 @@ def get_transcript_whisper_clips(video_path,audio_path,source_lang,client):
         all_keywords = []
 
         for i, frame in enumerate(frames):
-            print(f"Processing frame {i+1}/{len(frames)}")
+            print(f"Processing frame {i + 1}/{len(frames)}")
             keyword = analyze_frame_with_clip(frame, object_vocab)
             all_keywords.append(keyword)
             print(f"Frame {i} keyword: {keyword}")
@@ -153,22 +176,34 @@ def get_transcript_whisper_clips(video_path,audio_path,source_lang,client):
         top_keywords = [keyword for keyword, count in sorted_keywords]
 
         # Generate the final prompt with the video’s main keywords
-        prompt = f"The key concepts in this video include: {', '.join(top_keywords[:3])}."
+        prompt = (
+            f"The key concepts in this video include: {', '.join(top_keywords[:3])}."
+        )
         print(prompt)
         return prompt
 
-
     # Run the function and get the prompt
-    video_prompt = get_video_keywords(video_path,60)
+    video_prompt = get_video_keywords(video_path, 60)
 
-    def get_transcript_whisper_plus_clips_api(audio_path, source_lang, init_prompt, client):
-        with open(audio_path, 'rb') as audio_file:
-            transcript = client.audio.transcriptions.create(model="whisper-1", file=audio_file, response_format="srt", language=source_lang.lower(), prompt=init_prompt)
+    def get_transcript_whisper_plus_clips_api(
+        audio_path, source_lang, init_prompt, client
+    ):
+        with open(audio_path, "rb") as audio_file:
+            transcript = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file,
+                response_format="srt",
+                language=source_lang.lower(),
+                prompt=init_prompt,
+            )
         return transcript
 
-    return get_transcript_whisper_plus_clips_api(audio_path,source_lang,video_prompt,client)
+    return get_transcript_whisper_plus_clips_api(
+        audio_path, source_lang, video_prompt, client
+    )
 
-def get_transcript_whisper_large_v3(audio_path, pre_load_asr_model = None):
+
+def get_transcript_whisper_large_v3(audio_path, pre_load_asr_model=None):
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
     torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
     model_id = "openai/whisper-large-v3"
@@ -176,29 +211,33 @@ def get_transcript_whisper_large_v3(audio_path, pre_load_asr_model = None):
     if pre_load_asr_model is not None:
         model = pre_load_asr_model
     else:
-        model = AutoModelForSpeechSeq2Seq.from_pretrained(model_id, torch_dtype=torch_dtype)
-    
+        model = AutoModelForSpeechSeq2Seq.from_pretrained(
+            model_id, torch_dtype=torch_dtype
+        )
+
     model.to(device)
 
     processor = AutoProcessor.from_pretrained(model_id)
     pipe = pipeline(
-    "automatic-speech-recognition",
-    model=model,
-    tokenizer=processor.tokenizer,
-    feature_extractor=processor.feature_extractor,
-    max_new_tokens=128,
-    chunk_length_s=30,
-    batch_size=16,
-    return_timestamps=True,
-    torch_dtype=torch_dtype,
-    device=device,
+        "automatic-speech-recognition",
+        model=model,
+        tokenizer=processor.tokenizer,
+        feature_extractor=processor.feature_extractor,
+        max_new_tokens=128,
+        chunk_length_s=30,
+        batch_size=16,
+        return_timestamps=True,
+        torch_dtype=torch_dtype,
+        device=device,
     )
 
     transcript_whisper_v3 = pipe(str(audio_path))
 
     # convert format
     transcript = []
-    for i in transcript_whisper_v3['chunks']:
-        transcript.append({'start': i['timestamp'][0], 'end': i['timestamp'][1], 'text':i['text']})
+    for i in transcript_whisper_v3["chunks"]:
+        transcript.append(
+            {"start": i["timestamp"][0], "end": i["timestamp"][1], "text": i["text"]}
+        )
 
     return transcript
