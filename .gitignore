@@ -16,3 +16,6 @@ log.csv
 local_dump/
 .pytest_cache/
 flagged/
+expdata/
+storage/
+testdata/
