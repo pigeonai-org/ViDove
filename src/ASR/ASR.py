@@ -240,5 +240,6 @@ def get_transcript_whisper_large_v3(audio_path, pre_load_asr_model=None):
         transcript.append(
             {"start": i["timestamp"][0], "end": i["timestamp"][1], "text": i["text"]}
         )
-
+        
+    print(transcript)
     return transcript
