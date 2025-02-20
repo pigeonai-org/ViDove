@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from yaml import Loader, load
 
-from src.task import Task
+from src.task import task
 
 """
     Main entry for terminal environment.
