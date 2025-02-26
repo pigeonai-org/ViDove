@@ -17,6 +17,7 @@ from src.ASR.ASR import get_transcript
 from src.srt_util.srt import SrtScript
 from src.srt_util.srt2ass import srt2ass
 from src.translators.translator import Translator
+from src.vision.vision_agent import CLIPVisionAgent, vLLMVisionAgent
 
 
 class TaskStatus(str, Enum):
@@ -65,6 +66,8 @@ class Task:
 
         self.task_local_dir = task_local_dir
         self.ASR_setting = task_cfg["ASR"]
+        self.vision_setting = task_cfg["vision"]
+        self.memory_setting = ...
         self.translation_setting = task_cfg["translation"]
         self.translation_model = self.translation_setting["model"]
 
@@ -134,6 +137,31 @@ class Task:
             self.client,
             self.chunk_size,
         )
+
+        # initialize vision agent
+        self.vision_agent = None
+        if self.vision_setting["vision_model"] == "CLIP":
+            self.vision_agent = CLIPVisionAgent(
+                self.vision_setting["vision_model"],
+                self.vision_setting["model_path"],
+                self.vision_setting["extract_interval"],
+                self.vision_setting["frame_cache_dir"],
+            )
+        elif self.vision_setting["vision_model"] == "vLLM":
+            self.vision_agent = vLLMVisionAgent(
+                self.vision_setting["vision_model"],
+                self.vision_setting["model_path"],
+                self.vision_setting["extract_interval"],
+                self.vision_setting["frame_cache_dir"],
+            )
+        else:
+            raise ValueError(f"Unsupported vision model: {self.vision_setting['vision_model']}")
+
+        if self.video_path is not None and self.vision_agent is not None:
+            self.visual_cues = self.vision_agent.analyze_video(self.video_path)
+        else:
+            self.visual_cues = None
+
 
     @staticmethod
     def fromYoutubeLink(youtube_url, task_id, task_dir, task_cfg):

@@ -19,6 +19,7 @@ def get_transcript(
     client,
     task_logger,
     pre_load_asr_model=None,
+    visual_cues=None,
 ):
     is_trans = False  # is trans flag
 
@@ -26,7 +27,7 @@ def get_transcript(
         # extract script from audio
         task_logger.info("extract script from audio")
         task_logger.info(f"Module 1: ASR inference method: {method}")
-        init_prompt = "Hello, welcome to my lecture." if source_lang == "EN" else ""
+        init_prompt = "Hello, welcome to my lecture." if source_lang == "EN" and visual_cues is None else visual_cues # directly use the visual cues as the init prompt
 
         # process the audio by method
         if method == "whisper-api":
@@ -37,7 +38,7 @@ def get_transcript(
         elif method == "whisper-large-v3":
             transcript = get_transcript_whisper_large_v3(audio_path, pre_load_asr_model)
             is_trans = True
-        elif method == "whisper-clips":
+        elif method == "whisper-clips": # TODO: remove this method @Zongheng00
             transcript = get_transcript_whisper_clips(
                 video_path, audio_path, source_lang, client
             )
