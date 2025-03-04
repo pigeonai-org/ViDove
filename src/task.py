@@ -11,7 +11,7 @@ from time import gmtime, strftime, time
 # pytube deprecated
 # from pytube import YouTube
 import yt_dlp
-from openai import AzureOpenAI
+from openai import AzureOpenAI, OpenAI
 
 from src.ASR.ASR import get_transcript
 from src.srt_util.srt import SrtScript
@@ -78,6 +78,7 @@ class Task:
         self.pre_setting = task_cfg["pre_process"]
         self.post_setting = task_cfg["post_process"]
         self.chunk_size = task_cfg["translation"]["chunk_size"]
+        self.api_source = task_cfg["api_source"]
 
         self.audio_path = None
         self.SRT_Script = None
@@ -103,12 +104,23 @@ class Task:
 
         print(f"Task ID: {self.task_id}")
         self.task_logger.info(f"Task ID: {self.task_id}")
-        if "AZURE_OPENAI_API_KEY" in task_cfg:
-            self.task_logger.info("Using AZURE_OPENAI_API_KEY from gradio interface.")
-            self.api_key = task_cfg["AZURE_OPENAI_API_KEY"]
-        else:
-            self.task_logger.info("Using AZURE_OPENAI_API_KEY from environment variable.")
-            self.api_key = getenv("AZURE_OPENAI_API_KEY")
+
+        if self.api_source == "openai":
+            self.task_logger.info("Using OpenAI API")
+            if "OPENAI_API_KEY" in task_cfg:
+                self.task_logger.info("Using OPENAI_API_KEY from gradio interface.")
+                self.api_key = task_cfg["OPENAI_API_KEY"]
+            else:
+                self.task_logger.info("Using OPENAI_API_KEY from environment variable.")
+                self.api_key = getenv("OPENAI_API_KEY")
+        elif self.api_source == "azure":
+            self.task_logger.info("Using Azure OpenAI API")
+            if "AZURE_OPENAI_API_KEY" in task_cfg:
+                self.task_logger.info("Using AZURE_OPENAI_API_KEY from gradio interface.")
+                self.api_key = task_cfg["AZURE_OPENAI_API_KEY"]
+            else:
+                self.task_logger.info("Using AZURE_OPENAI_API_KEY from environment variable.")
+                self.api_key = getenv("AZURE_OPENAI_API_KEY")
         self.task_logger.info(
             f"{self.source_lang} -> {self.target_lang} task in {self.field}"
         )
@@ -126,7 +138,10 @@ class Task:
             self.task_logger.info(f"{key}: {self.post_setting[key]}")
 
         # init openai client
-        self.client = AzureOpenAI(api_key=self.api_key, azure_endpoint=getenv("AZURE_OPENAI_ENDPOINT"),api_version="2024-05-01-preview")
+        if self.api_source == "openai":
+            self.client = OpenAI(api_key=self.api_key)
+        elif self.api_source == "azure":
+            self.client = AzureOpenAI(api_key=self.api_key, azure_endpoint=getenv("AZURE_OPENAI_ENDPOINT"),api_version="2024-05-01-preview")
         # initialize translator
         self.translator = Translator(
             self.translation_model,
@@ -156,11 +171,6 @@ class Task:
             )
         else:
             raise ValueError(f"Unsupported vision model: {self.vision_setting['vision_model']}")
-
-        if self.video_path is not None and self.vision_agent is not None:
-            self.visual_cues = self.vision_agent.analyze_video(self.video_path)
-        else:
-            self.visual_cues = None
 
 
     @staticmethod
@@ -380,6 +390,12 @@ class YoutubeTask(Task):
         self.task_logger.info("Task Creation method: Youtube Link")
         self.youtube_url = youtube_url
         self.video_resolution = task_cfg["video_download"]["resolution"]
+
+        # Not sure should I put this here or in run? same as Video Task
+        if self.video_path is not None and self.vision_agent is not None:
+            self.visual_cues = self.vision_agent.analyze_video(self.video_path)
+        else:
+            self.visual_cues = None
         # self.model = model
 
     def run(self, pre_load_asr_model=None):
@@ -455,6 +471,11 @@ class VideoTask(Task):
         self.task_logger.info(f"Copy video file to: {new_video_path}")
         shutil.copyfile(video_path, new_video_path)
         self.video_path = new_video_path
+
+        if self.video_path is not None and self.vision_agent is not None:
+            self.visual_cues = self.vision_agent.analyze_video(self.video_path)
+        else:
+            self.visual_cues = None
 
     def run(self, pre_load_asr_model=None):
         self.task_logger.info("using ffmpeg to extract audio")

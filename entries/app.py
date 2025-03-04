@@ -14,6 +14,7 @@ launch_config = "./configs/local_launch.yaml"
 task_config = './configs/task_config.yaml'
 launch_cfg = load(open(launch_config), Loader=Loader)
 LAUNCH_MODE = launch_cfg["environ"]
+API_SOURCE = launch_cfg["api_source"]
 
 
 model_dict = {"stable_large": None, "stable_medium": None, "stable_base": None}
@@ -34,9 +35,16 @@ def init(apikey, opt_resolution, opt_post, opt_pre, output_type, src_lang, tgt_l
                 apikey = fernet.decrypt(apikey.encode()).decode()
             except:  # noqa: E722
                 raise gr.Error("Invalid API key")
-            task_cfg["AZURE_OPENAI_API_KEY"] = apikey 
+            # task_cfg["AZURE_OPENAI_API_KEY"] = apikey 
+            if API_SOURCE == "openai":
+                task_cfg["OPENAI_API_KEY"] = apikey
+            elif API_SOURCE == "azure":
+                task_cfg["AZURE_OPENAI_API_KEY"] = apikey
         else:
-            task_cfg["AZURE_OPENAI_API_KEY"] = os.getenv("AZURE_OPENAI_API_KEY")
+            if API_SOURCE == "openai":
+                task_cfg["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
+            elif API_SOURCE == "azure":
+                task_cfg["AZURE_OPENAI_API_KEY"] = os.getenv("AZURE_OPENAI_API_KEY")
             translation_model = "gpt-4o-mini"
             resolution = 480
             gr.Warning("Free Mode: API key is not provided, you can only use gpt-4o-mini model for translation. And the video resolution is set to <=480p.")
@@ -50,6 +58,8 @@ def init(apikey, opt_resolution, opt_post, opt_pre, output_type, src_lang, tgt_l
         raise gr.Error("Invalid Launch Mode")
     
     print(f"API Key: {task_cfg['AZURE_OPENAI_API_KEY']}")
+
+    task_cfg["api_source"] = API_SOURCE
 
     task_cfg["video_download"]["resolution"] = resolution
     task_cfg["source_lang"] = src_lang

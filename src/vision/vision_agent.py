@@ -1,4 +1,5 @@
 from transformers import AutoModel, AutoTokenizer
+import torch
 
 """
     Interface for vision agent.

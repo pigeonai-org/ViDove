@@ -79,6 +79,12 @@ if __name__ == "__main__":
     if not local_dir.exists():
         local_dir.mkdir(parents=False, exist_ok=False)
 
+    # Check API source from azure or openai
+    if launch_cfg["api_source"] == "openai":
+        task_cfg["api_source"] = "openai"
+    elif launch_cfg["api_source"] == "azure":
+        task_cfg["api_source"] = "azure"
+
     # get task id
     task_id = str(uuid4())
 
