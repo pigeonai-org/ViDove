@@ -1,7 +1,6 @@
 import __init_lib_path
 import logging
 from yaml import Loader, Dumper, load, dump
-from src.task import Task
 import openai
 import argparse
 import os
@@ -9,6 +8,12 @@ from pathlib import Path
 from datetime import datetime
 import shutil
 from uuid import uuid4
+
+import sys
+sys.path.append(".")
+from src.task import Task
+    
+
 
 """
     Main entry for terminal environment.
