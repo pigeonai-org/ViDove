@@ -242,16 +242,3 @@ class assistant_vision_api(VisionAgent):
         if self.thread_id:
             self.client.beta.threads.delete(self.thread_id)
         return True
-
-
-agent = GptVisionAgent(None, 'asst_13RC0IoWDOJqeGKpfvSzEw1w', 1440)
-
-video_path = "test5.mp4"
-if not os.path.exists(video_path):
-    raise FileNotFoundError(f"Video file '{video_path}' not found in the directory.")
-
-visual_cues = agent.analyze_video(video_path)
-
-print("Extracted Visual Cues:"+ visual_cues)
-#print(agent.visual_cues)
-#print(agent.cleanup())
