@@ -72,14 +72,34 @@ class BasicRAG(AbsApiRAG):
         self.logger.info("Model loaded")
 
     def retrieve_relevant_nodes(self, query):
-        if self.index is None:
-            self.load_model()
+        if self.retriever is None:
+            self.load_knowledge_base()
         return self.retriever.retrieve(query)
 
-    def add_document(self, text):
+    def add_to_index(self, text_or_texts, chunk_size=50, chunk_overlap=5):
+        """
+        Add one or more text documents to the index.
+        
+        Args:
+            texts: A single string or a list of strings to add to the index.
+            chunk_size: Size of each text chunk (default: 50).
+            chunk_overlap: Overlap between chunks (default: 5).
+        """
         if self.index is None:
-            self.load_model()
-        document = Document(text=text)
-        splitter = SentenceSplitter(chunk_size=40, chunk_overlap=5)
-        nodes = splitter.get_nodes_from_documents([document])
+            self.load_knowledge_base()
+
+        # Normalize input to a list of Documents
+        if isinstance(text_or_texts, str):
+            documents = [Document(text=text_or_texts)]
+        elif isinstance(text_or_texts, list):
+            documents = [Document(text=text) for text in text_or_texts]
+        else:
+            raise ValueError("Input 'texts' must be a string or a list of strings.")
+
+        # Split documents into nodes and insert
+        splitter = SentenceSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+        nodes = splitter.get_nodes_from_documents(documents)
         self.index.insert_nodes(nodes)
+
+        # Update the retriever
+        self.retriever = self.index.as_retriever(similarity_top_k=5)

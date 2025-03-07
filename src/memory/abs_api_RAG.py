@@ -20,5 +20,5 @@ class AbsApiRAG(ABC):
         pass
 
     @abstractmethod
-    def add_document(self, text) -> None:
+    def add_to_index(self, text_or_texts, chunk_size=50, chunk_overlap=5) -> None:
         pass
