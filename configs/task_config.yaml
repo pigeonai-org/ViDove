@@ -7,6 +7,10 @@ field: General
 video_download:
   resolution: 480 # 360, 480, 720, best(best we can find)
 
+# VAD config
+VAD:
+  VAD_model: "pyannote/speaker-diarization-3.1"
+
 # ASR config
 ASR:
   ASR_model: whisper-api # whisper-large-v3, stable-whisper-base, stable-whisper-medium, stable-whisper-large

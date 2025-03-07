@@ -1,6 +1,6 @@
 import unittest
 import __init_path__
-from src.srt_util.srt import SrtScript, SrtSegment
+from src.SRT.srt import SrtScript, SrtSegment
 
 class TestRemovePunc(unittest.TestCase):
     def setUp(self):

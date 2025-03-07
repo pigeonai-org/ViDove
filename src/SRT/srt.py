@@ -2,10 +2,11 @@ import os
 import re
 from copy import deepcopy
 from datetime import timedelta
-
+import datetime
 from tqdm import tqdm
 
 from .. import dict_util
+import logging
 
 # punctuation dictionary for supported languages
 punctuation_dict = {
@@ -59,55 +60,31 @@ punctuation_dict = {
 dict_path = "./domain_dict"
 
 class SrtSegment(object):
-    def __init__(self, src_lang, tgt_lang, *args) -> None:
+    def __init__(self, src_lang, tgt_lang, src_text = "", translation = "", speaker = "", start_time = 0.0, end_time = 0.0, timestamp_str="") -> None:
         self.src_lang = src_lang
         self.tgt_lang = tgt_lang
-
-        if isinstance(args[0], dict):
-            segment = args[0]
-            self.start = segment['start']
-            self.end = segment['end']
-            self.start_ms = int((segment['start'] * 100) % 100 * 10)
-            self.end_ms = int((segment['end'] * 100) % 100 * 10)
-
-            if self.start_ms == self.end_ms and int(segment['start']) == int(segment['end']):  # avoid empty time stamp
-                self.end_ms += 500
-
-            self.start_time = timedelta(seconds=int(segment['start']), milliseconds=self.start_ms)
-            self.end_time = timedelta(seconds=int(segment['end']), milliseconds=self.end_ms)
-            if self.start_ms == 0:
-                self.start_time_str = str(0) + str(self.start_time).split('.')[0] + ',000'
-            else:
-                self.start_time_str = str(0) + str(self.start_time).split('.')[0] + ',' + \
-                                      str(self.start_time).split('.')[1][:3]
-            if self.end_ms == 0:
-                self.end_time_str = str(0) + str(self.end_time).split('.')[0] + ',000'
-            else:
-                self.end_time_str = str(0) + str(self.end_time).split('.')[0] + ',' + str(self.end_time).split('.')[1][
-                                                                                      :3]
-            self.source_text = segment['text'].lstrip()
-            self.duration = f"{self.start_time_str} --> {self.end_time_str}"
-            self.translation = ""
-
-        elif isinstance(args[0], list):
-            self.source_text = args[0][2]
-            self.duration = args[0][1]
-            self.start_time_str = self.duration.split(" --> ")[0]
-            self.end_time_str = self.duration.split(" --> ")[1]
-
-            # parse the time to float
-            self.start_ms = int(self.start_time_str.split(',')[1]) / 10
-            self.end_ms = int(self.end_time_str.split(',')[1]) / 10
-            start_list = self.start_time_str.split(',')[0].split(':')
-            self.start = int(start_list[0]) * 3600 + int(start_list[1]) * 60 + int(start_list[2]) + self.start_ms / 100
-            end_list = self.end_time_str.split(',')[0].split(':')
-            self.end = int(end_list[0]) * 3600 + int(end_list[1]) * 60 + int(end_list[2]) + self.end_ms / 100
-            if len(args[0]) < 5:
-                self.translation = ""
-            else:
-                self.translation = args[0][3]
+        self.src_text = src_text
+        self.translation = translation
+        self.speaker = speaker
+        self.start_time = start_time
+        self.end_time = end_time
+        self.duration = self.end_time - self.start_time
+        if not timestamp_str:
+            self.timestamp_str = f"{self.start_time} --> {self.end_time}"
+        else:
+            self.timestamp_str = timestamp_str
+        self.start_time_str = self.format_time(self.start_time)
+        self.end_time_str = self.format_time(self.end_time)
+ 
             
-
+    def format_time(self, seconds):
+        milliseconds = int((seconds - int(seconds)) * 1000)
+        time_str = str(datetime.timedelta(seconds=int(seconds)))
+        return f"{time_str},{milliseconds:03d}"
+    
+    def timestr_to_seconds(self, time_str):
+        return datetime.datetime.strptime(time_str, "%H:%M:%S,%f").total_seconds()
+    
     def merge_seg(self, seg):
         """
         Merge the segment seg with the current segment in place.
@@ -156,12 +133,15 @@ class SrtSegment(object):
 
 
 class SrtScript(object):
-    def __init__(self, src_lang, tgt_lang, segments, task_logger, client, domain="General") -> None:
-        self.task_logger = task_logger
+    def __init__(self, src_lang, tgt_lang, segments=None, task_id=None, client=None, domain="General") -> None:
+        self.task_logger = logging.getLogger(f"task_{task_id}")
         self.domain = domain
         self.src_lang = src_lang
         self.tgt_lang = tgt_lang
-        self.segments = [SrtSegment(self.src_lang, self.tgt_lang, seg) for seg in segments]
+        if segments is not None:
+            self.segments = [SrtSegment(self.src_lang, self.tgt_lang, seg) for seg in segments]
+        else:
+            self.segments = []
         self.client = client
 
         if self.domain != "General":

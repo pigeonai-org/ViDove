@@ -6,7 +6,7 @@ import openai
 
 from tqdm import tqdm
 
-from src.srt_util.srt import split_script
+from src.SRT.srt import split_script
 
 from .assistant import Assistant
 from .basic_rag import BasicRAG

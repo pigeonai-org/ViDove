@@ -14,10 +14,11 @@ import yt_dlp
 from openai import AzureOpenAI
 
 from src.ASR.ASR import get_transcript
-from src.srt_util.srt import SrtScript
-from src.srt_util.srt2ass import srt2ass
+from src.SRT.srt import SrtScript
+from src.SRT.srt2ass import srt2ass
 from src.translators.translator import Translator
 from src.vision.vision_agent import CLIPVisionAgent, vLLMVisionAgent
+from src.VAD.VAD import VAD
 
 
 class TaskStatus(str, Enum):
@@ -190,6 +191,15 @@ class Task:
         Creates a SRTTask instance from a srt file path.
         """
         return SRTTask(task_id, task_dir, task_cfg, srt_path)
+    
+    # Module 0: VAD: audio --> speaker segments
+    def get_speaker_segments(self):
+        """
+        Handles the VAD module to convert audio to speaker segments.
+        """
+        vad = VAD("pyannote/speaker-diarization-3.1", self.source_lang, self.target_lang)
+        self.SRT_Script = vad.get_speaker_segments(self.audio_path)
+        VAD.clip_audio_and_save(self.SRT_Script, self.audio_path, f"{self.task_local_dir}/.cache")
 
     # Module 1 ASR: audio --> SRT_script
     def get_srt_class(self, pre_load_asr_model=None):
