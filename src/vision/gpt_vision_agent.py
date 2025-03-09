@@ -70,26 +70,30 @@ class GptVisionAgent(VisionAgent):
 
     def analyze_video(self, video_path):
         cap = cv2.VideoCapture(video_path)
-        frame_count = 0
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         
+        if total_frames < 4:
+            extract_indices = list(range(total_frames))
+        else:
+            extract_indices = [int(i * total_frames / 4) for i in range(1, 5)]
+
+        frame_count = 0
+        self.visual_cues = []
+
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
                 break
-            
-            if frame_count % self.extract_interval == 0:
-                if frame_count == 0:
-                    frame_count += 1
-                    continue
+
+            if frame_count in extract_indices:
                 description = self.analyze_frame(frame)
-                #print(description)
                 self.visual_cues.append(description)
-            
+
             frame_count += 1
-        
+
         cap.release()
         return self.summarize_cue()
-    
+
 
 
 class assistant_vision_api(VisionAgent):
@@ -209,28 +213,33 @@ class assistant_vision_api(VisionAgent):
 
         return "No summary available from the assistant."
 
-    def analyze_video(self, video_path):
-        """Extracts frames from a video, processes them, and summarizes findings."""
-        cap = cv2.VideoCapture(video_path)
-        frame_count = 0
 
+    def analyze_video(self, video_path):
+        cap = cv2.VideoCapture(video_path)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+        if total_frames < 4:
+            extract_indices = list(range(total_frames))  # Take all available frames if fewer than 4
+        else:
+            extract_indices = [int(i * total_frames / 4) for i in range(1, 5)]  # Pick 4 evenly spaced frames
+
+        frame_count = 0
+        self.visual_cues = []
+        
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
                 break
 
-            if frame_count % self.extract_interval == 0:
-                if frame_count == 0:
-                    frame_count += 1
-                    continue
+            if frame_count in extract_indices:
                 description = self.analyze_frame(frame)
                 self.visual_cues.append(description)
 
             frame_count += 1
 
         cap.release()
-
         return self.summarize_cue()
+
     
     def cleanup(self):
         while self.file_ids:
