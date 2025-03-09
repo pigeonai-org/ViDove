@@ -14,7 +14,7 @@ class VAD:
     def __init__(self, model_name_or_path: str, src_lang: str, tgt_lang: str):
         self.model = Pipeline.from_pretrained(
         model_name_or_path,
-        use_auth_token="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",
+        use_auth_token=os.getenv("HF_TOKEN"),
     )
         self.src_lang = src_lang
         self.tgt_lang = tgt_lang
