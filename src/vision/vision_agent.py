@@ -7,10 +7,10 @@ import torch
 """
 
 class VisionAgent:
-    def __init__(self, model_name, model_path=None, extract_interval=1800, cache_dir=None):
+    def __init__(self, model_name, model_path=None, frame_per_seg=4, cache_dir=None):
         self.model_name = model_name
         self.model_path = model_path
-        self.extract_interval = extract_interval # frame interval
+        self.frame_per_seg = frame_per_seg # frame interval
         self.cache_dir = cache_dir
         self.frames = []
         self.model = None

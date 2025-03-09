@@ -8,8 +8,8 @@ from openai import OpenAI
 import time
 
 class GptVisionAgent(VisionAgent):
-    def __init__(self, model_name, model_path, extract_interval, cache_dir=None):
-        super().__init__(model_name, model_path, extract_interval, cache_dir)
+    def __init__(self, model_name, model_path, frame_per_seg, cache_dir=None):
+        super().__init__(model_name, model_path, frame_per_seg, cache_dir)
         self.visual_cues = []
         openai.api_key = os.getenv('OPENAI_API_KEY')
         self.client = OpenAI()
@@ -56,16 +56,17 @@ class GptVisionAgent(VisionAgent):
         return response.choices[0].message.content
     
     def summarize_cue(self):
+        prompt = f"Summarize the following visual description: {' '.join(self.visual_cues)}"
         response = openai.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4.5-preview-2025-02-27",
             messages=[
-                {"role": "system", "content": "You are an AI model that summarizes visual cues from a video."},
+                {"role": "system", "content": "You are an AI model that summarizes visual description from a video."},
                 {
                     "role": "user", 
-                    "content": "Conclude the chain of visual cues: " + " ".join(self.visual_cues)
+                    "content": prompt
                 }
             ],
-        )  
+        )
         return response.choices[0].message.content
 
     def analyze_video(self, video_path):
@@ -75,7 +76,7 @@ class GptVisionAgent(VisionAgent):
         if total_frames < 4:
             extract_indices = list(range(total_frames))
         else:
-            extract_indices = [int(i * total_frames / 4) for i in range(1, 5)]
+            extract_indices = [int(i * total_frames / self.frame_per_seg) for i in range(1, 5)]
 
         frame_count = 0
         self.visual_cues = []

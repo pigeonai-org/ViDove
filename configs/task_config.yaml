@@ -20,7 +20,7 @@ vision:
   vision_model: gpt-4o # clip or other vLLMs
   model_path: ./ViDove/vision_model/clip-vit-base-patch16 # replace it with your own model path
   frame_cache_dir: ./cache #should be cleared after task finished
-  extract_interval: 1800 # interval for frame extraction
+  frame_per_seg: 4 # number of frame extracted from segment
   
 # pre-process module config
 pre_process: 

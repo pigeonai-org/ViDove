@@ -162,14 +162,14 @@ class Task:
                 self.vision_agent = CLIPVisionAgent(
                     model_name = self.vision_setting["vision_model"],
                     model_path = self.vision_setting["model_path"] if self.vision_setting["model_path"] else None,
-                    extract_interval = self.vision_setting["extract_interval"],
+                    frame_per_seg = self.vision_setting["frame_per_seg"],
                     cache_dir = self.vision_setting["frame_cache_dir"],
                 )
             elif self.vision_setting["vision_model"] == "gpt-4o":
                 self.vision_agent = GptVisionAgent(
                     model_name = self.vision_setting["vision_model"],
                     model_path = None,
-                    extract_interval = self.vision_setting["extract_interval"],
+                    frame_per_seg = self.vision_setting["frame_per_seg"],
                     cache_dir = self.vision_setting["frame_cache_dir"],
                 )
             else:
@@ -213,7 +213,7 @@ class Task:
         self.SRT_Script = vad.get_speaker_segments(self.audio_path)
         vad.clip_audio_and_save(self.SRT_Script, self.audio_path, f"{self.task_local_dir}/.cache/audio")
         if self.video_path is not None and self.vision_agent is not None:
-            vad.clip_video_and_save(self.video_path, f"{self.task_local_dir}/.cache/video")
+            vad.clip_video_and_save(self.SRT_Script, self.video_path, f"{self.task_local_dir}/.cache/video")
 
     def get_visual_cues(self):
         """
@@ -223,11 +223,11 @@ class Task:
             self.task_logger.info("No vision agent found, skipping visual cues extraction")
             return 
         else:
+            self.task_logger.info(f"Extracting visual cues from video using {self.vision_agent.model_name}")
             for idx, segment_path in enumerate(os.listdir(f"{self.task_local_dir}/.cache/video")):
+                segment_path = f"{self.task_local_dir}/.cache/video/{segment_path}"
                 visual_cues = self.vision_agent.analyze_video(segment_path)
-                print(f"{idx} visual cues: {visual_cues}")
                 self.SRT_Script.segments[idx].visual_cues = visual_cues
-        exit()
 
     # Module 1 ASR: audio --> SRT_script
     def get_srt_class(self, pre_load_asr_model=None):
@@ -404,8 +404,7 @@ class Task:
         Executes the entire pipeline process for the task.
         """
         self.get_speaker_segments()
-        if self.vision_agent is not None:
-            self.get_visual_cues()
+        self.get_visual_cues()
         self.get_srt_class(pre_load_asr_model)
         self.preprocess()
         self.translation()
@@ -422,11 +421,7 @@ class YoutubeTask(Task):
         self.youtube_url = youtube_url
         self.video_resolution = task_cfg["video_download"]["resolution"]
 
-        # Not sure should I put this here or in run? same as Video Task
-        if self.video_path is not None and self.vision_agent is not None:
-            self.visual_cues = self.vision_agent.analyze_video(self.video_path)
-        else:
-            self.visual_cues = None
+
         # self.model = model
 
     def run(self, pre_load_asr_model=None):
@@ -503,10 +498,10 @@ class VideoTask(Task):
         shutil.copyfile(video_path, new_video_path)
         self.video_path = new_video_path
 
-        if self.video_path is not None and self.vision_agent is not None:
-            self.visual_cues = self.vision_agent.analyze_video(self.video_path)
-        else:
-            self.visual_cues = None
+        # if self.video_path is not None and self.vision_agent is not None:
+        #     self.visual_cues = self.vision_agent.analyze_video(self.video_path)
+        # else:
+        #     self.visual_cues = None
 
     def run(self, pre_load_asr_model=None):
         self.task_logger.info("using ffmpeg to extract audio")
