@@ -60,11 +60,13 @@ punctuation_dict = {
 dict_path = "./domain_dict"
 
 class SrtSegment(object):
-    def __init__(self, src_lang, tgt_lang, src_text = "", translation = "", speaker = "", start_time = 0.0, end_time = 0.0, timestamp_str="") -> None:
+    def __init__(self, src_lang, tgt_lang, src_text = "", translation = "", speaker = "", start_time = 0.0, end_time = 0.0, timestamp_str="", idx = -1) -> None:
+        self.idx = idx
         self.src_lang = src_lang
         self.tgt_lang = tgt_lang
         self.src_text = src_text
         self.translation = translation
+        self.visual_cues = None
         self.speaker = speaker
         self.start_time = start_time
         self.end_time = end_time

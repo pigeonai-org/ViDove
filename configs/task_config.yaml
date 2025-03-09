@@ -16,10 +16,10 @@ ASR:
   ASR_model: whisper-api # whisper-large-v3, stable-whisper-base, stable-whisper-medium, stable-whisper-large
 
 vision:
-  vision_model: CLIP # clip or other vLLMs
+  vision_model: gpt-4o # clip or other vLLMs
   model_path: ./ViDove/vision_model/clip-vit-base-patch16 # replace it with your own model path
   frame_cache_dir: ./cache #should be cleared after task finished
-  extract_interval: 60 # interval for frame extraction
+  extract_interval: 1800 # interval for frame extraction
   
 # pre-process module config
 pre_process: 

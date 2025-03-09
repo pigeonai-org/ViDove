@@ -2,7 +2,7 @@ import base64
 import openai
 import torch
 import cv2
-from vision_agent import VisionAgent
+from src.vision.vision_agent import VisionAgent
 import os
 from openai import OpenAI
 import time
@@ -10,9 +10,6 @@ import time
 class GptVisionAgent(VisionAgent):
     def __init__(self, model_name, model_path, extract_interval, cache_dir=None):
         super().__init__(model_name, model_path, extract_interval, cache_dir)
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = self.load_model(model_path)
-        self.tokenizer = self.load_tokenizer(model_name)
         self.visual_cues = []
         openai.api_key = os.getenv('OPENAI_API_KEY')
         self.client = OpenAI()
