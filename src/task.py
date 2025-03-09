@@ -12,6 +12,7 @@ from time import gmtime, strftime, time
 # from pytube import YouTube
 import yt_dlp
 from openai import AzureOpenAI, OpenAI
+import os
 
 from src.ASR.ASR import get_transcript
 from src.SRT.srt import SrtScript
@@ -156,22 +157,23 @@ class Task:
 
         # initialize vision agent
         self.vision_agent = None
-        if self.vision_setting["vision_model"] == "CLIP":
-            self.vision_agent = CLIPVisionAgent(
-                model_name = self.vision_setting["vision_model"],
-                model_path = self.vision_setting["model_path"] if self.vision_setting["model_path"] else None,
-                extract_interval = self.vision_setting["extract_interval"],
-                cache_dir = self.vision_setting["frame_cache_dir"],
-            )
-        elif self.vision_setting["vision_model"] == "gpt-4o":
-            self.vision_agent = GptVisionAgent(
-                model_name = self.vision_setting["vision_model"],
-                model_path = None,
-                extract_interval = self.vision_setting["extract_interval"],
-                cache_dir = self.vision_setting["frame_cache_dir"],
-            )
-        else:
-            raise ValueError(f"Unsupported vision model: {self.vision_setting['vision_model']}")
+        if self.vision_setting["enable_vision"]:
+            if self.vision_setting["vision_model"] == "CLIP":
+                self.vision_agent = CLIPVisionAgent(
+                    model_name = self.vision_setting["vision_model"],
+                    model_path = self.vision_setting["model_path"] if self.vision_setting["model_path"] else None,
+                    extract_interval = self.vision_setting["extract_interval"],
+                    cache_dir = self.vision_setting["frame_cache_dir"],
+                )
+            elif self.vision_setting["vision_model"] == "gpt-4o":
+                self.vision_agent = GptVisionAgent(
+                    model_name = self.vision_setting["vision_model"],
+                    model_path = None,
+                    extract_interval = self.vision_setting["extract_interval"],
+                    cache_dir = self.vision_setting["frame_cache_dir"],
+                )
+            else:
+                raise ValueError(f"Unsupported vision model: {self.vision_setting['vision_model']}")
 
 
     @staticmethod
@@ -209,14 +211,23 @@ class Task:
         """
         vad = VAD("pyannote/speaker-diarization-3.1", self.source_lang, self.target_lang)
         self.SRT_Script = vad.get_speaker_segments(self.audio_path)
-        VAD.clip_audio_and_save(self.SRT_Script, self.audio_path, f"{self.task_local_dir}/.cache")
+        vad.clip_audio_and_save(self.SRT_Script, self.audio_path, f"{self.task_local_dir}/.cache/audio")
+        if self.video_path is not None and self.vision_agent is not None:
+            vad.clip_video_and_save(self.video_path, f"{self.task_local_dir}/.cache/video")
 
     def get_visual_cues(self):
         """
         Handles the vision agent to convert video to visual cues.
         """
-        for segment_path in os.listdir(f"{self.task_local_dir}/.cache"):
-            self.visual_cues.append(self.vision_agent.analyze_video(segment_path))
+        if self.vision_agent is None:
+            self.task_logger.info("No vision agent found, skipping visual cues extraction")
+            return 
+        else:
+            for idx, segment_path in enumerate(os.listdir(f"{self.task_local_dir}/.cache/video")):
+                visual_cues = self.vision_agent.analyze_video(segment_path)
+                print(f"{idx} visual cues: {visual_cues}")
+                self.SRT_Script.segments[idx].visual_cues = visual_cues
+        exit()
 
     # Module 1 ASR: audio --> SRT_script
     def get_srt_class(self, pre_load_asr_model=None):
@@ -393,6 +404,8 @@ class Task:
         Executes the entire pipeline process for the task.
         """
         self.get_speaker_segments()
+        if self.vision_agent is not None:
+            self.get_visual_cues()
         self.get_srt_class(pre_load_asr_model)
         self.preprocess()
         self.translation()

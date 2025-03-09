@@ -71,6 +71,8 @@ class SrtSegment(object):
         self.start_time = start_time
         self.end_time = end_time
         self.duration = self.end_time - self.start_time
+        self.audio_path = None
+        self.video_path = None
         if not timestamp_str:
             self.timestamp_str = f"{self.start_time} --> {self.end_time}"
         else:
@@ -208,7 +210,7 @@ class SrtScript(object):
         ending_puncs = punctuation_dict[self.src_lang]["sentence_end"]
         # Get each entire sentence of distinct segments, fill indices to merge_list
         for i, seg in enumerate(self.segments):
-            if seg.source_text[-1] in ending_puncs and len(seg.source_text) > 10 and 'vs.' not in seg.source_text:
+            if seg.source_text[-1] in ending_puncs and len(seg.source_text) > 10 and 'vs.' not in seg.source_text.lower():
                 sentence.append(i)
                 merge_list.append(sentence)
                 sentence = []
@@ -620,3 +622,12 @@ def split_script(script_in, chunk_size=1000):
 
     assert len(script_arr) == len(range_arr)
     return script_arr, range_arr
+
+def get_transcription(self, output_dir: str, pre_load_asr_model = None):
+    # get transcription for each segment
+    for i, seg in enumerate(self.segments):
+        if seg.audio_path is not None:
+            audio_path = seg.audio_path
+            transcription = get_transcript(audio_path, pre_load_asr_model)
+            seg.src_text = transcription
+            seg.write_srt_file_src(os.path.join(output_dir, f"segment_{i}.srt"))

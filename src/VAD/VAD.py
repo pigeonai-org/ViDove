@@ -55,7 +55,7 @@ class VAD:
 
             # Generate output filename
             output_filename = os.path.join(output_dir, f"segment_{start_ms}_{end_ms}.wav")
-
+            segment.audio_path = output_filename
             # Use ffmpeg to extract segment
             ffmpeg_cmd = [
                 "ffmpeg", "-y",
@@ -65,6 +65,36 @@ class VAD:
                 "-acodec", "pcm_s16le",
                 "-ar", "16000",
                 "-ac", "1",
+                output_filename
+            ]
+
+            try:
+                subprocess.run(ffmpeg_cmd, check=True, capture_output=True)
+            except subprocess.CalledProcessError as e:
+                print(f"Error processing segment {start_ms}-{end_ms}: {e}")
+    
+    @staticmethod
+    def clip_video_and_save(srt: SrtScript, video_path: str, output_dir: str):
+        os.makedirs(output_dir, exist_ok=True)
+        for segment in srt.segments:
+            start_time = segment.start_time
+            end_time = segment.end_time
+            # Convert time to milliseconds for ffmpeg
+            start_ms = int(start_time * 1000)
+            end_ms = int(end_time * 1000)
+            duration_ms = end_ms - start_ms
+
+            # Format timestamps for ffmpeg
+            start_time_str = str(datetime.timedelta(milliseconds=start_ms))
+            duration_str = str(datetime.timedelta(milliseconds=duration_ms))
+
+            output_filename = os.path.join(output_dir, f"segment_{start_time}_{end_time}.mp4")
+            segment.video_path = output_filename
+            ffmpeg_cmd = [
+                "ffmpeg", "-y",
+                "-i", video_path,
+                "-ss", start_time_str,
+                "-t", duration_str,
                 output_filename
             ]
 

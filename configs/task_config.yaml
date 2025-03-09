@@ -16,6 +16,7 @@ ASR:
   ASR_model: whisper-api # whisper-large-v3, stable-whisper-base, stable-whisper-medium, stable-whisper-large
 
 vision:
+  enable_vision: True
   vision_model: gpt-4o # clip or other vLLMs
   model_path: ./ViDove/vision_model/clip-vit-base-patch16 # replace it with your own model path
   frame_cache_dir: ./cache #should be cleared after task finished
