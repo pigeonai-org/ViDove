@@ -9,18 +9,16 @@ from llama_index.core import (
     VectorStoreIndex,
     load_index_from_storage,
 )
+from llama_index.core.indices.empty import EmptyIndex
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.embeddings.azure_openai import AzureOpenAIEmbedding
 from llama_index.embeddings.openai import OpenAIEmbedding
 
 from ..memory.abs_api_RAG import AbsApiRAG
-from ..translators.prompts import system_prompt
 
 # SYSTEM_PROMPT = system_prompt
 
 # Default persist directory and data directory
-PERSIST_DIR = "./storage/basic_rag"
-DATA_DIR = "domain_dict/SC2"
 
 # text_qa_template
 
@@ -45,14 +43,14 @@ class BasicRAG(AbsApiRAG):
         self.logger = logger
         self.loaded = False
 
-    def load_knowledge_base(self, persist_dir=PERSIST_DIR, data_dir=DATA_DIR, num_retrievals=5):
+    def load_knowledge_base(self, data_dir, persist_dir=None, num_retrievals=5):
         Settings.embed_model = self.embeddings
         self.logger.info(
             f"Loading the model, set {Settings.embed_model} as embedding model"
         )
         if persist_dir is None and data_dir is None:
             self.logger.info("Creating one empty index without any data")
-            self.index = VectorStoreIndex()
+            index = EmptyIndex()
         else:    
             if not os.path.exists(persist_dir):
                 self.logger.info("Loading the RAG from the data directory")

@@ -16,6 +16,7 @@ import os
 
 from src.SRT.srt import SrtScript
 from src.SRT.srt2ass import srt2ass
+from src.memory.basic_rag import BasicRAG
 from src.translators.translator import Translator
 from src.vision.gpt_vision_agent import GptVisionAgent, CLIPVisionAgent, assistant_vision_api
 from src.VAD.VAD import VAD
@@ -68,7 +69,7 @@ class Task:
         self.task_local_dir = task_local_dir
         self.ASR_setting = task_cfg["ASR"]
         self.vision_setting = task_cfg["vision"]
-        self.memory_setting = ...
+        self.memory_setting = task_cfg["MEMEORY"]
         self.translation_setting = task_cfg["translation"]
         self.translation_model = self.translation_setting["model"]
 
@@ -80,6 +81,7 @@ class Task:
         self.post_setting = task_cfg["post_process"]
         self.chunk_size = task_cfg["translation"]["chunk_size"]
         self.api_source = task_cfg["api_source"]
+
 
         self.audio_path = None
         self.SRT_Script = None
@@ -149,6 +151,21 @@ class Task:
             self.client,
             self.chunk_size,
         )
+
+        if self.memory_setting["enable_local_knowledge"] and self.domain != "General":
+            self.local_knowledge = BasicRAG(self.task_logger, self.domain)
+            # persist_dir = f"{self.task_local_dir}/storage"
+            data_dir = f"{self.memory_setting['local_knowledge_path']}/{self.domain}"
+            self.local_knowledge.load_knowledge_base(data_dir=data_dir)
+        
+        if self.memory_setting["enable_web_search"]:
+            #TODO: init web search
+            self.web_search = ...
+            # self.web_search.load_knowledge_base()
+        
+        if self.memory_setting["enable_vision_knowledge"]:
+            self.vision_knowledge = BasicRAG(self.task_logger, "vision")
+            self.vision_knowledge.load_knowledge_base(data_dir=None)
 
         # initialize vision agent
         self.vision_agent = None
@@ -225,7 +242,9 @@ class Task:
             for idx, segment_path in enumerate(os.listdir(f"{self.task_local_dir}/.cache/video")):
                 segment_path = f"{self.task_local_dir}/.cache/video/{segment_path}"
                 visual_cues = self.vision_agent.analyze_video(segment_path)
+                self.vision_knowledge.add_to_index(visual_cues, chunk_size=100, chunk_overlap=5)
                 self.SRT_Script.segments[idx].visual_cues = visual_cues
+            print(self.vision_knowledge.retrieve_relevant_nodes("Protoss"))
 
     # Module 1 ASR: audio --> SRT_script
     def get_srt_class(self, pre_load_asr_model=None):
