@@ -1,7 +1,7 @@
 # configuration for each task
 source_lang: EN
 target_lang: ZH
-field: General
+domain: General
 
 # YouTube Download Option
 video_download:
@@ -13,7 +13,7 @@ VAD:
 
 # ASR config
 ASR:
-  ASR_model: whisper-api # whisper-large-v3, stable-whisper-base, stable-whisper-medium, stable-whisper-large
+  ASR_model: openai/whisper-large-v3 # openai/whisper-large-v3, stable-whisper-base, stable-whisper-medium, stable-whisper-large, whisper-api
 
 vision:
   enable_vision: True

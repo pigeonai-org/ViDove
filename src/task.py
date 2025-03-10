@@ -14,13 +14,12 @@ import yt_dlp
 from openai import AzureOpenAI, OpenAI
 import os
 
-from src.ASR.ASR import get_transcript
 from src.SRT.srt import SrtScript
 from src.SRT.srt2ass import srt2ass
 from src.translators.translator import Translator
 from src.vision.gpt_vision_agent import GptVisionAgent, CLIPVisionAgent, assistant_vision_api
 from src.VAD.VAD import VAD
-
+from src.ASR.ASR import ASR
 
 class TaskStatus(str, Enum):
     """
@@ -76,7 +75,7 @@ class Task:
         self.output_type = task_cfg["output_type"]
         self.target_lang = task_cfg["target_lang"]
         self.source_lang = task_cfg["source_lang"]
-        self.field = task_cfg["field"]
+        self.domain = task_cfg["domain"]
         self.pre_setting = task_cfg["pre_process"]
         self.post_setting = task_cfg["post_process"]
         self.chunk_size = task_cfg["translation"]["chunk_size"]
@@ -99,10 +98,6 @@ class Task:
         task_file_handler = logging.FileHandler(self.log_dir, "w", encoding="utf-8")
         task_file_handler.setFormatter(logging.Formatter(logfmt))
         self.task_logger.addHandler(task_file_handler)
-        # logging.basicConfig(level=logging.INFO, format=logfmt, handlers=[
-        #     logging.FileHandler(
-        #         "{}/{}_{}.log".format(task_local_dir, f"task_{task_id}", datetime.now().strftime("%m%d%Y_%H%M%S")),
-        #         'w', encoding='utf-8')])
 
         print(f"Task ID: {self.task_id}")
         self.task_logger.info(f"Task ID: {self.task_id}")
@@ -124,7 +119,7 @@ class Task:
                 self.task_logger.info("Using AZURE_OPENAI_API_KEY from environment variable.")
                 self.api_key = getenv("AZURE_OPENAI_API_KEY")
         self.task_logger.info(
-            f"{self.source_lang} -> {self.target_lang} task in {self.field}"
+            f"{self.source_lang} -> {self.target_lang} task in {self.domain}"
         )
         self.task_logger.info(f"Translation Model: {self.translation_model}")
         self.task_logger.info(f"Chunk Size: {self.chunk_size}")
@@ -149,7 +144,7 @@ class Task:
             self.translation_model,
             self.source_lang,
             self.target_lang,
-            self.field,
+            self.domain,
             self.task_id,
             self.client,
             self.chunk_size,
@@ -174,6 +169,9 @@ class Task:
                 )
             else:
                 raise ValueError(f"Unsupported vision model: {self.vision_setting['vision_model']}")
+            
+        # initialize ASR
+        self.asr = ASR.create(self.ASR_setting["ASR_model"], logger=self.task_logger)
 
 
     @staticmethod
@@ -237,7 +235,7 @@ class Task:
         # Instead of using the script_en variable directly, we'll use script_input
         self.status = TaskStatus.INITIALIZING_ASR
 
-        if self.SRT_Script != None:
+        if self.SRT_Script.segments[0].src_text != "":
             self.task_logger.info("SRT input mode, skip ASR Module")
             return
         # get configs
@@ -247,7 +245,10 @@ class Task:
         src_srt_path = self.task_local_dir.joinpath(
             f"task_{self.task_id}_{self.source_lang}.srt"
         )
+        
+        self.SRT_Script.asr = self.asr
 
+        self.SRT_Script.get_transcription(output_dir=src_srt_path)
         # get transcript
         transcript = get_transcript(method, 
                                     src_srt_path, 
@@ -265,7 +266,7 @@ class Task:
                     self.target_lang,
                     self.task_logger,
                     self.client,
-                    domain=self.field,
+                    domain=self.domain,
                     srt_str=transcript.rstrip(),
                 )
             else:
@@ -275,7 +276,7 @@ class Task:
                     transcript,
                     self.task_logger,
                     self.client,
-                    self.field,
+                    self.domain,
                 )
             # save the srt script to local
             self.SRT_Script.write_srt_file_src(src_srt_path)
@@ -541,7 +542,7 @@ class SRTTask(Task):
             self.target_lang,
             self.task_logger,
             self.client,
-            domain=self.field,
+            domain=self.domain,
             path=srt_path,
         )
 

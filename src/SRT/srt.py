@@ -96,12 +96,12 @@ class SrtSegment(object):
         :return: None
         """
         # assert seg.start_ms == self.end_ms, f"cannot merge discontinuous segments."
-        self.source_text += f' {seg.source_text}'
+        self.src_text += f' {seg.src_text}'
         self.translation += f' {seg.translation}'
         self.end_time_str = seg.end_time_str
-        self.end = seg.end
-        self.end_ms = seg.end_ms
-        self.duration = f"{self.start_time_str} --> {self.end_time_str}"
+        self.end_time = seg.end_time
+        self.timestamp_str = f"{self.start_time_str} --> {self.end_time_str}"
+        self.duration = self.end_time - self.start_time
 
     def __add__(self, other):
         """
@@ -157,6 +157,8 @@ class SrtScript(object):
             else:
                 self.task_logger.error(f"domain {self.domain} or related dictionary({src_lang} or {tgt_lang}) doesn't exist, fallback to general domain, this will disable correct_with_force_term and spell_check_term")
                 self.domain = "General"
+        
+        self.asr = None
 
 
     @classmethod
@@ -598,6 +600,16 @@ class SrtScript(object):
                 f.write(f'{i + idx}\n')
                 f.write(seg.get_bilingual_str())
         pass
+    
+    def get_transcription(self, output_dir: str):
+    # get transcription for each segment
+        for i, seg in enumerate(self.segments):
+            if seg.audio_path is not None:
+                audio_path = seg.audio_path
+                init_prompt = seg.visual_cues if seg.visual_cues is not None else "Hello, welcome to my lecture."
+                seg_transcript = self.asr.get_transcript(audio_path=audio_path, source_lang=self.src_lang, init_prompt=init_prompt)
+                print(seg_transcript)
+                exit()
 
 def split_script(script_in, chunk_size=1000):
     script_split = script_in.split('\n\n')
@@ -623,11 +635,4 @@ def split_script(script_in, chunk_size=1000):
     assert len(script_arr) == len(range_arr)
     return script_arr, range_arr
 
-def get_transcription(self, output_dir: str, pre_load_asr_model = None):
-    # get transcription for each segment
-    for i, seg in enumerate(self.segments):
-        if seg.audio_path is not None:
-            audio_path = seg.audio_path
-            transcription = get_transcript(audio_path, pre_load_asr_model)
-            seg.src_text = transcription
-            seg.write_srt_file_src(os.path.join(output_dir, f"segment_{i}.srt"))
+
