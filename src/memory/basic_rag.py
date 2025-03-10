@@ -14,7 +14,7 @@ from llama_index.embeddings.azure_openai import AzureOpenAIEmbedding
 from llama_index.embeddings.openai import OpenAIEmbedding
 
 from ..memory.abs_api_RAG import AbsApiRAG
-from ..memory.prompts import system_prompt
+from ..translators.prompts import system_prompt
 
 SYSTEM_PROMPT = system_prompt
 

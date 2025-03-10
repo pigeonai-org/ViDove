@@ -9,7 +9,9 @@ from tqdm import tqdm
 from src.srt_util.srt import split_script
 
 from .assistant import Assistant
-from .basic_rag import BasicRAG
+from llama_index.core import PromptTemplate
+from ..memory.basic_rag import BasicRAG
+from .prompts import system_prompt
 from .LLM import LLM
 from .MTA import MTA
 
@@ -62,8 +64,6 @@ class Translator:
             )
         elif self.model_name == "RAG":
             self.translator = BasicRAG(
-                self.src_lang,
-                self.tgt_lang,
                 self.task_logger,
                 self.domain,
                 self.model_name,
@@ -81,7 +81,7 @@ class Translator:
         )
         self.task_logger.info("SRT file set")
 
-    def prompt_selector(self):
+    def prompt_selector(self) -> PromptTemplate:
         try:
             src_lang = SUPPORT_LANG_MAP[self.src_lang]
             tgt_lang = SUPPORT_LANG_MAP[self.tgt_lang]
@@ -93,11 +93,12 @@ class Translator:
                 f"Unsupported language detected: {src_lang} to {tgt_lang}"
             )
 
-        prompt = f"""
-            you are a translation assistant, your job is to translate a video in domain of {self.domain} from {src_lang} to {tgt_lang},
-            you will be provided with a segement in {src_lang} parsed by line, where your translation text should keep the original
-            meaning and the number of lines. DO NOT INCLUDE THE INDEX NUMBER IN YOUR TRANSLATION.  /n/n
-            """
+        prompt = PromptTemplate(system_prompt).partial_format(
+            domain=self.domain,
+            source_language=src_lang,
+            target_language=tgt_lang,
+        )
+        
         self.task_logger.info(f"System Prompt: {prompt}")
         return prompt
 
