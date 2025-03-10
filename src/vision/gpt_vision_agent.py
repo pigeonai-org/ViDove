@@ -2,17 +2,14 @@ import base64
 import openai
 import torch
 import cv2
-from vision_agent import VisionAgent
+from src.vision.vision_agent import VisionAgent
 import os
 from openai import OpenAI
 import time
 
 class GptVisionAgent(VisionAgent):
-    def __init__(self, model_name, model_path, extract_interval, cache_dir=None):
-        super().__init__(model_name, model_path, extract_interval, cache_dir)
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = self.load_model(model_path)
-        self.tokenizer = self.load_tokenizer(model_name)
+    def __init__(self, model_name, model_path, frame_per_seg, cache_dir=None):
+        super().__init__(model_name, model_path, frame_per_seg, cache_dir)
         self.visual_cues = []
         openai.api_key = os.getenv('OPENAI_API_KEY')
         self.client = OpenAI()
@@ -59,40 +56,45 @@ class GptVisionAgent(VisionAgent):
         return response.choices[0].message.content
     
     def summarize_cue(self):
+        prompt = f"Summarize the following visual description: {' '.join(self.visual_cues)}"
         response = openai.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4.5-preview-2025-02-27",
             messages=[
-                {"role": "system", "content": "You are an AI model that summarizes visual cues from a video."},
+                {"role": "system", "content": "You are an AI model that summarizes visual description from a video."},
                 {
                     "role": "user", 
-                    "content": "Conclude the chain of visual cues: " + " ".join(self.visual_cues)
+                    "content": prompt
                 }
             ],
-        )  
+        )
         return response.choices[0].message.content
 
     def analyze_video(self, video_path):
         cap = cv2.VideoCapture(video_path)
-        frame_count = 0
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         
+        if total_frames < 4:
+            extract_indices = list(range(total_frames))
+        else:
+            extract_indices = [int(i * total_frames / self.frame_per_seg) for i in range(1, 5)]
+
+        frame_count = 0
+        self.visual_cues = []
+
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
                 break
-            
-            if frame_count % self.extract_interval == 0:
-                if frame_count == 0:
-                    frame_count += 1
-                    continue
+
+            if frame_count in extract_indices:
                 description = self.analyze_frame(frame)
-                #print(description)
                 self.visual_cues.append(description)
-            
+
             frame_count += 1
-        
+
         cap.release()
         return self.summarize_cue()
-    
+
 
 
 class assistant_vision_api(VisionAgent):
@@ -212,28 +214,33 @@ class assistant_vision_api(VisionAgent):
 
         return "No summary available from the assistant."
 
-    def analyze_video(self, video_path):
-        """Extracts frames from a video, processes them, and summarizes findings."""
-        cap = cv2.VideoCapture(video_path)
-        frame_count = 0
 
+    def analyze_video(self, video_path):
+        cap = cv2.VideoCapture(video_path)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+        if total_frames < 4:
+            extract_indices = list(range(total_frames))  # Take all available frames if fewer than 4
+        else:
+            extract_indices = [int(i * total_frames / 4) for i in range(1, 5)]  # Pick 4 evenly spaced frames
+
+        frame_count = 0
+        self.visual_cues = []
+        
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
                 break
 
-            if frame_count % self.extract_interval == 0:
-                if frame_count == 0:
-                    frame_count += 1
-                    continue
+            if frame_count in extract_indices:
                 description = self.analyze_frame(frame)
                 self.visual_cues.append(description)
 
             frame_count += 1
 
         cap.release()
-
         return self.summarize_cue()
+
     
     def cleanup(self):
         while self.file_ids:

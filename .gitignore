@@ -18,4 +18,11 @@ local_dump/
 flagged/
 expdata/
 storage/
+*.mp4
 testdata/
+*.mp3
+*.wav
+*.m4a
+*.mov
+*.avi
+*.mkv

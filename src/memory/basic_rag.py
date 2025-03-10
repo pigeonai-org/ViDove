@@ -16,7 +16,7 @@ from llama_index.embeddings.openai import OpenAIEmbedding
 from ..memory.abs_api_RAG import AbsApiRAG
 from ..translators.prompts import system_prompt
 
-SYSTEM_PROMPT = system_prompt
+# SYSTEM_PROMPT = system_prompt
 
 # Default persist directory and data directory
 PERSIST_DIR = "./storage/basic_rag"

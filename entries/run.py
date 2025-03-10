@@ -5,6 +5,8 @@ from uuid import uuid4
 
 from yaml import Loader, load
 
+import __init_lib_path
+
 from src.task import Task
 
 """

@@ -12,13 +12,14 @@ from time import gmtime, strftime, time
 # from pytube import YouTube
 import yt_dlp
 from openai import AzureOpenAI, OpenAI
+import os
 
-from src.ASR.ASR import get_transcript
-from src.srt_util.srt import SrtScript
-from src.srt_util.srt2ass import srt2ass
+from src.SRT.srt import SrtScript
+from src.SRT.srt2ass import srt2ass
 from src.translators.translator import Translator
-from src.vision.vision_agent import CLIPVisionAgent, vLLMVisionAgent
-
+from src.vision.gpt_vision_agent import GptVisionAgent, CLIPVisionAgent, assistant_vision_api
+from src.VAD.VAD import VAD
+from src.ASR.ASR import ASR
 
 class TaskStatus(str, Enum):
     """
@@ -74,7 +75,7 @@ class Task:
         self.output_type = task_cfg["output_type"]
         self.target_lang = task_cfg["target_lang"]
         self.source_lang = task_cfg["source_lang"]
-        self.field = task_cfg["field"]
+        self.domain = task_cfg["domain"]
         self.pre_setting = task_cfg["pre_process"]
         self.post_setting = task_cfg["post_process"]
         self.chunk_size = task_cfg["translation"]["chunk_size"]
@@ -97,10 +98,6 @@ class Task:
         task_file_handler = logging.FileHandler(self.log_dir, "w", encoding="utf-8")
         task_file_handler.setFormatter(logging.Formatter(logfmt))
         self.task_logger.addHandler(task_file_handler)
-        # logging.basicConfig(level=logging.INFO, format=logfmt, handlers=[
-        #     logging.FileHandler(
-        #         "{}/{}_{}.log".format(task_local_dir, f"task_{task_id}", datetime.now().strftime("%m%d%Y_%H%M%S")),
-        #         'w', encoding='utf-8')])
 
         print(f"Task ID: {self.task_id}")
         self.task_logger.info(f"Task ID: {self.task_id}")
@@ -122,7 +119,7 @@ class Task:
                 self.task_logger.info("Using AZURE_OPENAI_API_KEY from environment variable.")
                 self.api_key = getenv("AZURE_OPENAI_API_KEY")
         self.task_logger.info(
-            f"{self.source_lang} -> {self.target_lang} task in {self.field}"
+            f"{self.source_lang} -> {self.target_lang} task in {self.domain}"
         )
         self.task_logger.info(f"Translation Model: {self.translation_model}")
         self.task_logger.info(f"Chunk Size: {self.chunk_size}")
@@ -147,7 +144,7 @@ class Task:
             self.translation_model,
             self.source_lang,
             self.target_lang,
-            self.field,
+            self.domain,
             self.task_id,
             self.client,
             self.chunk_size,
@@ -155,22 +152,26 @@ class Task:
 
         # initialize vision agent
         self.vision_agent = None
-        if self.vision_setting["vision_model"] == "CLIP":
-            self.vision_agent = CLIPVisionAgent(
-                self.vision_setting["vision_model"],
-                self.vision_setting["model_path"],
-                self.vision_setting["extract_interval"],
-                self.vision_setting["frame_cache_dir"],
-            )
-        elif self.vision_setting["vision_model"] == "vLLM":
-            self.vision_agent = vLLMVisionAgent(
-                self.vision_setting["vision_model"],
-                self.vision_setting["model_path"],
-                self.vision_setting["extract_interval"],
-                self.vision_setting["frame_cache_dir"],
-            )
-        else:
-            raise ValueError(f"Unsupported vision model: {self.vision_setting['vision_model']}")
+        if self.vision_setting["enable_vision"]:
+            if self.vision_setting["vision_model"] == "CLIP":
+                self.vision_agent = CLIPVisionAgent(
+                    model_name = self.vision_setting["vision_model"],
+                    model_path = self.vision_setting["model_path"] if self.vision_setting["model_path"] else None,
+                    frame_per_seg = self.vision_setting["frame_per_seg"],
+                    cache_dir = self.vision_setting["frame_cache_dir"],
+                )
+            elif self.vision_setting["vision_model"] == "gpt-4o":
+                self.vision_agent = GptVisionAgent(
+                    model_name = self.vision_setting["vision_model"],
+                    model_path = None,
+                    frame_per_seg = self.vision_setting["frame_per_seg"],
+                    cache_dir = self.vision_setting["frame_cache_dir"],
+                )
+            else:
+                raise ValueError(f"Unsupported vision model: {self.vision_setting['vision_model']}")
+            
+        # initialize ASR
+        self.asr = ASR.create(self.ASR_setting["ASR_model"], logger=self.task_logger)
 
 
     @staticmethod
@@ -200,6 +201,31 @@ class Task:
         Creates a SRTTask instance from a srt file path.
         """
         return SRTTask(task_id, task_dir, task_cfg, srt_path)
+    
+    # Module 0: VAD: audio --> speaker segments
+    def get_speaker_segments(self):
+        """
+        Handles the VAD module to convert audio to speaker segments.
+        """
+        vad = VAD("pyannote/speaker-diarization-3.1", self.source_lang, self.target_lang)
+        self.SRT_Script = vad.get_speaker_segments(self.audio_path)
+        vad.clip_audio_and_save(self.SRT_Script, self.audio_path, f"{self.task_local_dir}/.cache/audio")
+        if self.video_path is not None and self.vision_agent is not None:
+            vad.clip_video_and_save(self.SRT_Script, self.video_path, f"{self.task_local_dir}/.cache/video")
+
+    def get_visual_cues(self):
+        """
+        Handles the vision agent to convert video to visual cues.
+        """
+        if self.vision_agent is None:
+            self.task_logger.info("No vision agent found, skipping visual cues extraction")
+            return 
+        else:
+            self.task_logger.info(f"Extracting visual cues from video using {self.vision_agent.model_name}")
+            for idx, segment_path in enumerate(os.listdir(f"{self.task_local_dir}/.cache/video")):
+                segment_path = f"{self.task_local_dir}/.cache/video/{segment_path}"
+                visual_cues = self.vision_agent.analyze_video(segment_path)
+                self.SRT_Script.segments[idx].visual_cues = visual_cues
 
     # Module 1 ASR: audio --> SRT_script
     def get_srt_class(self, pre_load_asr_model=None):
@@ -209,7 +235,7 @@ class Task:
         # Instead of using the script_en variable directly, we'll use script_input
         self.status = TaskStatus.INITIALIZING_ASR
 
-        if self.SRT_Script != None:
+        if self.SRT_Script.segments[0].src_text != "":
             self.task_logger.info("SRT input mode, skip ASR Module")
             return
         # get configs
@@ -219,7 +245,10 @@ class Task:
         src_srt_path = self.task_local_dir.joinpath(
             f"task_{self.task_id}_{self.source_lang}.srt"
         )
+        
+        self.SRT_Script.asr = self.asr
 
+        self.SRT_Script.get_transcription(output_dir=src_srt_path)
         # get transcript
         transcript = get_transcript(method, 
                                     src_srt_path, 
@@ -237,7 +266,7 @@ class Task:
                     self.target_lang,
                     self.task_logger,
                     self.client,
-                    domain=self.field,
+                    domain=self.domain,
                     srt_str=transcript.rstrip(),
                 )
             else:
@@ -247,7 +276,7 @@ class Task:
                     transcript,
                     self.task_logger,
                     self.client,
-                    self.field,
+                    self.domain,
                 )
             # save the srt script to local
             self.SRT_Script.write_srt_file_src(src_srt_path)
@@ -375,6 +404,8 @@ class Task:
         """
         Executes the entire pipeline process for the task.
         """
+        self.get_speaker_segments()
+        self.get_visual_cues()
         self.get_srt_class(pre_load_asr_model)
         self.preprocess()
         self.translation()
@@ -391,11 +422,7 @@ class YoutubeTask(Task):
         self.youtube_url = youtube_url
         self.video_resolution = task_cfg["video_download"]["resolution"]
 
-        # Not sure should I put this here or in run? same as Video Task
-        if self.video_path is not None and self.vision_agent is not None:
-            self.visual_cues = self.vision_agent.analyze_video(self.video_path)
-        else:
-            self.visual_cues = None
+
         # self.model = model
 
     def run(self, pre_load_asr_model=None):
@@ -472,10 +499,10 @@ class VideoTask(Task):
         shutil.copyfile(video_path, new_video_path)
         self.video_path = new_video_path
 
-        if self.video_path is not None and self.vision_agent is not None:
-            self.visual_cues = self.vision_agent.analyze_video(self.video_path)
-        else:
-            self.visual_cues = None
+        # if self.video_path is not None and self.vision_agent is not None:
+        #     self.visual_cues = self.vision_agent.analyze_video(self.video_path)
+        # else:
+        #     self.visual_cues = None
 
     def run(self, pre_load_asr_model=None):
         self.task_logger.info("using ffmpeg to extract audio")
@@ -515,7 +542,7 @@ class SRTTask(Task):
             self.target_lang,
             self.task_logger,
             self.client,
-            domain=self.field,
+            domain=self.domain,
             path=srt_path,
         )
 

@@ -7,10 +7,10 @@ import torch
 """
 
 class VisionAgent:
-    def __init__(self, model_name, model_path, extract_interval, cache_dir=None):
+    def __init__(self, model_name, model_path=None, frame_per_seg=4, cache_dir=None):
         self.model_name = model_name
         self.model_path = model_path
-        self.extract_interval = extract_interval
+        self.frame_per_seg = frame_per_seg # frame interval
         self.cache_dir = cache_dir
         self.frames = []
         self.model = None
@@ -37,41 +37,3 @@ class VisionAgent:
         # analyze video
         visual_cues = ... # here's the final prompt feed into whisper or translators
         return visual_cues
-
-
-class CLIPVisionAgent(VisionAgent):
-    # TODO: implement CLIP vision agent @Zongheng00
-    def __init__(self, model_name, model_path, extract_interval, cache_dir=None):
-        super().__init__(model_name, model_path, extract_interval, cache_dir)
-        self.model = AutoModel.from_pretrained(model_path)
-        self.tokenizer = AutoTokenizer.from_pretrained(model_path)
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model.to(self.device)
-
-    def analyze_frame(self, frame):
-        # analyze frame
-        pass
-    
-    def analyze_video(self, video_path):
-        # analyze video
-        visual_cues = ... # here's the final prompt feed into whisper or translators
-        return visual_cues
-    
-class vLLMVisionAgent(VisionAgent):
-    # TODO: implement vLLM vision agent @worldqwq
-    def __init__(self, model_name, model_path, extract_interval, cache_dir=None):
-        super().__init__(model_name, model_path, extract_interval, cache_dir)
-        self.model = ...
-        self.tokenizer = ...
-        self.device = ...
-        self.model.to(self.device)
-
-    def analyze_frame(self, frame):
-        # analyze frame
-        pass
-    
-    def analyze_video(self, video_path):
-        # analyze video 
-        visual_cues = ... # here's the final prompt feed into whisper or translators
-        return visual_cues
-

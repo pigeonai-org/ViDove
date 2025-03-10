@@ -1,19 +1,19 @@
 import logging
 import traceback
-from time import sleep
 import warnings
-import openai
+from time import sleep
 
+import openai
+from llama_index.core import PromptTemplate
 from tqdm import tqdm
 
-from src.srt_util.srt import split_script
+from src.memory.basic_rag import BasicRAG
+from src.SRT.srt import split_script
+from src.translators.assistant import Assistant
+from src.translators.LLM import LLM
+from src.translators.MTA import MTA
 
-from .assistant import Assistant
-from llama_index.core import PromptTemplate
-from ..memory.basic_rag import BasicRAG
 from .prompts import system_prompt
-from .LLM import LLM
-from .MTA import MTA
 
 SUPPORT_LANG_MAP = {
     "EN": "English",
