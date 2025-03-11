@@ -8,12 +8,14 @@ from llama_index.core import PromptTemplate
 from tqdm import tqdm
 
 from src.memory.basic_rag import BasicRAG
+from src.memory.direct_search_RAG import TavilySearchRAG
 from src.SRT.srt import split_script
 from src.translators.assistant import Assistant
 from src.translators.LLM import LLM
 from src.translators.MTA import MTA
 
 from .prompts import system_prompt
+from .prompts import get_input_prompt
 
 SUPPORT_LANG_MAP = {
     "EN": "English",
@@ -30,7 +32,7 @@ SUPPORT_LANG_MAP = {
 
 class Translator:
     def __init__(
-        self, model_name, src_lang, tgt_lang, domain, task_id, client, chunk_size=1000
+        self, model_name, src_lang, tgt_lang, domain, task_id, client, local_knowledge:BasicRAG=None, web_search:TavilySearchRAG=None, vision_knowledge:BasicRAG=None, chunk_size=1000,
     ):
         self.task_logger = logging.getLogger(f"task_{task_id}")
         self.task_logger.info("initializing translator")
@@ -42,6 +44,10 @@ class Translator:
         self.task_id = task_id
         self.system_prompt = self.prompt_selector()
         self.client = client
+        self.local_knowledge = local_knowledge
+        self.web_search = web_search
+        self.vision_knowledge = vision_knowledge
+        self.translation_history = []
         self.srt = None
 
         if self.model_name == "Assistant":
@@ -93,7 +99,7 @@ class Translator:
                 f"Unsupported language detected: {src_lang} to {tgt_lang}"
             )
 
-        prompt = PromptTemplate(system_prompt).partial_format(
+        prompt = PromptTemplate(system_prompt).format(
             domain=self.domain,
             source_language=src_lang,
             target_language=tgt_lang,
@@ -127,7 +133,25 @@ class Translator:
             retry_count = 0
             while retry_count < max_retries:
                 try:
-                    translation = self.translator.send_request(sentence)
+                    # add knowledge retrieve before translation
+                    # TODO: disable the knowledge if assistant is active
+                    # convert nodes to string
+
+                    input_dict = {}
+                    if len(self.translation_history) != 0:
+                        input_dict["history_str"] = "\n".join(self.translation_history[-5:])
+                    if self.local_knowledge is not None:
+                        input_dict["context_str"] = self.local_knowledge.retrieve_relevant_nodes(sentence)
+                    if self.web_search is not None:
+                        input_dict["supporting_documents"] = self.web_search.seach_tavily(sentence)
+                    if self.vision_knowledge is not None:
+                        input_dict["video_clips_description"] = self.vision_knowledge.retrieve_relevant_nodes(sentence)
+                    input_dict["query_str"] = sentence
+
+                    input = get_input_prompt(self.domain, self.src_lang, self.tgt_lang, input_dict)
+
+                    translation = self.translator.send_request(input)
+                    self.translation_history.append(translation)
                     break  # Success - exit the loop
                 except openai.BadRequestError as e:
                     retry_count += 1

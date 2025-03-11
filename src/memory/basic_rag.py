@@ -16,13 +16,6 @@ from llama_index.embeddings.openai import OpenAIEmbedding
 
 from ..memory.abs_api_RAG import AbsApiRAG
 
-# SYSTEM_PROMPT = system_prompt
-
-# Default persist directory and data directory
-
-# text_qa_template
-
-
 class BasicRAG(AbsApiRAG):
     def __init__(
         self,

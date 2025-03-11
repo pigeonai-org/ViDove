@@ -2,6 +2,8 @@ from .abs_api_model import AbsApiModel
 from llama_index.core import PromptTemplate
 from openai import AzureOpenAI, OpenAI
 
+
+
 # add RAG support in here
 
 
@@ -14,13 +16,14 @@ class LLM(AbsApiModel):
         else:
             raise NotImplementedError
         self.system_prompt = system_prompt
+        self.history = []
         self.temp = temp
 
-    def send_request(self, input):
+    def send_request(self, input, ):
         response = self.client.chat.completions.create(
             model=self.model_name,
             messages=[
-                {"role": "system", "content": self.system_prompt.format()},
+                {"role": "system", "content": self.system_prompt},
                 {"role": "user", "content": input},
             ],
             temperature=self.temp,

@@ -17,6 +17,7 @@ import os
 from src.SRT.srt import SrtScript
 from src.SRT.srt2ass import srt2ass
 from src.memory.basic_rag import BasicRAG
+from src.memory.direct_search_RAG import TavilySearchRAG
 from src.translators.translator import Translator
 from src.vision.gpt_vision_agent import GptVisionAgent, CLIPVisionAgent, assistant_vision_api
 from src.VAD.VAD import VAD
@@ -89,6 +90,9 @@ class Task:
         self.s_t = None
         self.t_e = None
         self.t_s = time()
+        self.local_knowledge = None
+        self.web_search = None
+        self.vision_knowledge = None
 
         # logging setting
         self.task_logger = logging.getLogger(f"task_{task_id}")
@@ -108,18 +112,18 @@ class Task:
             self.task_logger.info("Using OpenAI API")
             if "OPENAI_API_KEY" in task_cfg:
                 self.task_logger.info("Using OPENAI_API_KEY from gradio interface.")
-                self.api_key = task_cfg["OPENAI_API_KEY"]
+                self.oai_api_key = task_cfg["OPENAI_API_KEY"]
             else:
                 self.task_logger.info("Using OPENAI_API_KEY from environment variable.")
-                self.api_key = getenv("OPENAI_API_KEY")
+                self.oai_api_key = getenv("OPENAI_API_KEY")
         elif self.api_source == "azure":
             self.task_logger.info("Using Azure OpenAI API")
             if "AZURE_OPENAI_API_KEY" in task_cfg:
                 self.task_logger.info("Using AZURE_OPENAI_API_KEY from gradio interface.")
-                self.api_key = task_cfg["AZURE_OPENAI_API_KEY"]
+                self.oai_api_key = task_cfg["AZURE_OPENAI_API_KEY"]
             else:
                 self.task_logger.info("Using AZURE_OPENAI_API_KEY from environment variable.")
-                self.api_key = getenv("AZURE_OPENAI_API_KEY")
+                self.oai_api_key = getenv("AZURE_OPENAI_API_KEY")
         self.task_logger.info(
             f"{self.source_lang} -> {self.target_lang} task in {self.domain}"
         )
@@ -138,20 +142,11 @@ class Task:
 
         # init openai client
         if self.api_source == "openai":
-            self.client = OpenAI(api_key=self.api_key)
+            self.client = OpenAI(api_key=self.oai_api_key)
         elif self.api_source == "azure":
-            self.client = AzureOpenAI(api_key=self.api_key, azure_endpoint=getenv("AZURE_OPENAI_ENDPOINT"),api_version="2024-05-01-preview")
-        # initialize translator
-        self.translator = Translator(
-            self.translation_model,
-            self.source_lang,
-            self.target_lang,
-            self.domain,
-            self.task_id,
-            self.client,
-            self.chunk_size,
-        )
-
+            self.client = AzureOpenAI(api_key=self.oai_api_key, azure_endpoint=getenv("AZURE_OPENAI_ENDPOINT"),api_version="2024-05-01-preview")
+        
+        # init memory module
         if self.memory_setting["enable_local_knowledge"] and self.domain != "General":
             self.local_knowledge = BasicRAG(self.task_logger, self.domain)
             # persist_dir = f"{self.task_local_dir}/storage"
@@ -160,12 +155,26 @@ class Task:
         
         if self.memory_setting["enable_web_search"]:
             #TODO: init web search
-            self.web_search = ...
+            self.web_search = TavilySearchRAG()
             # self.web_search.load_knowledge_base()
         
         if self.memory_setting["enable_vision_knowledge"]:
             self.vision_knowledge = BasicRAG(self.task_logger, "vision")
             self.vision_knowledge.load_knowledge_base(data_dir=None)
+
+        # initialize translator
+        self.translator = Translator(
+            self.translation_model,
+            self.source_lang,
+            self.target_lang,
+            self.domain,
+            self.task_id,
+            self.client,
+            self.local_knowledge,
+            self.web_search,
+            self.vision_knowledge,
+            self.chunk_size,
+        )
 
         # initialize vision agent
         self.vision_agent = None

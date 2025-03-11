@@ -1,6 +1,6 @@
 import time
 
-from openai import AzureOpenAI
+from openai import AzureOpenAI, OpenAI
 
 from .abs_api_model import AbsApiModel
 
@@ -8,7 +8,7 @@ SUPPORT_DOMAIN = ["SC2"]
 ID_MAP = {"SC2": "asst_48Ha6WDx8Kybf2pa5nxDvKe1"} # should move to secrete place in the future
 
 class Assistant(AbsApiModel):   
-    def __init__(self, client:AzureOpenAI, system_prompt, temp = 0.15, domain = "SC2"):
+    def __init__(self, client:AzureOpenAI|OpenAI, temp = 0.15, domain = "SC2"):
         super().__init__()
         self.client = client
         self.thread_id = self.client.beta.threads.create(tool_resources={
@@ -19,7 +19,6 @@ class Assistant(AbsApiModel):
         if domain not in SUPPORT_DOMAIN:
             raise NotImplementedError
         self.assistant_id = ID_MAP[domain]
-        self.system_prompt = system_prompt
         self.temp = temp
         
     def send_request(self, input):
@@ -32,7 +31,7 @@ class Assistant(AbsApiModel):
         thread_message = self.client.beta.threads.messages.create(
             thread_id=self.thread_id,
             role="user",
-            content= self.system_prompt  + "/n" + input,
+            content= input,
             # file_ids=["file-ZWoegkS6ha4nrfie0iEchnVi", "file-bT6x3aqi4MsG9eKmIizFmzZE"]
         )
 
