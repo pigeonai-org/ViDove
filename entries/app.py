@@ -121,20 +121,38 @@ def init(apikey, opt_resolution, opt_post, opt_pre, output_type, src_lang, tgt_l
 
 def process_input(apikey, video_file, audio_file, srt_file, youtube_link, opt_resolution, src_lang, tgt_lang, domain, opt_asr_method, opt_post, opt_pre, output_type, chunk_size, translation_model):
     task_id, task_dir, task_cfg, pre_load_asr_model = init(apikey, opt_resolution, opt_post, opt_pre, output_type, src_lang, tgt_lang, domain, opt_asr_method, chunk_size, translation_model)
+    
+    
+    # save video file to the local_dump directory, and then use the path to create a Task instance
+        
     if youtube_link:
+        
         task = Task.fromYoutubeLink(youtube_link, task_id, task_dir, task_cfg)
         task.run(pre_load_asr_model)
         return task.result, task.log_dir
     elif audio_file is not None:
-        task = Task.fromAudioFile(audio_file.name, task_id, task_dir, task_cfg)
+        audio_file_path = os.path.join(task_dir, audio_file.name)
+        with open(audio_file_path, "wb") as f:
+            f.write(audio_file.getbuffer())
+        
+        task = Task.fromAudioFile(audio_file_path, task_id, task_dir, task_cfg)
         task.run(pre_load_asr_model)
         return task.result, task.log_dir
     elif srt_file is not None:
-        task = Task.fromSRTFile(srt_file.name, task_id, task_dir, task_cfg)
+        srt_file_path = os.path.join(task_dir, srt_file.name)
+        with open(srt_file_path, "wb") as f:
+            f.write(srt_file.getbuffer())
+        
+        task = Task.fromSRTFile(srt_file_path, task_id, task_dir, task_cfg)
         task.run()
         return task.result, task.log_dir
     elif video_file is not None:
-        task = Task.fromVideoFile(video_file, task_id, task_dir, task_cfg)
+        video_file_path = os.path.join(task_dir, video_file.name)
+        with open(video_file_path, "wb") as f:
+            f.write(video_file.getbuffer())
+        
+        # task = Task.fromVideoFile(video_file, task_id, task_dir, task_cfg)
+        task = Task.fromVideoFile(video_file_path, task_id, task_dir, task_cfg)
         task.run(pre_load_asr_model)
         return task.result, task.log_dir
     else:
@@ -235,7 +253,11 @@ def main():
     with tab1:
         youtube_link = st.text_input("Enter a YouTube URL")
     with tab2:
+        
+        # that should not be the file itself, but its path
         video_file = st.file_uploader("Upload a video")
+    
+        # video_file_path = video_file.path
         # video_file = st.file_uploader("Upload a video", type=['mp4', 'avi', 'mov', 'mkv'])
     with tab3:
         audio_file = st.file_uploader("Upload an Audio File")
