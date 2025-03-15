@@ -155,7 +155,7 @@ class Task:
         
         if self.memory_setting["enable_web_search"]:
             #TODO: init web search
-            self.web_search = TavilySearchRAG()
+            self.web_search = TavilySearchRAG(self.task_logger, self.domain)
             # self.web_search.load_knowledge_base()
         
         if self.memory_setting["enable_vision_knowledge"]:
