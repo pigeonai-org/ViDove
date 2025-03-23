@@ -1,7 +1,8 @@
 from pathlib import Path
 import re
 
-def srt_to_plain_text(srt_path):
+def to_big_video_format(srt_path):
+    # big video is a dataset we plan to test on
     """
     original file example:
     1
@@ -11,7 +12,7 @@ def srt_to_plain_text(srt_path):
     00:00:01,000 --> 00:00:02,000
     World
     
-    output example:
+    output example(big video dataset "test_data_test.zh" format):
     Hello, World
     """
     
@@ -56,17 +57,17 @@ def srt_to_plain_text(srt_path):
     combined_text = ' '.join(text_lines)
     
     # Replace spaces with commas
-    combined_text = combined_text.replace(' ', ',')
+    combined_text = combined_text.replace(' ', '，')
     
     # Handle possible consecutive commas
-    combined_text = re.sub(',+', ',', combined_text)
+    combined_text = re.sub('，+', '，', combined_text)
     
     # Remove trailing comma (if any) and add period
-    if combined_text.endswith(','):
+    if combined_text.endswith('，'):
         combined_text = combined_text[:-1]
     
-    if not combined_text.endswith('.'):
-        combined_text += '.'
+    if not combined_text.endswith('。'):
+        combined_text += '。'
     
     return combined_text
 
@@ -91,7 +92,7 @@ def batch_convert_srt_files(input_dir, output_dir=None, output_suffix="_plain"):
     
     for srt_file in srt_files:
         # Convert SRT to plain text
-        plain_text = srt_to_plain_text(srt_file)
+        plain_text = to_big_video_format(srt_file)
         
         # Create output file path
         relative_path = srt_file.relative_to(input_dir)
@@ -109,7 +110,7 @@ def batch_convert_srt_files(input_dir, output_dir=None, output_suffix="_plain"):
 if __name__ == "__main__":
     # Test if the function works properly
 
-    input_path = "evaluation/test_data/c0a62310-998d-4c52-b2be-e94ce7f0f3b2_ZH.srt"
+    input_path = "evaluation/test_data/28e6c89c-2a04-45d9-8fdb-6b4ed23f6087_ZH.srt"
     output_dir = "evaluation/test_data/"
 
     # Convert string paths to Path objects
@@ -117,7 +118,7 @@ if __name__ == "__main__":
     output_dir = Path(output_dir)
 
     # Single file conversion
-    plain_text = srt_to_plain_text(input_path)
+    plain_text = to_big_video_format(input_path)
     
     if output_dir is None:
         output_file = input_path.with_suffix('.txt')
