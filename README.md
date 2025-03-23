@@ -104,7 +104,7 @@ Here's why:
    git clone https://github.com/project-kxkg/ViDove.git
    cd ViDove
    ```
-3. Install Requirments
+3. Install Requirements
    ```sh
    conda create -n ViDove python=3.10 -y
    conda activate ViDove
@@ -139,9 +139,9 @@ Here's why:
 <!-- USAGE EXAMPLES -->
 ## Usage
 
-### Quick Start with Gradio User Interface
+### Quick Start with Streamlit User Interface
    ```sh
-   python3 entries/app.py
+   streamlit run entries/app.py
    ```
 
 ### Launch with configs

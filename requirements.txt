@@ -19,7 +19,8 @@ multidict==6.0.4
 networkx==3.0
 numba==0.56.4
 numpy==1.23.5
-openai == 1.30.1
+# openai==1.30.1
+openai==1.65.2
 openai-whisper @ git+https://github.com/openai/whisper.git@6dea21fd7f7253bfe450f1e2512a0fe47ee2d258
 panda==0.3.1
 pandas==1.5.3
@@ -33,7 +34,8 @@ sympy==1.11.1
 tiktoken==0.3.1
 torch==2.0.0
 tqdm==4.65.0
-typing_extensions==4.8.0
+# typing_extensions==4.8.0
+typing_extensions==4.12.2
 transformers
 urllib3==1.26.15
 yarl==1.8.2
@@ -48,3 +50,9 @@ pydantic==2.9.2
 fastapi==0.110.0
 uvicorn==0.27.1
 streamlit==1.43.0
+torchaudio==2.0.1
+langchain
+langchain_community
+comet-ml
+# comet
+# git+https://github.com/Unbabel/COMET.git
