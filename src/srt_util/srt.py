@@ -189,8 +189,12 @@ class SrtScript(object):
             raise RuntimeError("need input Srt Path or Srt String")
 
         bilingual = False
-        if script_lines[2] != '' and script_lines[3] != '':
-            bilingual = True
+        try:
+            if script_lines[2] != '' and script_lines[3] != '':
+                bilingual = True
+        except:
+            print("Error: The file maybe too short", )
+            bilingual = False
         segments = []
         if bilingual:
             for i in range(0, len(script_lines), 5):

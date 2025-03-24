@@ -37,7 +37,7 @@ def process_video(video_path_str, output_dir, task_cfg, logger):
     task_id = str(uuid4())
     
     # Create task directory in a temporary location
-    temp_dir = Path("./temp_tasks")  # Create temporary directory outside of output directory
+    temp_dir = Path("./evaluation/test_data/temp_tasks")  # Create temporary directory outside of output directory
     temp_dir.mkdir(parents=True, exist_ok=True)
     
     task_dir = temp_dir / f"task_{task_id}"
@@ -129,14 +129,14 @@ def batch_process_videos(input_dir, output_dir, task_cfg, logger):
             failed += 1
             # 如果失败的话，把失败了的文件的id记录到一个fail.txt文件中
             with open("./evaluation/test_data/srt_output/fail.txt", "a") as f:
-                f.write(f"{video_path}\n")
+                f.write(f"{video_path.split('/')[-1]}\n")
     
     logger.info(f"Batch processing complete. Generated {successful} SRT files. Failed: {failed}.")
     return results
 
 def main():
     # Get paths from command line or use defaults
-    input_dir = sys.argv[1] if len(sys.argv) > 1 else "./evaluation/test_data/videos/test"
+    input_dir = sys.argv[1] if len(sys.argv) > 1 else "./evaluation/test_data/videos"
     output_dir = sys.argv[2] if len(sys.argv) > 2 else "./evaluation/test_data/srt_output"
     
     # Setup logging
