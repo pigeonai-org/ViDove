@@ -36,8 +36,11 @@ def process_video(video_path_str, output_dir, task_cfg, logger):
     # Create a unique task ID
     task_id = str(uuid4())
     
-    # Create task directory
-    task_dir = Path(output_dir) / f"task_{task_id}"
+    # Create task directory in a temporary location
+    temp_dir = Path("./temp_tasks")  # Create temporary directory outside of output directory
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    
+    task_dir = temp_dir / f"task_{task_id}"
     task_dir.mkdir(parents=True, exist_ok=True)
     results_dir = task_dir / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -67,6 +70,14 @@ def process_video(video_path_str, output_dir, task_cfg, logger):
             import shutil
             shutil.copy2(source_srt, output_srt)
             logger.info(f"Generated SRT: {output_srt}")
+            
+            # Clean up temp directory after successful processing
+            try:
+                shutil.rmtree(task_dir)
+                logger.info(f"Cleaned up temporary directory: {task_dir}")
+            except Exception as e:
+                logger.warning(f"Failed to clean up directory {task_dir}: {str(e)}")
+                
             return str(output_srt)
         else:
             logger.error(f"Failed to generate SRT for {video_path}")
@@ -74,6 +85,15 @@ def process_video(video_path_str, output_dir, task_cfg, logger):
     except Exception as e:
         logger.error(f"Error processing {video_path_str}: {str(e)}")
         logger.error(traceback.format_exc())
+        
+        # Try to clean up even on failure
+        try:
+            import shutil
+            shutil.rmtree(task_dir)
+            logger.info(f"Cleaned up temporary directory after error: {task_dir}")
+        except Exception as cleanup_err:
+            logger.warning(f"Failed to clean up directory {task_dir}: {str(cleanup_err)}")
+            
         return None
 
 def batch_process_videos(input_dir, output_dir, task_cfg, logger):
