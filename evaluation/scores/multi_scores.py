@@ -7,10 +7,9 @@ class multi_scores:
     def __init__(self, source_lang="en", target_lang="zh", domain="starcraft 2") -> None:
         # 22 is not supported by comet
         
-        # self.comet_model = load_from_checkpoint(download_model("Unbabel/wmt22-comet-da"))
-        # self.comet_model = load_from_checkpoint(download_model("Unbabel/wmt22-comet-da"))
+        # self.comet_model = load_from_checkpoint(download_model("Unbabel/wmt20-comet-da"))
+        self.comet_model = load_from_checkpoint(download_model("Unbabel/wmt22-comet-da"))
         
-        # TODO: add the tokenize=target_lang
         self.bleu_model = BLEU(tokenize=target_lang)
         # self.bleu_model = BLEU()
         self.LLM_model = LLM_eval.init_evaluator(source_lang=source_lang, target_lang=target_lang, domain=domain)
@@ -103,6 +102,13 @@ class multi_scores:
         
         return results
 
+def cal_all_scores(src_list, mt_list, ref_list):
+    print("\n\n\n BLUE ------------------------------------:")
+    print(multi_scores().calculate_bleu(mt_list, [ref_list]))
+    print("\n\n\n COMET ----------------- LLM ------------------------------------:")
+    for result in multi_scores().calculate_comet_llm_batch(src_list, mt_list, ref_list):
+        print(result)
+
 if __name__ == "__main__":
     src = "The South Korea player is encountering with the Blue Terran's SCV"
     src_list = [src,"Hello, I am a player from China. I think BLEU is a very bad evaluation metric.","Second, I recommend greasing the groove, which means several times a day hanging on the bar for about 50 percent of your max hold time. It's all about doing submaximal sets. You want to practice frequently while keeping yourself feeling as fresh as possible. Grease the groove every single day."]
@@ -110,18 +116,21 @@ if __name__ == "__main__":
     mt_list = [mt,"你好，我是来自中国的玩家。我认为BLEU是一个非常糟糕的评价指标。","其次,我建议使用“润滑槽”方法,这意味着每天多次在单杠上悬挂,时间约为你最大悬挂时间的50%,这主要是进行低于最大强度的训练,你需要频繁练习,同时尽量保持身体的清新感,每天都要进行“润滑槽”训练."]
     ref = " 来自南韩的玩家遇到了来自蓝色人族的SCV"
     ref_list = [ref,"你好，我是来自中国的玩家。我认为BLEU是一个非常糟糕的评价指标。","第二，我推荐磨合训练法，单杠训练一天多次，锻炼时间保持在你最长记录的50%，也就是做次强度训练。勤加练习，同时保持精力充沛。每天如是磨合训练。"]
+    
+    cal_all_scores(src_list, mt_list, ref_list)
+    
     #  print(multi_scores().get_scores(src, mt, ref))
-    #print(multi_scores().calculate_comet_llm(src, mt, ref))
-    print("\n\n\n BLUE ------------------------------------:")
-    bleu_inputs = ["你好世界，我是来自中国的玩家。我认为BLEU是一个非常糟糕的评价指标。", "你好世界，我是来自中国的玩家。", "Hello, I am a player from China. I think BLEU is a very bad evaluation metric."]
-    refs = [ # First set of references
-          ['The dog bit the man.', 'It was not unexpected.', 'The man bit him first.'],
-          # Second set of references
-          ['The dog had bit the man.', 'No one was surprised.', 'The man had bitten the dog.'],
-        ]
-    sys = ['The dog bit the man.', "It wasn't surprising.", 'The man had just bitten him.']
-    print(multi_scores().calculate_bleu(mt_list, [ref_list]))
-    print("\n\n\n COMET ----------------- LLM ------------------------------------:")
+    # print(multi_scores().calculate_comet_llm(src, mt, ref))
+    # print("\n\n\n BLUE ------------------------------------:")
+    # bleu_inputs = ["你好世界，我是来自中国的玩家。我认为BLEU是一个非常糟糕的评价指标。", "你好世界，我是来自中国的玩家。", "Hello, I am a player from China. I think BLEU is a very bad evaluation metric."]
+    # refs = [ # First set of references
+    #       ['The dog bit the man.', 'It was not unexpected.', 'The man bit him first.'],
+    #       # Second set of references
+    #       ['The dog had bit the man.', 'No one was surprised.', 'The man had bitten the dog.'],
+    #     ]
+    # sys = ['The dog bit the man.', "It wasn't surprising.", 'The man had just bitten him.']
+    # print(multi_scores().calculate_bleu(mt_list, [ref_list]))
+    # print("\n\n\n COMET ----------------- LLM ------------------------------------:")
     # for result in multi_scores().calculate_comet_llm_batch(src_list, mt_list, ref_list):
     #     print(result)
     # print(multi_scores().calculate_comet_llm_batch(src_list, mt_list, ref_list))

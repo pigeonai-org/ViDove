@@ -5,6 +5,11 @@ from srt_util.srt import SrtScript
 from srt_util.srt import SrtSegment
 
 
+"""
+This file won't be used in the current evaluation module.    
+"""
+
+
 # Helper method
 # Align sub anchor segment pair via greedy approach
 # Input: anchor segment, SRT segments, output array of sub, index of current sub
