@@ -64,7 +64,7 @@ def process_srt_files(id_file_path, output_file_path, srt_dir):
     if missing_files:
         print(f"Warning: {len(missing_files)} files were missing: {', '.join(missing_files)}")
 
-def to_eval_result(id_file="./evaluation/test_data/text_data_test.id",
+def generate_eval_result(id_file="./evaluation/test_data/text_data_test.id",
                   output="./evaluation/test_data/eval_result.zh",
                   srt_dir="./evaluation/test_data/srt_output"):
     """把所有多行的srt文件转换为big video format（只有一行），然后批量写入到output文件中
@@ -79,7 +79,12 @@ def to_eval_result(id_file="./evaluation/test_data/text_data_test.id",
 
 if __name__ == "__main__":
     # TEST
-    to_eval_result(id_file="./evaluation/test_data/test_eval/text_data_test.id",
-                  output="./evaluation/test_data/test_eval/eval_result.zh",
-                  srt_dir="./evaluation/test_data/test_eval/srt_output") 
+    # to_eval_result(id_file="./evaluation/test_data/test_eval/text_data_test.id",
+    #               output="./evaluation/test_data/test_eval/eval_result.zh",
+    #               srt_dir="./evaluation/test_data/test_eval/srt_output") 
+    
+    generate_eval_result(id_file="./evaluation/test_data/text_data_test.id",
+                output="./evaluation/test_data/eval_result.zh",
+                srt_dir="./evaluation/test_data/srt_output") 
+
     

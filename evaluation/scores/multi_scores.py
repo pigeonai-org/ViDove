@@ -1,7 +1,12 @@
 from comet import download_model, load_from_checkpoint
 from sacrebleu.metrics import BLEU, CHRF, TER
-# from scores import LLM_eval
-import LLM_eval
+
+try:
+    # 跑./evaluation/的文件的时候用这个
+    from scores import LLM_eval
+except ModuleNotFoundError:
+    # 直接跑这个文件的时候用这个
+    import LLM_eval
 
 class multi_scores:
     def __init__(self, source_lang="en", target_lang="zh", domain="starcraft 2") -> None:
@@ -32,6 +37,9 @@ class multi_scores:
     def calculate_comet_llm(self, src:str, mt:str, ref:str) -> dict:
         # preprocess the input
         src, mt, ref = self.__preprocess(src, mt, ref)
+        # 这里将batch_size设置为1，gpus设置为0，表示使用CPU进行预测
+        # batch_size=1意味着每次只处理一个样本，这可能会影响处理速度，但对于单个样本评估是合适的
+        # gpus=0表示不使用GPU加速，而是使用CPU进行计算，这会影响计算速度，但在没有GPU的环境中是必要的
         comet_output = self.comet_model.predict([{"src":src, "mt":mt, "ref":ref}], batch_size=1, gpus=0)
         comet_score = comet_output.scores[0]
         # comet_score = self.comet_model.predict([{"src":src, "mt":mt, "ref":ref}], batch_size=8, gpus=0).scores[0]
@@ -103,11 +111,39 @@ class multi_scores:
         return results
 
 def cal_all_scores(src_list, mt_list, ref_list):
-    print("\n\n\n BLUE ------------------------------------:")
-    print(multi_scores().calculate_bleu(mt_list, [ref_list]))
-    print("\n\n\n COMET ----------------- LLM ------------------------------------:")
-    for result in multi_scores().calculate_comet_llm_batch(src_list, mt_list, ref_list):
+    """Calculate all scores for a list of src, mt, and ref."""
+    import csv
+    import json
+    
+    # Set up the CSV file with headers
+    with open("result.csv", "w", encoding="utf-8") as f:
+        csv_writer = csv.writer(f)
+        csv_writer.writerow(["Source", "MT", "Reference", "BLEU", "COMET", "LLM Score", "LLM Explanation"])
+    
+    # Calculate BLEU score
+    
+    # bleu_score = multi_scores().calculate_bleu(mt_list, [ref_list])
+    # print(f"BLEU: {bleu_score}")
+    
+    # Calculate scores for each example and write to CSV
+    results = multi_scores().calculate_comet_llm_batch(src_list, mt_list, ref_list)
+    for i, result in enumerate(results):
         print(result)
+        
+        # Write result to CSV file - convert dictionary to row
+        with open("./evaluation/test_data/result.csv", "a", encoding="utf-8") as f:
+            csv_writer = csv.writer(f)
+            # Create a row for the CSV with all values from the result dictionary
+            row = [
+                src_list[i] if i < len(src_list) else "",  # Source
+                mt_list[i] if i < len(mt_list) else "",    # MT
+                ref_list[i] if i < len(ref_list) else "",  # Reference
+                result.get("bleu_score", ""),              # BLEU
+                result.get("comet_score", ""),             # COMET
+                result.get("llm_score", ""),               # LLM Score
+                result.get("llm_explanation", "")          # LLM Explanation
+            ]
+            csv_writer.writerow(row)
 
 if __name__ == "__main__":
     src = "The South Korea player is encountering with the Blue Terran's SCV"

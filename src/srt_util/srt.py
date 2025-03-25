@@ -194,7 +194,7 @@ class SrtScript(object):
                 bilingual = True
         except:
             print("Error: The file maybe too short", )
-            bilingual = False
+            bilingual = True
         segments = []
         if bilingual:
             for i in range(0, len(script_lines), 5):
