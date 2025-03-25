@@ -72,7 +72,7 @@ class multi_scores:
         llm_acc, llm_completeness = LLM_eval.evaluate_prediction(src, ref, mt, self.LLM_model)
         return {'bleu_score':bleu_score ,'comet_score':comet_score, 'llm_score':llm_acc[0], 'llm_explanation': llm_acc[1], 'llm_completeness':llm_completeness[0], 'llm_completeness_explanation':llm_completeness[1]}
 
-    def calculate_comet_llm_batch(self, srcs: list, mts: list, refs: list) -> list:
+    def calculate_comet_llm_batch(self, srcs: list, mts: list, refs: list, csv_path="./evaluation/test_data/result.csv") -> list:
         """
         Batch evaluate multiple translation results by processing them individually
         
@@ -80,16 +80,36 @@ class multi_scores:
             srcs: List of source texts
             mts: List of machine translations
             refs: List of reference translations
+            csv_path: Path to save results to CSV
         
         Returns:
             List of dictionaries containing scores for each translation
         """
+        
+        # 删除重复的 results 初始化
+        results = []
+        
+        # for testing
+        # result = {
+        # 'comet_score': "111",
+        # 'llm_score': "222" , 
+        # 'llm_explanation': "333"
+        # }
+        # results.append(result)
+        # return results
+        
+        
         # Ensure input lists have the same length
         assert len(srcs) == len(mts) == len(refs), "Input lists must have the same length"
         
-        results = []
+        # 这里出现了重复的results列表初始化，需要删除
+        # results = []
+        
+        # 用于跟踪上次保存的索引位置
+        last_saved_index = -1
+        
         # Process each item individually to avoid COMET batch issue
-        for src, mt, ref in zip(srcs, mts, refs):
+        for i, (src, mt, ref) in enumerate(zip(srcs, mts, refs)):
             # Preprocess inputs
             src = src.strip()
             mt = mt.strip()
@@ -98,17 +118,77 @@ class multi_scores:
             # Get COMET score individually
             comet_score = self.comet_model.predict([{"src": src, "mt": mt, "ref": ref}], batch_size=1, gpus=0).scores[0]
             
-            # Get LLM evaluation
-            llm_acc, llm_completeness = LLM_eval.evaluate_prediction(src, ref, mt, self.LLM_model)
-            
-            # Store results
-            results.append({
+            result = {
                 'comet_score': comet_score,
-                'llm_score': llm_acc[0], 
-                'llm_explanation': llm_acc[1]
-            })
+                'llm_score': "" , 
+                'llm_explanation': ""
+            }
+            
+            # Get LLM evaluation
+            # llm_acc, llm_completeness = LLM_eval.evaluate_prediction(src, ref, mt, self.LLM_model)
+            
+            # # Store results
+            # result = {
+            #     'comet_score': comet_score,
+            #     'llm_score': llm_acc[0], 
+            #     'llm_explanation': llm_acc[1]
+            # }
+            
+            results.append(result)
+            
+            # Save to CSV every 10 items - 只保存新处理的部分
+            if (i + 1) % 10 == 0:
+                # 只保存新增的结果，而不是全部重新保存
+                new_results = results[last_saved_index+1:i+1]
+                new_srcs = srcs[last_saved_index+1:i+1]
+                new_mts = mts[last_saved_index+1:i+1]
+                new_refs = refs[last_saved_index+1:i+1]
+                
+                self._save_batch_to_csv(new_srcs, new_mts, new_refs, new_results, csv_path)
+                print(f"Saved results {last_saved_index+1} to {i+1} to {csv_path}")
+                last_saved_index = i
         
+        # Save any remaining results
+        if last_saved_index < len(results) - 1:
+            new_results = results[last_saved_index+1:]
+            new_srcs = srcs[last_saved_index+1:]
+            new_mts = mts[last_saved_index+1:]
+            new_refs = refs[last_saved_index+1:]
+            
+            self._save_batch_to_csv(new_srcs, new_mts, new_refs, new_results, csv_path)
+            print(f"Saved remaining results {last_saved_index+1} to {len(results)} to {csv_path}")
+            
         return results
+    
+    def _save_batch_to_csv(self, srcs, mts, refs, results, csv_path):
+        """Helper method to save batch results to CSV"""
+        import csv
+        import os
+        
+        # Create directory if it doesn't exist
+        os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+        
+        # Check if file exists to determine if we need to write headers
+        file_exists = os.path.isfile(csv_path)
+        
+        with open(csv_path, "a", encoding="utf-8", newline='') as f:
+            csv_writer = csv.writer(f)
+            
+            # Write headers if file doesn't exist
+            if not file_exists:
+                csv_writer.writerow(["Source", "MT", "Reference", "COMET", "LLM Score", "LLM Explanation"])
+            
+            # Write results
+            for i, result in enumerate(results):
+                row = [
+                    srcs[i],                          # Source
+                    mts[i],                           # MT
+                    refs[i],                          # Reference
+                    result.get("comet_score", ""),    # COMET
+                    result.get("llm_score", ""),      # LLM Score
+                    result.get("llm_explanation", "") # LLM Explanation
+                ]
+                csv_writer.writerow(row)
 
 def cal_all_scores(src_list, mt_list, ref_list):
     """Calculate all scores for a list of src, mt, and ref."""
@@ -122,7 +202,13 @@ def cal_all_scores(src_list, mt_list, ref_list):
     
     # Calculate BLEU score
     
+    # TODO 已经处理完了BLEU，因此注释
     # bleu_score = multi_scores().calculate_bleu(mt_list, [ref_list])
+    
+    # # 将bleu_score写入csv文件
+    # with open("./evaluation/test_data/bleu_result.csv", "a", encoding="utf-8") as f:
+    #     csv_writer = csv.writer(f)
+    #     csv_writer.writerow(["BLEU", bleu_score])
     # print(f"BLEU: {bleu_score}")
     
     # Calculate scores for each example and write to CSV
@@ -130,28 +216,15 @@ def cal_all_scores(src_list, mt_list, ref_list):
     for i, result in enumerate(results):
         print(result)
         
-        # Write result to CSV file - convert dictionary to row
-        with open("./evaluation/test_data/result.csv", "a", encoding="utf-8") as f:
-            csv_writer = csv.writer(f)
-            # Create a row for the CSV with all values from the result dictionary
-            row = [
-                src_list[i] if i < len(src_list) else "",  # Source
-                mt_list[i] if i < len(mt_list) else "",    # MT
-                ref_list[i] if i < len(ref_list) else "",  # Reference
-                result.get("bleu_score", ""),              # BLEU
-                result.get("comet_score", ""),             # COMET
-                result.get("llm_score", ""),               # LLM Score
-                result.get("llm_explanation", "")          # LLM Explanation
-            ]
-            csv_writer.writerow(row)
+    return results  # 返回结果以便其他函数可以使用
 
 if __name__ == "__main__":
     src = "The South Korea player is encountering with the Blue Terran's SCV"
-    src_list = [src,"Hello, I am a player from China. I think BLEU is a very bad evaluation metric.","Second, I recommend greasing the groove, which means several times a day hanging on the bar for about 50 percent of your max hold time. It's all about doing submaximal sets. You want to practice frequently while keeping yourself feeling as fresh as possible. Grease the groove every single day."]
+    src_list = [src,"Hello,  I think BLEU is a very bad evaluation metric.","Second, I recommend greasing the groove, which means several times a day hanging on the bar for about 50 percent of your max hold time. It's all about doing submaximal sets. You want to practice frequently while keeping yourself feeling as fresh as possible. Grease the groove every single day."]
     mt = "位于对角线的另一个角落  使用蓝色的Terran Probes"
-    mt_list = [mt,"你好，我是来自中国的玩家。我认为BLEU是一个非常糟糕的评价指标。","其次,我建议使用“润滑槽”方法,这意味着每天多次在单杠上悬挂,时间约为你最大悬挂时间的50%,这主要是进行低于最大强度的训练,你需要频繁练习,同时尽量保持身体的清新感,每天都要进行“润滑槽”训练."]
+    mt_list = [mt,"你好，我认为BLEU是一个非常糟糕的评价指标。","其次,我建议使用润滑槽方法,这意味着每天多次在单杠上悬挂,时间约为你最大悬挂时间的50%,这主要是进行低于最大强度的训练,你需要频繁练习,同时尽量保持身体的清新感,每天都要进行润滑槽训练."]
     ref = " 来自南韩的玩家遇到了来自蓝色人族的SCV"
-    ref_list = [ref,"你好，我是来自中国的玩家。我认为BLEU是一个非常糟糕的评价指标。","第二，我推荐磨合训练法，单杠训练一天多次，锻炼时间保持在你最长记录的50%，也就是做次强度训练。勤加练习，同时保持精力充沛。每天如是磨合训练。"]
+    ref_list = [ref,"你好，我认为BLEU是一个非常糟糕的评价指标。","第二，我推荐磨合训练法，单杠训练一天多次，锻炼时间保持在你最长记录的50%，也就是做次强度训练。勤加练习，同时保持精力充沛。每天如是磨合训练。"]
     
     cal_all_scores(src_list, mt_list, ref_list)
     
