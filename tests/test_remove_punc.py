@@ -1,6 +1,7 @@
 import unittest
 import __init_path__
 from src.srt_util.srt import SrtScript, SrtSegment
+import logging
 
 class TestRemovePunc(unittest.TestCase):
     def setUp(self):
@@ -9,7 +10,8 @@ class TestRemovePunc(unittest.TestCase):
 
     def form_srt_class(self, src_lang, tgt_lang, source_text="", translation="", duration="00:00:00,740 --> 00:00:08,779"):
         segment = [0, duration, source_text, translation, ""]
-        return SrtScript(src_lang, tgt_lang, [segment])
+        # return SrtScript(src_lang, tgt_lang, [segment])
+        return SrtScript(src_lang, tgt_lang, [segment],task_logger=logging.getLogger("test"),client=None)
 
     def test_zh(self):
         srt = self.form_srt_class(src_lang="EN", tgt_lang="ZH", translation=self.zh_test1)
