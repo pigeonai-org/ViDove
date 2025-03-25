@@ -42,8 +42,8 @@ def init_evaluator(source_lang="en", target_lang="zh", domain="startcraft2", mod
             numerically incorrect this also includes values that have the $ in front
             Please give the completeness score first followed by the accuracy score. 
             For example: 
-            Accuracy: 40. Explanation here
-            Completeness: 80. Explanation here
+            Accuracy: 40
+            Completeness: 80
             Do not differ from the format ever
             """
     
