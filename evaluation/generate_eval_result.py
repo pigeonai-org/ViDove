@@ -5,7 +5,7 @@ from pathlib import Path
 
 # Add the root directory to the path to import to_big_video_format
 sys.path.append("./")
-from evaluation.to_big_video_format import to_big_video_format
+from evaluation.utils.dataset_parser.to_big_video_format import to_big_video_format
 
 
 
