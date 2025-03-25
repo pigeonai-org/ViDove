@@ -12,7 +12,7 @@ bleu = BLEU()
 print(bleu.corpus_score(sys, refs))
 print(bleu.get_signature())
 
-bleu_inputs = ["你好世界，我是来自中国的玩家。我认为BLEU是一个非常糟糕的评价指标。", "你好世界，我是来自中国的玩家。"]
+bleu_inputs = ["你好世界，我认为BLEU是一个非常糟糕的评价指标。", "你好世界，我是好人"]
 
 bleu_model = BLEU(tokenize="zh")
 print(bleu_model.corpus_score(bleu_inputs, [bleu_inputs]))
