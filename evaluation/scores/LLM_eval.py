@@ -38,14 +38,16 @@ def init_evaluator(source_lang="en", target_lang="zh", domain="startcraft2", mod
             based on the following criteria: 
             {criteria}
             Give two grades, accuracy and completeness rate them from a scale of 0 to 100, where 0 is the lowest (very low accuracy/completeness) and 100 is the highest (very high accuracy/completeness)? 
-            Give explanations for every single one and if the answer if partially correct that is acceptable. However punish the scores for answers that are 
-            numerically incorrect this also includes values that have the $ in front
+
             Please give the completeness score first followed by the accuracy score. 
             For example: 
             Accuracy: 40
             Completeness: 80
             Do not differ from the format ever
             """
+            
+            # Give explanations for every single one and if the answer if partially correct that is acceptable. However punish the scores for answers that are 
+            # numerically incorrect this also includes values that have the $ in front
     
     if source_lang in language_map and target_lang in language_map:
         lang_str = f"You are an expert {language_map[source_lang]} to {language_map[target_lang]} translator specialized in {domain}."

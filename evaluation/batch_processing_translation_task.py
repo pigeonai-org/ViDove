@@ -12,8 +12,10 @@ from src.task import Task
 
 
 """
-1. 需要根据源文件的id来对应生成srt文件的名字
-2. 尽量去掉srt文件以外的文件
+Batch processing of translation tasks (using ViDove Agent)
+
+1. Generate srt file names corresponding to the source file id
+2. Remove files other than srt files
 
 """
 
