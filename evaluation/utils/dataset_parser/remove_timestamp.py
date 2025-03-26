@@ -1,24 +1,27 @@
 from pathlib import Path
 import re
 import argparse
+from extract_ass_subtitles import extract_ass_subtitles, AssSubtitleExtractor
 
-class VidoveFormatConverter:
-    """Class for converting SRT files to Vidove dataset format"""
+class RemoveTimestampConverter:
+    """Class for converting SRT files to Vidove dataset format（remove timestamp）"""
     
-    def __init__(self, id_file=None, srt_dir=None, output_file=None, single_file=None):
+    def __init__(self, id_list=None, target_srt_dir=None, single_file=None, output_file=None, output_dir=None):
         """
         Initialize the converter with file paths
         
         Args:
-            id_file: Path to file containing IDs
-            srt_dir: Directory containing SRT files
-            output_file: Path to output file
+            id_list: Path to file containing IDs
+            target_srt_dir: Directory containing SRT files to process
             single_file: Path to a single SRT file to process
+            output_file: Path to output file (for single file output)
+            output_dir: Directory to save individual processed files (for batch processing)
         """
-        self.id_file = Path(id_file) if id_file else None
-        self.srt_dir = Path(srt_dir) if srt_dir else None
-        self.output_file = Path(output_file) if output_file else None
+        self.id_list = Path(id_list) if id_list else None
+        self.target_srt_dir = Path(target_srt_dir) if target_srt_dir else None
         self.single_file = Path(single_file) if single_file else None
+        self.output_file = Path(output_file) if output_file else None
+        self.output_dir = Path(output_dir) if output_dir else None
         
     def convert_srt_file(self, srt_path):
         """
@@ -113,53 +116,60 @@ class VidoveFormatConverter:
         print(f"Combined {len(srt_files)} files into {output_file}")
         return output_file
 
-    def process_id_list(self):
+    def process_id_list_to_separate_files(self):
         """
-        Process SRT files according to IDs in a file and combine into one output file
+        Process SRT files according to IDs in a file and save each to a separate output file
         """
-        if not self.id_file or not self.id_file.exists():
-            print(f"Error: ID file not found at {self.id_file}")
+        if not self.id_list or not self.id_list.exists():
+            print(f"Error: ID file not found at {self.id_list}")
             return
         
-        with open(self.id_file, "r", encoding="utf-8") as f:
+        if not self.output_dir:
+            print("Error: output_dir must be specified for separate file output")
+            return
+        
+        # Create output directory if it doesn't exist
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        
+        with open(self.id_list, "r", encoding="utf-8") as f:
             ids = [line.strip() for line in f if line.strip()]
         
         print(f"Found {len(ids)} IDs to process")
         
-        # Process each SRT file and collect results
-        all_texts = []
+        # Process each SRT file and save to separate output file
+        processed_files = []
         missing_files = []
         
         for file_id in ids:
-            srt_path = self.srt_dir / f"{file_id}.srt"
+            srt_path = self.target_srt_dir / f"{file_id}.srt"
             if not srt_path.exists():
                 # Try without the extension in the ID
                 base_id = file_id.split(".")[0] if "." in file_id else file_id
-                srt_path = self.srt_dir / f"{base_id}.srt"
+                srt_path = self.target_srt_dir / f"{base_id}.srt"
                 
             if not srt_path.exists():
                 print(f"Warning: SRT file not found for ID: {file_id}")
                 missing_files.append(file_id)
-                all_texts.append("")  # Add empty entry to maintain order
                 continue
             
             # Process SRT file to Vidove format
             formatted_text = self.convert_srt_file(srt_path)
-            all_texts.append(formatted_text)
-            print(f"Processed: {file_id}")
+            
+            # Create output file with same name but .txt extension
+            output_file = self.output_dir / f"{file_id}.txt"
+            
+            # Write formatted text to output file
+            with open(output_file, 'w', encoding='utf-8') as f:
+                f.write(formatted_text)
+            
+            processed_files.append(str(output_file))
+            print(f"Processed: {file_id} -> {output_file}")
         
-        # Create output directory if it doesn't exist
-        self.output_file.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Write all converted texts to single file
-        with open(self.output_file, 'w', encoding='utf-8') as f:
-            f.write('\n'.join(all_texts))
-        
-        print(f"Combined {len(ids) - len(missing_files)} files into {self.output_file}")
+        print(f"Processed {len(processed_files)} files. Output saved to {self.output_dir}")
         if missing_files:
             print(f"Warning: {len(missing_files)} files were missing: {', '.join(missing_files)}")
         
-        return self.output_file
+        return processed_files
     
     def process_single_file(self):
         """Process a single SRT file"""
@@ -177,172 +187,21 @@ class VidoveFormatConverter:
             
         print(f"Converted {self.single_file} to {self.output_file}")
         return self.output_file
-    
-    def run(self):
-        """Run the converter based on input parameters"""
-        if self.single_file:
-            return self.process_single_file()
-        elif self.id_file and self.srt_dir and self.output_file:
-            return self.process_id_list()
-        else:
-            print("Error: Missing required parameters")
-            return None
-
-class AssSubtitleExtractor:
-    """Class for extracting translation content from ASS subtitle format"""
-    
-    def __init__(self, input_file=None, output_file=None):
-        """
-        Initialize the extractor with file paths
-        
-        Args:
-            input_file: Path to ASS subtitle file or text file containing ASS dialogues
-            output_file: Path to output file
-        """
-        self.input_file = Path(input_file) if input_file else None
-        self.output_file = Path(output_file) if output_file else None
-    
-    def extract_text_from_line(self, line):
-        """
-        Extract only the subtitle text from an ASS dialogue line
-        
-        Args:
-            line: A line in ASS format starting with "Dialogue:"
-            
-        Returns:
-            Extracted subtitle text after the last comma
-        """
-        if not line.startswith("Dialogue:"):
-            return line.strip()
-        
-        # Split by commas and get the last part (the actual subtitle text)
-        parts = line.split(',')
-        if len(parts) > 8:  # Ensure there are enough parts
-            return parts[-1].strip()
-        return ""
-    
-    def extract_from_file(self):
-        """
-        Extract subtitle text from an ASS file
-        
-        Returns:
-            List of extracted subtitle text lines
-        """
-        if not self.input_file or not self.input_file.exists():
-            print(f"Error: Input file not found at {self.input_file}")
-            return []
-        
-        extracted_lines = []
-        
-        with open(self.input_file, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if line.startswith("Dialogue:"):
-                    text = self.extract_text_from_line(line)
-                    if text:
-                        extracted_lines.append(text)
-        
-        return extracted_lines
-    
-    def process(self):
-        """
-        Process the input file and write extracted text to output file
-        
-        Returns:
-            Path to the output file if successful, None otherwise
-        """
-        if not self.input_file or not self.output_file:
-            print("Error: Both input and output files must be specified")
-            return None
-        
-        extracted_lines = self.extract_from_file()
-        
-        if not extracted_lines:
-            print("Warning: No subtitle text extracted")
-            return None
-        
-        # Create output directory if it doesn't exist
-        self.output_file.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Write extracted lines to output file
-        with open(self.output_file, 'w', encoding='utf-8') as f:
-            f.write('\n'.join(extracted_lines))
-        
-        print(f"Extracted {len(extracted_lines)} subtitle lines to {self.output_file}")
-        return self.output_file
-
-def convert_srt_files(id_file=None, srt_dir=None, output_file=None, single_file=None):
-    """
-    Function to convert SRT files to Vidove dataset format
-    
-    Args:
-        id_file: Path to file containing IDs
-        srt_dir: Directory containing SRT files
-        output_file: Path to output file
-        single_file: Path to a single SRT file to process
-        
-    Returns:
-        Path to the output file if successful, None otherwise
-    """
-    converter = VidoveFormatConverter(
-        id_file=id_file,
-        srt_dir=srt_dir,
-        output_file=output_file,
-        single_file=single_file
-    )
-    return converter.run()
-
-def extract_ass_subtitles(input_file=None, output_file=None):
-    """
-    Function to extract subtitle text from ASS format
-    
-    Args:
-        input_file: Path to ASS subtitle file
-        output_file: Path to output file
-        
-    Returns:
-        Path to the output file if successful, None otherwise
-    """
-    extractor = AssSubtitleExtractor(
-        input_file=input_file,
-        output_file=output_file
-    )
-    return extractor.process()
-
-def parse_arguments():
-    """Parse command line arguments"""
-    parser = argparse.ArgumentParser(description="Convert subtitles to Vidove dataset format")
-    
-    subparsers = parser.add_subparsers(dest="command")
-    
-    # SRT converter subcommand
-    srt_parser = subparsers.add_parser("srt", help="Convert SRT files to Vidove format")
-    srt_parser.add_argument("--id-file", default="./evaluation/test_data/text_data_test.id",
-                     help="Path to file containing IDs (default: ./evaluation/test_data/text_data_test.id)")
-    srt_parser.add_argument("--output", default="./evaluation/test_data/eval_result.zh",
-                     help="Path to output file (default: ./evaluation/test_data/eval_result.zh)")
-    srt_parser.add_argument("--srt-dir", default="./evaluation/test_data/srt_output",
-                     help="Directory containing SRT files (default: ./evaluation/test_data/srt_output)")
-    srt_parser.add_argument("--single-file", help="Process a single SRT file instead of using ID file")
-    
-    # ASS extractor subcommand
-    ass_parser = subparsers.add_parser("ass", help="Extract subtitle text from ASS format")
-    ass_parser.add_argument("--input", required=True, help="Path to input ASS subtitle file")
-    ass_parser.add_argument("--output", required=True, help="Path to output text file")
-    
-    return parser.parse_args()
 
 if __name__ == "__main__":
-    args = parse_arguments()
-    
-    convert_srt_files(
-        id_file=args.id_file,
-        srt_dir=args.srt_dir,
-        output_file=args.output,
-        single_file=args.single_file
-    )
 
-    # extract_ass_subtitles(
-    #     input_file=args.input,
-    #     output_file=args.output
+    # 单个文件处理
+    converter = RemoveTimestampConverter(
+        single_file=r"evaluation\test_data\28e6c89c-2a04-45d9-8fdb-6b4ed23f6087_ZH.srt", # for single file processing
+        output_file=r"evaluation\test_data\remove_timestamp_result.txt",
+    )
+    converter.process_single_file()
+    
+    # 批量处理
+    # converter = RemoveTimestampConverter(
+    #     id_list=r"evaluation\test_data\text_data_test.id",
+    #     target_srt_dir=r"evaluation\test_data\test\srt_output",
+    #     output_dir=r"evaluation\test_data\batch_result",
     # )
+    # converter.process_id_list_to_separate_files()
+
