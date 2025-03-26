@@ -112,8 +112,8 @@ def extract_ass_subtitles(input_file=None, output_file=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Extract subtitle text from ASS format")
-    parser.add_argument("--input", required=True, help="Path to input ASS subtitle file")
-    parser.add_argument("--output", required=True, help="Path to output text file")
+    parser.add_argument("--input", default=r"evaluation\test_data\vidove_dataset\sc2\1\11.ass", help="Path to input ASS subtitle file")
+    parser.add_argument("--output", default=r"evaluation\test_data\vidove_dataset\result.txt", help="Path to output text file")
     
     args = parser.parse_args()
     
