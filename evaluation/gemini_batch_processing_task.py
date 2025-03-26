@@ -20,7 +20,7 @@ Batch processing of video files using Vertex AI Gemini model
 
 Usage:
 1. follow the instructions from https://cloud.google.com/sdk/docs/install to authenticate with the gcloud CLI
-2. Set environment variable GEMINI_PROJECT_ID pointing to your GCP project ID
+2. Set environment variable GEMINI_PROJECT_ID and GOOGLE_CLOUD_PROJECT pointing to your GCP project ID
 3. Run the script to process videos: python evaluation/gemini_batch_processing_task.py [input_dir] [output_dir]
 """
 
