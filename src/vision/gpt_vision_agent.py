@@ -324,3 +324,107 @@ class CLIPVisionAgent(VisionAgent):
 
         prompt = f"The key concepts in this video include: {', '.join(top_keywords[:3])}."
         return prompt
+
+def get_video_info_ffmpeg(video_path):
+    # Retrieve video information using ffmpeg
+    probe = ffmpeg.probe(video_path)
+    video_stream = next((s for s in probe['streams'] if s['codec_type'] == 'video'), None)
+    if video_stream is None:
+        raise ValueError("No video stream found")
+
+    fps = eval(video_stream['r_frame_rate'])
+    if 'nb_frames' in video_stream:
+        total_frames = int(video_stream['nb_frames'])
+    else:
+        duration = float(video_stream['duration'])
+        total_frames = int(duration * fps)
+
+    return fps, total_frames
+    
+class HfVisionAgent:
+    def __init__(self, model_name="llava-hf/llava-interleave-qwen-0.5b-hf", api="OPENAI_API_KEY", seconds_per_frame=30, device=None, verbose=True):
+        # Initialize the HfVisionAgent with model details, API key, frame interval, and device settings
+        self.model_name = model_name
+        self.interval_sec = seconds_per_frame  # Interval in seconds between frames to analyze
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.visual_cues = []
+        self.verbose = verbose
+        self.pipe = None
+        self.load_model()
+        self.client = OpenAI(api_key=api)
+
+    def load_model(self):
+        # Load the multimodal pipeline model
+        if self.verbose:
+            print(f"Loading multimodal pipeline: {self.model_name}")
+        self.pipe = pipeline("image-text-to-text", model=self.model_name, device=self.device)
+
+    def encode_image_to_caption(self, image):
+        # Convert an image to a caption using the loaded pipeline
+        image_pil = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "image": image_pil},
+                    {"type": "text", "text": "Briefly describe this image in 1-2 sentences (max 60 tokens)."}
+                ],
+            }
+        ]
+
+        outputs = self.pipe(text=messages, max_new_tokens=60, return_full_text=False)
+        caption = outputs[0]["generated_text"]
+        return caption
+
+    def summarize_cue(self):
+        # Summarize the collected visual descriptions into a coherent summary
+        prompt = f"Summarize the following visual description: { ' | '.join(self.visual_cues) }"
+        response = self.client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": "You are an AI model that summarizes visual description from a video."},
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+        )
+        return response.choices[0].message.content
+
+    def analyze_frame(self, frame):
+        # Analyze a single frame and obtain its caption
+        caption = self.encode_image_to_caption(frame)
+        if self.verbose:
+            print(f"[Caption]: {caption}")
+        return caption
+
+    def analyze_video(self, video_path):
+        # Analyze the video by extracting frames at specified intervals and summarizing their content
+        fps, total_frames = get_video_info_ffmpeg(video_path)
+        if self.verbose:
+            print(f"Using FFmpeg - FPS: {fps}, Total Frames: {total_frames}")
+
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise ValueError(f"Cannot open video: {video_path}")
+
+        duration_sec = int(total_frames / fps)
+        extract_indices = [int(t * fps) for t in range(0, duration_sec, self.interval_sec)]
+
+        self.visual_cues = []
+        frame_count = 0
+
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            if frame_count in extract_indices:
+                caption = self.analyze_frame(frame)
+                self.visual_cues.append(caption)
+
+            frame_count += 1
+
+        cap.release()
+        return self.summarize_cue()
