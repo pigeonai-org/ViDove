@@ -51,9 +51,11 @@ fastapi==0.110.0
 uvicorn==0.27.1
 streamlit==1.43.0
 torchaudio==2.0.1
-langchain
-langchain_community
+langchain==0.3.21
+langchain_community==0.3.20
 comet-ml
 # comet
 # git+https://github.com/Unbabel/COMET.git
 vertexai
+google 
+google.genai
