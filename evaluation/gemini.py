@@ -3,9 +3,12 @@ import os
 from google import genai
 from google.genai import types
 from vertexai.generative_models import Part, GenerationConfig
+import sys
+from pathlib import Path
+import glob
 
 class Gemini:
-    def __init__(self, model_name="gemini-2.0-flash", api_key=None):
+    def __init__(self, model_name="gemini-2.0-flash", api_key=None, input_dir=None, output_dir=None):
         """
         Initialize the Gemini translator.
         
@@ -19,6 +22,14 @@ class Gemini:
             raise ValueError("API key must be provided either directly or via GEMINI_API_KEY environment variable")
         
         self.client = genai.Client(api_key=api_key)
+        self.input_dir = input_dir
+        self.output_dir = output_dir        
+        
+        self.successful = 0
+        self.failed = 0
+        self.results = []
+        
+        
     
     def generate_translation(self, video_path):
         """
@@ -38,9 +49,11 @@ class Gemini:
             video_data = f.read()
         
         # Generate translation prompt
+        
+        
+        # Please maintain the original style and tone of the speech.
         prompt = """Please translate the speech in this video to Chinese (Simplified).
-        Please maintain the original style and tone of the speech.
-        Output format should be the same as the following (including the time stamps, keep in Chinese):
+        Output format should be the same as the following (including the time stamps, and keep your content in Chinese), do not differ from the format:
         1
         00:00:00,240 --> 00:00:02,523
         其次 我建议使用"润滑槽"方法
@@ -54,31 +67,7 @@ class Gemini:
         时间约为你最大悬挂时间的50%
         """
         
-        # try:
-        #     # Using vertexai API
-        #     contents = [
-        #         Part.from_text(text=prompt),
-        #         Part.from_data(data=video_data, mime_type="video/mp4")
-        #     ]
-            
-        #     generation_config = GenerationConfig(
-        #         temperature=0.2,
-        #         top_p=0.95,
-        #         top_k=40,
-        #         max_output_tokens=2048
-        #     )
-            
-        #     response = self.client.generate_content(
-        #         model=self.model_name,
-        #         contents=contents,
-        #         generation_config=generation_config
-        #     )
-            
-        #     return response.text
-            
-        # except Exception as e:
-        #     # Fallback to alternative method if the first one fails
-        #     try:
+        
         contents = [
             types.Content(
                 role="user",
@@ -92,52 +81,68 @@ class Gemini:
             )
         ]
         
-        # generate_content_config = types.GenerateContentConfig(
-        #     temperature=0.2,
-        #     top_p=0.95,
-        #     top_k=40,
-        #     max_output_tokens=2048
-        # )
-    
-# 用这个方法      
-#                 response = self.client.models.generate_content(
-#                     model=self.model,
-#                     contents=[
-#                         Part.from_text(text=question),
-#                         Part.from_bytes(data=audio_data, mime_type="audio/wav"),
-#                     ]
-#                 )
-
-        
-        
-        
         response = self.client.models.generate_content(
             model=self.model_name,
             contents=contents
         )
         
+        
+        output_path = os.path.splitext(video_path)[0] + ".srt"
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(response.text)
+        print(f"Translation saved to {output_path}")
+    
+        
         return response.text
-                
-            # except Exception as inner_e:
-            #     raise RuntimeError(f"Failed to generate translation: {str(e)}. Inner exception: {str(inner_e)}")
+    def batch_process_videos(self):
+        """
+        Batch process all videos in the input directory and save the translations to the output directory.
+        
+        Args:
+            input_dir (str): Path to the directory containing the videos
+            output_dir (str): Path to the directory to save the translations
+        """
+        
+        Path(self.output_dir).mkdir(parents=True, exist_ok=True)
+        
+        video_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.webm']
+        video_files = []
+        
+        for ext in video_extensions:
+            video_files.extend(glob.glob(os.path.join(self.input_dir, f"*{ext}")))
+        
+        # Process each video
+        for video_path in video_files:
+            # output_srt_file = os.path.splitext(video_path)[0] + ".srt"
+            result = self.generate_translation(video_path)
 
+            if result:
+                # self.results.append(result)
+                self.successful += 1
+                print(f"Success: {video_path}")
+            else:
+                self.failed += 1
+                # Record failed file ID
+                with open(os.path.join(self.output_dir, "fail.txt"), "a") as f:
+                    f.write(f"{os.path.basename(video_path)}\n")
+            
+                        
 def main():
     """Main function to run the video translation."""
     video_path = "./evaluation/test_data/videos/test/_l0SHo7ekoQ_00.mp4"
+    input_dir = sys.argv[1] if len(sys.argv) > 1 else "./evaluation/test_data/videos/test"
+    output_dir = sys.argv[2] if len(sys.argv) > 2 else "./evaluation/test_data/gemini_results"
     
-    try:
-        translator = Gemini()
-        translation = translator.generate_translation(video_path)
-        print(translation)
-        
-        # Optionally save the translation to a file
-        output_path = os.path.splitext(video_path)[0] + ".srt"
-        with open(output_path, "w", encoding="utf-8") as f:
-            f.write(translation)
-        print(f"Translation saved to {output_path}")
-        
-    except Exception as e:
-        print(f"Error: {str(e)}")
+
+    translator = Gemini(input_dir=input_dir,output_dir=output_dir)
+    
+    # 单文件处理
+    # translation = translator.generate_translation(video_path)
+    # print(translation)
+    
+    # 多文件处理    
+    translator.batch_process_videos()
+    
 
 if __name__ == "__main__":
     main()
