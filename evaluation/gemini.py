@@ -8,7 +8,7 @@ from pathlib import Path
 import glob
 
 class Gemini:
-    def __init__(self, model_name="gemini-2.0-flash", api_key=None, input_dir=None, output_dir=None):
+    def __init__(self, model_name="gemini-1.5-pro", api_key=None, input_dir=None, output_dir=None):
         """
         Initialize the Gemini translator.
         
@@ -50,21 +50,33 @@ class Gemini:
         
         # Generate translation prompt
         
+        # prompt = """Please translate the speech in this video to Chinese (Simplified).
+        # # Please maintain the original style and tone of the speech.
+        # Output format should be the same as the following (including the time stamps, and keep your content in Chinese), do not differ from the format:
+        # 1
+        # 00:00:00,240 --> 00:00:02,523
+        # 其次 我建议使用"润滑槽"方法
+
+        # 2
+        # 00:00:02,523 --> 00:00:04,701
+        # 这意味着每天多次在单杠上悬挂
+
+        # 3
+        # 00:00:04,701 --> 00:00:07,271
+        # 时间约为你最大悬挂时间的50%
+        # """
         
-        # Please maintain the original style and tone of the speech.
-        prompt = """Please translate the speech in this video to Chinese (Simplified).
-        Output format should be the same as the following (including the time stamps, and keep your content in Chinese), do not differ from the format:
+        prompt = """请将视频中的语音翻译成中文（简体）。请保持原语音的语气。
+        输出格式应与以下格式相同（包括时间戳），请记住，一定要保持你的内容为中文，一定不要偏离以下格式，包括你不能有任何的前置输出（不要输出类似于"好的，没问题。以下是翻译后的文本：
+"这类的内容）：
         1
         00:00:00,240 --> 00:00:02,523
-        其次 我建议使用"润滑槽"方法
+        你好，世界
 
         2
         00:00:02,523 --> 00:00:04,701
-        这意味着每天多次在单杠上悬挂
-
-        3
-        00:00:04,701 --> 00:00:07,271
-        时间约为你最大悬挂时间的50%
+        这是你的中文翻译文本
+        
         """
         
         
@@ -87,7 +99,12 @@ class Gemini:
         )
         
         
-        output_path = os.path.splitext(video_path)[0] + ".srt"
+        
+        # output_path = os.path.splitext(video_path)[0] + ".srt"
+        # 需要是个srt文件
+        # 去掉.mp4后缀
+        file_name = os.path.basename(video_path).replace(".mp4", ".srt")
+        output_path = os.path.join(self.output_dir, file_name)
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(response.text)
         print(f"Translation saved to {output_path}")
@@ -130,7 +147,7 @@ class Gemini:
 def main():
     """Main function to run the video translation."""
     video_path = "./evaluation/test_data/videos/test/_l0SHo7ekoQ_00.mp4"
-    input_dir = sys.argv[1] if len(sys.argv) > 1 else "./evaluation/test_data/videos/test"
+    input_dir = sys.argv[1] if len(sys.argv) > 1 else "./evaluation/test_data/videos/"
     output_dir = sys.argv[2] if len(sys.argv) > 2 else "./evaluation/test_data/gemini_results"
     
 
