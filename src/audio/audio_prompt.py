@@ -68,7 +68,7 @@ Compose a 1–2 sentence natural description that:
 Example: "A confident adult male speaks with steady energy and moderate pitch. A soft sigh at the end adds emotional depth to his composed delivery."
 
 Final Output Format (JSON):
-{{
+{
   "gender": "<Male/Female>",
   "accent": "<Accent>",
   "age": "<Toddler/Child/Teenager/Adult/Middle-aged/Senior>",
@@ -76,5 +76,5 @@ Final Output Format (JSON):
   "timbre": "<Timbre description>",
   "paralinguistic_features": ["<Detected features>"],
   "final_caption": "<1-2 sentence enriched description based on attributes>"
-}}
+}
 """

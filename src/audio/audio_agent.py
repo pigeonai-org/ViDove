@@ -30,7 +30,7 @@ class AudioAgent(ABC):
         pass
     
     @abstractmethod
-    def transcribe(self, audio_path):
+    def transcribe(self, audio_path, visual_cues=None):
         pass
     
     @abstractmethod
@@ -50,7 +50,7 @@ class ClassicAudioAgent(AudioAgent):
 
 # TODO: @George please implement this
 class QwenAudioAgent(AudioAgent):
-    def __init__(self, model_name="qwen/qwen2.5-coder-32b-instruct"):
+    def __init__(self, model_name="qwen/qwen2-audio-instruct"):
         super().__init__(model_name)
 
     def load_model(self):
