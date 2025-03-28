@@ -5,5 +5,5 @@ LLM eval
 Eval time stamp  
 
 entry: 
-Python3 evaluation/evaluation.py –pred path/to/pred –gt path/to/gt
+Python evaluation/entry.py
 
