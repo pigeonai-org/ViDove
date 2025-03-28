@@ -57,3 +57,5 @@ comet-ml
 # comet
 # git+https://github.com/Unbabel/COMET.git
 vertexai
+google 
+google.genai

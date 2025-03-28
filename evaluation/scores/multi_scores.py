@@ -16,6 +16,7 @@ class multi_scores:
         self.comet_model = load_from_checkpoint(download_model("Unbabel/wmt22-comet-da"))
         
         # Initialize directional COMET (dCOMET) model
+        # The model used by DELTA： https://unbabel-experimental-models.s3.amazonaws.com/comet/wmt21/wmt21-comet-qe-mqm. tar.gz
         self.dcomet_model = load_from_checkpoint(download_model("NataliaKhaidanova/wmt21-comet-qe-mqm"))
         # self.dcomet_model = load_from_checkpoint(download_model("Unbabel/wmt21-comet-qe-da"))
         
@@ -47,6 +48,7 @@ class multi_scores:
         
         # Get directional COMET score (reference-free evaluation)
         dcomet_output = self.dcomet_model.predict([{"src":src, "mt":mt}], batch_size=1, gpus=0)
+        # dcomet_output = self.dcomet_model.predict([{"src":src, "mt":mt , "ref":ref}], batch_size=1, gpus=0)
         dcomet_score = dcomet_output.scores[0]
         
         # print(f"\n\n\n\n---------------------\n{comet_output}\n----------------------\n\n\n\n\n")
@@ -128,27 +130,27 @@ class multi_scores:
             ref = ref.strip()
             
             # Get COMET score individually
-            comet_score = self.comet_model.predict([{"src": src, "mt": mt, "ref": ref}], batch_size=1, gpus=0).scores[0]
+            # comet_score = self.comet_model.predict([{"src": src, "mt": mt, "ref": ref}], batch_size=1, gpus=0).scores[0]
             
             # Get directional COMET score (no reference needed)
-            dcomet_score = self.dcomet_model.predict([{"src": src, "mt": mt}], batch_size=1, gpus=0).scores[0]
+            # dcomet_score = self.dcomet_model.predict([{"src": src, "mt": mt}], batch_size=1, gpus=0).scores[0]
             
-            result = {
-                'comet_score': comet_score,
-                'dcomet_score': dcomet_score,
-                'llm_score': "" , 
-                'llm_explanation': ""
-            }
-            
-            # Get LLM evaluation
-            # llm_acc, llm_completeness = LLM_eval.evaluate_prediction(src, ref, mt, self.LLM_model)
-            
-            # # Store results
             # result = {
             #     'comet_score': comet_score,
-            #     'llm_score': llm_acc[0], 
-            #     'llm_explanation': llm_acc[1]
+            #     'dcomet_score': dcomet_score,
+            #     'llm_score': "" , 
+            #     'llm_explanation': ""
             # }
+            
+            # Get LLM evaluation
+            llm_acc, llm_completeness = LLM_eval.evaluate_prediction(src, ref, mt, self.LLM_model)
+            
+            # # Store results
+            result = {
+                # 'comet_score': comet_score,
+                'llm_score': llm_acc[0], 
+                'llm_explanation': llm_acc[1]
+            }
             
             results.append(result)
             

@@ -13,10 +13,10 @@ class CalAvgScoresInCsv:
         print(f'过滤后的行数: {len(filtered_df)}')
         # 计算 COMET / LLM Score 栏位的平均值
         average_comet = filtered_df['COMET'].mean()
-        average_llm_score = filtered_df['LLM Score'].mean()
+        average_llm_score = filtered_df['dCOMET'].mean()
 
-        print(f'COMET 栏位的平均值为: {average_comet}')
-        print(f'LLM Score 栏位的平均值为: {average_llm_score}')
+        print(f'sCOMET 栏位的平均值为: {average_comet}')
+        print(f'dCOMET 栏位的平均值为: {average_llm_score}')
 
 if __name__ == "__main__":
     cal_avg_scores_in_csv = CalAvgScoresInCsv('./evaluation/test_data/result.csv')
