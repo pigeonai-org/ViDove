@@ -3,8 +3,10 @@ from pathlib import Path
 import logging
 import torch
 import stable_whisper
-from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
+from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, WhisperForConditionalGeneration, WhisperProcessor
+import librosa
 from openai import OpenAI
+
 
 class ASR(ABC):
     """Abstract base class for all ASR implementations"""
@@ -18,6 +20,13 @@ class ASR(ABC):
             self.logger.info(message)
         else:
             print(message)
+    
+    def load_audio(self, audio_path):
+        # Load and resample the audio using librosa
+        audio, _ = librosa.load(audio_path, sr=16000, mono=True)
+        # Convert to float32 tensor
+        audio = torch.from_numpy(audio).float()
+        return audio
 
     @abstractmethod
     def get_transcript(self, audio_path, source_lang=None, init_prompt=None):
@@ -116,34 +125,37 @@ class HuggingfaceWhisperASR(ASR):
         if pre_load_model:
             self.model = pre_load_model
         else:
-            self.model = AutoModelForSpeechSeq2Seq.from_pretrained(
-                self.model_id, 
-                torch_dtype=self.torch_dtype
-            )
+            self.model = WhisperForConditionalGeneration.from_pretrained(self.model_id)
             self.model.to(self.device)
             
-        self.processor = AutoProcessor.from_pretrained(self.model_id)
-        self.pipe = pipeline(
-            "automatic-speech-recognition",
-            model=self.model,
-            tokenizer=self.processor.tokenizer,
-            feature_extractor=self.processor.feature_extractor,
-            max_new_tokens=128,
-            chunk_length_s=30,
-            batch_size=16,
-            return_timestamps=True,
-            torch_dtype=self.torch_dtype,
-            device=self.device,
-        )
-        
+        self.processor = WhisperProcessor.from_pretrained(self.model_id)
+
+    
     def get_transcript(self, audio_path, source_lang=None, init_prompt=None):
         # Apply language and prompt if provided
         self.log(f"Transcribing audio file: {audio_path}")
-        generate_kwargs = {}
+        input_speech = self.load_audio(audio_path)
+        input_features = self.processor(input_speech, return_tensors="pt").input_features
+        input_features = input_features.to(self.device)
+
         if init_prompt:
-            generate_kwargs["prompt"] = init_prompt
+            prompt_ids = self.processor.get_prompt_ids(init_prompt)
+            prompt_ids = torch.tensor(prompt_ids).to(self.device)
+        else:
+            prompt_ids = None
         
-        transcript_whisper = self.pipe(str(audio_path), return_timestamps=True)
+        output = self.model.generate(input_features, 
+                                    return_dict_in_generate=True,
+                                    return_timestamps=True,
+                                    prompt_ids=prompt_ids)
+        print(len(output['segments']))
+        print(len(output['segments'][0]))
+
+        print(output['segments'].keys())
+        # transcript_whisper = self.processor.decode(output[0], skip_special_tokens=False)
+
+        # print(transcript_whisper)
+        exit()
         
         # Convert format
         transcript = []
@@ -158,3 +170,8 @@ class HuggingfaceWhisperASR(ASR):
         torch.cuda.empty_cache()
             
         return transcript
+    
+if __name__ == "__main__":
+    asr = HuggingfaceWhisperASR(model_id="openai/whisper-large-v3")
+
+    asr.get_transcript("/home/mlp/eason/ViDove/src/VAD/0a4b82fc-fff5-4254-a7b1-1c6c88ff538a.wav")

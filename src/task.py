@@ -225,6 +225,7 @@ class Task:
             for idx, segment_path in enumerate(os.listdir(f"{self.task_local_dir}/.cache/video")):
                 segment_path = f"{self.task_local_dir}/.cache/video/{segment_path}"
                 visual_cues = self.vision_agent.analyze_video(segment_path)
+                
                 self.SRT_Script.segments[idx].visual_cues = visual_cues
 
     # Module 1 ASR: audio --> SRT_script
