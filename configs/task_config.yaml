@@ -7,6 +7,12 @@ domain: General
 video_download:
   resolution: 480 # 360, 480, 720, best(best we can find)
 
+MEMEORY: 
+  enable_local_knowledge: True
+  enable_vision_knowledge: True
+  enable_web_search: True
+  local_knowledge_path: "/Users/liujiaen/Documents/Codes/ViDove/domain_dict"
+
 # VAD config
 VAD:
   VAD_model: "pyannote/speaker-diarization-3.1"

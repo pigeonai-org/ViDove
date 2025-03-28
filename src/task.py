@@ -16,6 +16,8 @@ import os
 
 from src.SRT.srt import SrtScript
 from src.SRT.srt2ass import srt2ass
+from src.memory.basic_rag import BasicRAG
+from src.memory.direct_search_RAG import TavilySearchRAG
 from src.translators.translator import Translator
 from src.vision.gpt_vision_agent import GptVisionAgent, CLIPVisionAgent, assistant_vision_api
 from src.VAD.VAD import VAD
@@ -68,7 +70,7 @@ class Task:
         self.task_local_dir = task_local_dir
         self.ASR_setting = task_cfg["ASR"]
         self.vision_setting = task_cfg["vision"]
-        self.memory_setting = ...
+        self.memory_setting = task_cfg["MEMEORY"]
         self.translation_setting = task_cfg["translation"]
         self.translation_model = self.translation_setting["model"]
 
@@ -81,12 +83,16 @@ class Task:
         self.chunk_size = task_cfg["translation"]["chunk_size"]
         self.api_source = task_cfg["api_source"]
 
+
         self.audio_path = None
         self.SRT_Script = None
         self.result = None
         self.s_t = None
         self.t_e = None
         self.t_s = time()
+        self.local_knowledge = None
+        self.web_search = None
+        self.vision_knowledge = None
 
         # logging setting
         self.task_logger = logging.getLogger(f"task_{task_id}")
@@ -106,18 +112,18 @@ class Task:
             self.task_logger.info("Using OpenAI API")
             if "OPENAI_API_KEY" in task_cfg:
                 self.task_logger.info("Using OPENAI_API_KEY from gradio interface.")
-                self.api_key = task_cfg["OPENAI_API_KEY"]
+                self.oai_api_key = task_cfg["OPENAI_API_KEY"]
             else:
                 self.task_logger.info("Using OPENAI_API_KEY from environment variable.")
-                self.api_key = getenv("OPENAI_API_KEY")
+                self.oai_api_key = getenv("OPENAI_API_KEY")
         elif self.api_source == "azure":
             self.task_logger.info("Using Azure OpenAI API")
             if "AZURE_OPENAI_API_KEY" in task_cfg:
                 self.task_logger.info("Using AZURE_OPENAI_API_KEY from gradio interface.")
-                self.api_key = task_cfg["AZURE_OPENAI_API_KEY"]
+                self.oai_api_key = task_cfg["AZURE_OPENAI_API_KEY"]
             else:
                 self.task_logger.info("Using AZURE_OPENAI_API_KEY from environment variable.")
-                self.api_key = getenv("AZURE_OPENAI_API_KEY")
+                self.oai_api_key = getenv("AZURE_OPENAI_API_KEY")
         self.task_logger.info(
             f"{self.source_lang} -> {self.target_lang} task in {self.domain}"
         )
@@ -136,9 +142,26 @@ class Task:
 
         # init openai client
         if self.api_source == "openai":
-            self.client = OpenAI(api_key=self.api_key)
+            self.client = OpenAI(api_key=self.oai_api_key)
         elif self.api_source == "azure":
-            self.client = AzureOpenAI(api_key=self.api_key, azure_endpoint=getenv("AZURE_OPENAI_ENDPOINT"),api_version="2024-05-01-preview")
+            self.client = AzureOpenAI(api_key=self.oai_api_key, azure_endpoint=getenv("AZURE_OPENAI_ENDPOINT"),api_version="2024-05-01-preview")
+        
+        # init memory module
+        if self.memory_setting["enable_local_knowledge"] and self.domain != "General":
+            self.local_knowledge = BasicRAG(self.task_logger, self.domain)
+            # persist_dir = f"{self.task_local_dir}/storage"
+            data_dir = f"{self.memory_setting['local_knowledge_path']}/{self.domain}"
+            self.local_knowledge.load_knowledge_base(data_dir=data_dir)
+        
+        if self.memory_setting["enable_web_search"]:
+            #TODO: init web search
+            self.web_search = TavilySearchRAG(self.task_logger, self.domain)
+            # self.web_search.load_knowledge_base()
+        
+        if self.memory_setting["enable_vision_knowledge"]:
+            self.vision_knowledge = BasicRAG(self.task_logger, "vision")
+            self.vision_knowledge.load_knowledge_base(data_dir=None)
+
         # initialize translator
         self.translator = Translator(
             self.translation_model,
@@ -147,6 +170,9 @@ class Task:
             self.domain,
             self.task_id,
             self.client,
+            self.local_knowledge,
+            self.web_search,
+            self.vision_knowledge,
             self.chunk_size,
         )
 
@@ -225,8 +251,9 @@ class Task:
             for idx, segment_path in enumerate(os.listdir(f"{self.task_local_dir}/.cache/video")):
                 segment_path = f"{self.task_local_dir}/.cache/video/{segment_path}"
                 visual_cues = self.vision_agent.analyze_video(segment_path)
-                
+                self.vision_knowledge.add_to_index(visual_cues, chunk_size=100, chunk_overlap=5)
                 self.SRT_Script.segments[idx].visual_cues = visual_cues
+            print(self.vision_knowledge.retrieve_relevant_nodes("Protoss"))
 
     # Module 1 ASR: audio --> SRT_script
     def get_srt_class(self, pre_load_asr_model=None):
