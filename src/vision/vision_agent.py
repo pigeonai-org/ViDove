@@ -496,4 +496,4 @@ class HfVisionAgent:
         cap.release()
         return self.summarize_cue()
 
-HfVisionAgent("llava-hf/llava-interleave-qwen-0.5b-hf", "OPENAI_API_KEY", 30, device="cuda:0").analyze_video("test5.mp4")
+#HfVisionAgent("llava-hf/llava-interleave-qwen-0.5b-hf", "OPENAI_API_KEY", 30, device="cuda:0").analyze_video("test5.mp4")
