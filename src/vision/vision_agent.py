@@ -6,7 +6,6 @@ import base64
 from datetime import timedelta
 import cv2
 import ffmpeg
-import torch
 from PIL import Image
 import openai
 from openai import OpenAI
@@ -16,16 +15,6 @@ from transformers import (
     BlipForConditionalGeneration,
     pipeline
 )
-from transformers import AutoConfig, AutoModelForCausalLM
-from llava.model.language_model.llava_llama import LlavaLlamaForCausalLM
-
-class LlavaConfig(AutoConfig):
-    model_type = "llava"
-
-AutoConfig.register("llava", LlavaConfig)
-# model = LlavaLlamaForCausalLM.from_pretrained("llava-hf/llava-interleave-qwen-0.5b-hf")
-model = None  # Placeholder until the correct model is resolved
-
 
 """
     Interface for vision agent.
