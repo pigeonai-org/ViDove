@@ -148,14 +148,14 @@ class HuggingfaceWhisperASR(ASR):
                                     return_dict_in_generate=True,
                                     return_timestamps=True,
                                     prompt_ids=prompt_ids)
-        print(len(output['segments']))
-        print(len(output['segments'][0]))
+        # print(len(output['segments']))
+        # print(len(output['segments'][0]))
 
-        print(output['segments'].keys())
-        # transcript_whisper = self.processor.decode(output[0], skip_special_tokens=False)
+        # print(output['segments'].keys())
+        # # transcript_whisper = self.processor.decode(output[0], skip_special_tokens=False)
 
-        # print(transcript_whisper)
-        exit()
+        # # print(transcript_whisper)
+        # exit()
         
         # Convert format
         transcript = []
