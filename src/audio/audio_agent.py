@@ -1,4 +1,4 @@
-from transformers import AutoModel, AutoTokenizer
+from transformers import AutoModel, AutoTokenizer, AutoProcessor
 import torch
 from abc import ABC, abstractmethod
 import base64
@@ -10,6 +10,7 @@ from audio_prompt import AUDIO_TRANSCRIBE_PROMPT, AUDIO_ANALYZE_PROMPT, AUDIO_TR
 import json
 from ASR import ASR
 from VAD import VAD
+import librosa
 
 
 class AudioAgent(ABC):
@@ -50,12 +51,62 @@ class ClassicAudioAgent(AudioAgent):
 
 # TODO: @George please implement this
 class QwenAudioAgent(AudioAgent):
-    def __init__(self, model_name="qwen/qwen2-audio-instruct"):
+    def __init__(self, model_name="Qwen/Qwen2-Audio-7B-Instruct"):
         super().__init__(model_name)
 
     def load_model(self):
-        ...
-        
+        from transformers import Qwen2AudioForConditionalGeneration
+
+        self.processor = AutoProcessor.from_pretrained(self.model_name)
+        self.model = Qwen2AudioForConditionalGeneration.from_pretrained(self.model_name, device_map="auto")
+
+    def transcribe(self, audio_path, visual_cues=None):
+        audios = [librosa.load(audio_path, sr=self.processor.feature_extractor.sampling_rate)[0]]
+
+        conversation = [{"role": "user", "content": [
+            {"type": "audio", "audio_url": audio_path},
+            {"type": "text", "text": AUDIO_TRANSCRIBE_PROMPT_WITH_VISUAL_CUES.format(visual_cues=visual_cues) if visual_cues else AUDIO_TRANSCRIBE_PROMPT}
+        ]}]
+        text = self.processor.apply_chat_template(conversation, add_generation_prompt=True, tokenize=False)
+
+        inputs = self.processor(text=text, audios=audios, return_tensors="pt", padding=True)
+        # Move all tensors to CUDA while preserving the BatchEncoding structure
+        for key, value in inputs.items():
+            if isinstance(value, torch.Tensor):
+                inputs[key] = value.to("cuda")
+
+        generate_ids = self.model.generate(**inputs, max_length=5000) # TODO: The value of max_length may need to be adjusted.
+        generate_ids = generate_ids[:, inputs.input_ids.size(1):]
+
+        response = self.processor.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
+
+        return response
+
+
+    def analyze_audio(self, audio_path):
+
+        audios = [librosa.load(audio_path, sr=self.processor.feature_extractor.sampling_rate)[0]]
+
+        conversation = [{"role": "user", "content": [
+            {"type": "audio", "audio_url": audio_path},
+            {"type": "text", "text": AUDIO_ANALYZE_PROMPT}
+        ]}]
+        text = self.processor.apply_chat_template(conversation, add_generation_prompt=True, tokenize=False)
+
+        inputs = self.processor(text=text, audios=audios, return_tensors="pt", padding=True)
+        # Move all tensors to CUDA while preserving the BatchEncoding structure
+        for key, value in inputs.items():
+            if isinstance(value, torch.Tensor):
+                inputs[key] = value.to("cuda")
+
+        generate_ids = self.model.generate(**inputs, max_length=5000) # TODO: The value of max_length may need to be adjusted.
+        generate_ids = generate_ids[:, inputs.input_ids.size(1):]
+
+        response = self.processor.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
+
+        return response
+
+
 
 class GeminiAudioAgent(AudioAgent):
     def __init__(self, model_name="gemini-1.5-pro"):
@@ -141,8 +192,8 @@ class GeminiAudioAgent(AudioAgent):
 
 
 if __name__ == "__main__":
-    agent = GeminiAudioAgent(model_name="gemini-1.5-pro")
+    agent = QwenAudioAgent()
     visual_cues = "a man named lowko is talking about the game of starcraft"
-    print(agent.transcribe("/home/mlp/eason/ViDove/local_dump/test.wav"))
-    print(agent.transcribe("/home/mlp/eason/ViDove/local_dump/test.wav", visual_cues))
-    print(agent.analyze_audio("/home/mlp/eason/ViDove/local_dump/test.wav"))
+    print(agent.transcribe("C:\\Work\\GitRepos\\task.mp3"))
+    print(agent.transcribe("C:\\Work\\GitRepos\\task.mp3", visual_cues))
+    print(agent.analyze_audio("C:\\Work\\GitRepos\\task.mp3"))
