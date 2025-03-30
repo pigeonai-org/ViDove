@@ -49,7 +49,6 @@ class ClassicAudioAgent(AudioAgent):
         return self.ASR_model.get_transcript(audio_path)
 
 
-# TODO: @George please implement this
 class QwenAudioAgent(AudioAgent):
     def __init__(self, model_name="Qwen/Qwen2-Audio-7B-Instruct"):
         super().__init__(model_name)
