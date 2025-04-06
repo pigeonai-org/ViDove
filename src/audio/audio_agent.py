@@ -6,10 +6,10 @@ import os
 from google import genai
 from google.genai import types
 from google.genai.types import Part, HttpOptions
-from audio_prompt import AUDIO_TRANSCRIBE_PROMPT, AUDIO_ANALYZE_PROMPT, AUDIO_TRANSCRIBE_PROMPT_WITH_VISUAL_CUES
+from src.audio.audio_prompt import AUDIO_TRANSCRIBE_PROMPT, AUDIO_ANALYZE_PROMPT, AUDIO_TRANSCRIBE_PROMPT_WITH_VISUAL_CUES
 import json
-from ASR import ASR
-from VAD import VAD
+from src.audio.ASR import ASR
+from src.audio.VAD import VAD
 import librosa
 
 
@@ -19,12 +19,15 @@ class AudioAgent(ABC):
         self.audio_config = audio_config
         self.device = None
         self.load_model()
+        self.VAD_model = VAD(model_name_or_path=self.audio_config["VAD_model"], src_lang=self.audio_config["src_lang"], tgt_lang=self.audio_config["tgt_lang"])
     
-    def segment_audio(self, audio_path):
-        vad = VAD(model_name=self.audio_config["vad_model_name"], src_lang=self.audio_config["src_lang"], tgt_lang=self.audio_config["tgt_lang"])
-        self.segments = vad.get_speaker_segments(audio_path)
-        VAD.clip_audio_and_save(self.segments, audio_path, self.audio_config["cache_dir"])
+    def segment_audio(self, audio_path, cache_dir):
+        self.segments = self.VAD_model.get_speaker_segments(audio_path)
+        VAD.clip_audio_and_save(self.segments, audio_path, cache_dir)
         return self.segments
+
+    def clip_video_and_save(self, video_path, cache_dir):
+        VAD.clip_video_and_save(self.segments, video_path, cache_dir)
 
     @abstractmethod
     def load_model(self):
@@ -108,8 +111,8 @@ class QwenAudioAgent(AudioAgent):
 
 
 class GeminiAudioAgent(AudioAgent):
-    def __init__(self, model_name="gemini-1.5-pro"):
-        super().__init__(model_name)
+    def __init__(self, model_name="gemini-1.5-pro",audio_config: dict=None):
+        super().__init__(model_name,audio_config)
 
     def load_model(self):
         api_key = os.environ.get("GEMINI_API_KEY")

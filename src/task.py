@@ -20,8 +20,9 @@ from src.memory.basic_rag import BasicRAG
 from src.memory.direct_search_RAG import TavilySearchRAG
 from src.translators.translator import Translator
 from src.vision.gpt_vision_agent import GptVisionAgent, CLIPVisionAgent, assistant_vision_api
-from src.VAD.VAD import VAD
-from src.ASR.ASR import ASR
+from src.audio.audio_agent import GeminiAudioAgent, ClassicAudioAgent
+#from src.VAD.VAD import VAD
+#from src.ASR.ASR import ASR
 
 class TaskStatus(str, Enum):
     """
@@ -68,8 +69,8 @@ class Task:
         self.task_id = task_id
 
         self.task_local_dir = task_local_dir
-        self.ASR_setting = task_cfg["ASR"]
         self.vision_setting = task_cfg["vision"]
+        self.audio_setting = task_cfg["audio"]
         self.memory_setting = task_cfg["MEMEORY"]
         self.translation_setting = task_cfg["translation"]
         self.translation_model = self.translation_setting["model"]
@@ -129,7 +130,6 @@ class Task:
         )
         self.task_logger.info(f"Translation Model: {self.translation_model}")
         self.task_logger.info(f"Chunk Size: {self.chunk_size}")
-        self.task_logger.info(f"ASR Model: {self.ASR_setting['ASR_model']}")
         self.task_logger.info(f"subtitle_type: {self.output_type['subtitle']}")
         self.task_logger.info(f"video_ouput: {self.output_type['video']}")
         self.task_logger.info(f"bilingual_ouput: {self.output_type['bilingual']}")
@@ -195,9 +195,13 @@ class Task:
                 )
             else:
                 raise ValueError(f"Unsupported vision model: {self.vision_setting['vision_model']}")
-            
-        # initialize ASR
-        self.asr = ASR.create(self.ASR_setting["ASR_model"], logger=self.task_logger)
+        
+        self.audio_agent = None   
+        if self.audio_setting["enable_audio"]:
+            if self.audio_setting["audio_agent"] == "GeminiAudioAgent":
+                self.audio_agent = GeminiAudioAgent(audio_config=self.audio_setting)
+            else:
+                raise ValueError(f"Unsupported vision model: {self.vision_setting['vision_model']}")
 
 
     @staticmethod
@@ -233,11 +237,9 @@ class Task:
         """
         Handles the VAD module to convert audio to speaker segments.
         """
-        vad = VAD("pyannote/speaker-diarization-3.1", self.source_lang, self.target_lang)
-        self.SRT_Script = vad.get_speaker_segments(self.audio_path)
-        vad.clip_audio_and_save(self.SRT_Script, self.audio_path, f"{self.task_local_dir}/.cache/audio")
+        self.SRT_Script = self.audio_agent.segment_audio(self.audio_path, f"{self.task_local_dir}/.cache/audio")
         if self.video_path is not None and self.vision_agent is not None:
-            vad.clip_video_and_save(self.SRT_Script, self.video_path, f"{self.task_local_dir}/.cache/video")
+            self.audio_agent.clip_video_and_save(self.video_path, f"{self.task_local_dir}/.cache/video")
 
     def get_visual_cues(self):
         """
