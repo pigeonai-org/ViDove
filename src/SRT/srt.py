@@ -86,8 +86,14 @@ class SrtSegment(object):
         time_str = str(datetime.timedelta(seconds=int(seconds)))
         return f"{time_str},{milliseconds:03d}"
     
-    def timestr_to_seconds(self, time_str):
-        return datetime.datetime.strptime(time_str, "%H:%M:%S,%f").total_seconds()
+    def timestr_to_seconds(self,time_str):
+        try:
+            dt = datetime.datetime.strptime(time_str, "%H:%M:%S,%f")
+        except ValueError:
+            dt = datetime.datetime.strptime(time_str, "%H:%M:%S.%f")
+        
+        seconds = dt.hour * 3600 + dt.minute * 60 + dt.second + dt.microsecond / 1e6
+        return seconds
     
     def merge_seg(self, seg):
         """

@@ -255,65 +255,23 @@ class Task:
                 visual_cues = self.vision_agent.analyze_video(segment_path)
                 self.vision_knowledge.add_to_index(visual_cues, chunk_size=100, chunk_overlap=5)
                 self.SRT_Script.segments[idx].visual_cues = visual_cues
+                print(f"SRT_Script.segments[{idx}].visual_cues: {self.SRT_Script.segments[idx].visual_cues}")
             print(self.vision_knowledge.retrieve_relevant_nodes("Protoss"))
 
     # Module 1 ASR: audio --> SRT_script
-    def get_srt_class(self, pre_load_asr_model=None):
-        """
-        Handles the ASR module to convert audio to SRT script format.
-        """
-        # Instead of using the script_en variable directly, we'll use script_input
-        self.status = TaskStatus.INITIALIZING_ASR
-
-        if self.SRT_Script.segments[0].src_text != "":
-            self.task_logger.info("SRT input mode, skip ASR Module")
-            return
-        # get configs
-        # shoud be modified after we incorporate more ASR methods
-        method = self.ASR_setting["ASR_model"]
-        # whisper_model = self.ASR_setting["whisper_config"]["whisper_model"]
-        src_srt_path = self.task_local_dir.joinpath(
-            f"task_{self.task_id}_{self.source_lang}.srt"
-        )
-        
-        self.SRT_Script.asr = self.asr
-
-        self.SRT_Script.get_transcription(output_dir=src_srt_path)
-        # get transcript
-        transcript = get_transcript(method, 
-                                    src_srt_path, 
-                                    self.source_lang,
-                                    self.video_path,
-                                    self.audio_path, 
-                                    self.client, 
-                                    self.task_logger,
-                                    pre_load_asr_model)
-
-        if transcript != None:  # if the audio is transfered
-            if isinstance(transcript, str):
-                self.SRT_Script = SrtScript.parse_from_srt_file(
-                    self.source_lang,
-                    self.target_lang,
-                    self.task_logger,
-                    self.client,
-                    domain=self.domain,
-                    srt_str=transcript.rstrip(),
-                )
+    def transcribe(self):
+        srt = self.SRT_Script
+        for segment in srt.segments:
+            if segment.audio_path is not None:
+                self.task_logger.info(f"Transcribing audio file: {segment.audio_path}")
+                temp_segment = self.audio_agent.transcribe(segment.audio_path, segment.visual_cues)
+                for seg in temp_segment:
+                    seg['start'] = segment.timestr_to_seconds(seg['start']) + segment.start_time
+                    seg['end'] = segment.timestr_to_seconds(seg['end']) + segment.start_time
+                    print(seg)
+                self.task_logger.info(f"Transcribed text: {segment.src_text}")
             else:
-                self.SRT_Script = SrtScript(
-                    self.source_lang,
-                    self.target_lang,
-                    transcript,
-                    self.task_logger,
-                    self.client,
-                    self.domain,
-                )
-            # save the srt script to local
-            self.SRT_Script.write_srt_file_src(src_srt_path)
-        else:
-            raise RuntimeError(
-                f"Failed to get transcript from audio file: {self.audio_path}"
-            )
+                self.task_logger.info("No audio file found for this segment.")
 
     # Module 2: SRT preprocess: perform preprocess steps
     def preprocess(self):
@@ -436,7 +394,7 @@ class Task:
         """
         self.get_speaker_segments()
         self.get_visual_cues()
-        self.get_srt_class(pre_load_asr_model)
+        self.transcribe()
         self.preprocess()
         self.translation()
         self.postprocess()

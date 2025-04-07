@@ -42,8 +42,8 @@ class BasicRAG(AbsApiRAG):
             f"Loading the model, set {Settings.embed_model} as embedding model"
         )
         if persist_dir is None and data_dir is None:
-            self.logger.info("Creating one empty index without any data")
-            index = EmptyIndex()
+            self.logger.info("Creating a new VectorStoreIndex with no initial data")
+            index = VectorStoreIndex.from_documents([])
         else:    
             if not os.path.exists(persist_dir):
                 self.logger.info("Loading the RAG from the data directory")

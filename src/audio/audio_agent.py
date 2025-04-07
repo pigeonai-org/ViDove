@@ -165,7 +165,6 @@ class GeminiAudioAgent(AudioAgent):
             model=self.model_name,
             contents=contents,
         )
-
         return self.parse_response(response.text)
     
     def analyze_audio(self, audio_path):
