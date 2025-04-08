@@ -261,17 +261,18 @@ class Task:
     # Module 1 ASR: audio --> SRT_script
     def transcribe(self):
         srt = self.SRT_Script
-        for segment in srt.segments:
+        for idx,segment in enumerate(srt.segments):
             if segment.audio_path is not None:
                 self.task_logger.info(f"Transcribing audio file: {segment.audio_path}")
                 temp_segment = self.audio_agent.transcribe(segment.audio_path, segment.visual_cues)
                 for seg in temp_segment:
                     seg['start'] = segment.timestr_to_seconds(seg['start']) + segment.start_time
                     seg['end'] = segment.timestr_to_seconds(seg['end']) + segment.start_time
-                    print(seg)
-                self.task_logger.info(f"Transcribed text: {segment.src_text}")
+                srt.add_temp_segment(idx, srt.convert_transcribed_segments(temp_segment))
+                self.task_logger.info(f"Transcribed Length: {len(temp_segment)}")
             else:
                 self.task_logger.info("No audio file found for this segment.")
+        srt.replace_seg()
 
     # Module 2: SRT preprocess: perform preprocess steps
     def preprocess(self):
@@ -393,9 +394,9 @@ class Task:
         Executes the entire pipeline process for the task.
         """
         self.get_speaker_segments()
-        self.get_visual_cues()
+        #self.get_visual_cues()
         self.transcribe()
-        self.preprocess()
+        #self.preprocess()
         self.translation()
         self.postprocess()
         self.result = self.output_render()

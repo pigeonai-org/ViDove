@@ -133,13 +133,13 @@ class SrtSegment(object):
         # self.translation = self.translation.translate(translator)
 
     def __str__(self) -> str:
-        return f'{self.duration}\n{self.source_text}\n\n'
+        return f'{self.duration}\n{self.src_text}\n\n'
 
     def get_trans_str(self) -> str:
         return f'{self.duration}\n{self.translation}\n\n'
 
     def get_bilingual_str(self) -> str:
-        return f'{self.duration}\n{self.source_text}\n{self.translation}\n\n'
+        return f'{self.duration}\n{self.src_text}\n{self.translation}\n\n'
 
 
 class SrtScript(object):
@@ -153,7 +153,8 @@ class SrtScript(object):
         else:
             self.segments = []
         self.client = client
-
+        self.temp_segments = []
+        self.temp_segments_idx = []
         if self.domain != "General":
             if os.path.exists(f"{dict_path}/{self.domain}") and\
                               os.path.exists(f"{dict_path}/{self.domain}/{src_lang}.csv") and os.path.exists(f"{dict_path}/{self.domain}/{tgt_lang}.csv" ):
@@ -165,7 +166,6 @@ class SrtScript(object):
                 self.domain = "General"
         
         self.asr = None
-
 
     @classmethod
     def parse_from_srt_file(cls, src_lang, tgt_lang, task_logger, client, domain, path = None, srt_str = None):
@@ -205,6 +205,53 @@ class SrtScript(object):
             seg_result += self.segments[idx_list[idx]]
 
         return seg_result
+    
+    def convert_transcribed_segments(self, segments):
+        """
+        Convert transcribed segments to SrtSegment
+        :param segments: A list of segments dict to be converted
+        :return: A list of SrtSegment
+        """
+        ret = []
+        for i, seg in enumerate(segments):
+            ret.append(SrtSegment(self.src_lang, self.tgt_lang, src_text=seg['text'], start_time=seg['start'], end_time=seg['end']))
+        return ret
+
+    def add_temp_segment(self, idx, seg):
+        """
+        Add temp segment to temp_segments list
+        :param idx: index of the segment to be replaced
+        :param seg: A list of segments to be added for replacement
+        :return: None
+        """
+        if idx not in self.temp_segments_idx:
+            self.temp_segments_idx.append(idx)
+            self.temp_segments.append(seg)
+        else:
+            [self.temp_segments[self.temp_segments_idx.index(idx)].append(sg) for sg in seg]
+        #self.task_logger.info("Adding temp segment %s to %s", seg, idx)
+        #self.task_logger.info("temp_segments_idx: %s", self.temp_segments_idx)
+        #self.task_logger.info("temp_segments: %s", self.temp_segments)
+
+    def replace_seg(self):
+        """
+        Replace segments at temp_segments_idx with temp_segments
+        :return: None
+        """
+        self.task_logger.info("Total segments: %d", len(self.segments))
+        self.task_logger.info("Replacing segments...")
+        for i, idx in enumerate(self.temp_segments_idx):
+            if len(self.temp_segments[i]) > 1:
+                self.task_logger.info("replacing segments: %s", idx)
+            self.segments[idx] = self.temp_segments[i][0]
+            for j in range(1, len(self.temp_segments[i])):
+                self.segments.insert(idx + j, self.temp_segments[i][j])
+                #self.task_logger.info(f"Replacing segments at index {idx + j} with {self.temp_segments[i][j].src_text}")
+        # remove temp_segments and temp_segments_idx
+        self.temp_segments = []
+        self.temp_segments_idx = []
+        self.task_logger.info("Replacing segments finished.")
+        self.task_logger.info("Total segments after replacing: %d", len(self.segments))
 
     def form_whole_sentence(self):
         """
@@ -218,7 +265,7 @@ class SrtScript(object):
         ending_puncs = punctuation_dict[self.src_lang]["sentence_end"]
         # Get each entire sentence of distinct segments, fill indices to merge_list
         for i, seg in enumerate(self.segments):
-            if seg.source_text[-1] in ending_puncs and len(seg.source_text) > 10 and 'vs.' not in seg.source_text.lower():
+            if seg.src_text[-1] in ending_puncs and len(seg.src_text) > 10 and 'vs.' not in seg.src_text.lower():
                 sentence.append(i)
                 merge_list.append(sentence)
                 sentence = []
@@ -249,7 +296,7 @@ class SrtScript(object):
 
         src_text = ""
         for i, seg in enumerate(self.segments[start_seg_id - 1:end_seg_id]):
-            src_text += seg.source_text
+            src_text += seg.src_text
             src_text += '\n\n'
 
         def inner_func(target, input_str):
@@ -336,24 +383,24 @@ class SrtScript(object):
         src_comma_str = punctuation_dict[self.src_lang]["comma"]
         tgt_comma_str = punctuation_dict[self.tgt_lang]["comma"]
 
-        if len(seg.source_text) > 2:
-            if seg.source_text[:2] == src_comma_str:
-                seg.source_text = seg.source_text[2:]
+        if len(seg.src_text) > 2:
+            if seg.src_text[:2] == src_comma_str:
+                seg.src_text = seg.src_text[2:]
         if seg.translation[0] == tgt_comma_str:
             seg.translation = seg.translation[1:]
 
-        source_text = seg.source_text
+        src_text = seg.src_text
         translation = seg.translation
 
         # split the text based on commas
-        src_commas = [m.start() for m in re.finditer(src_comma_str, source_text)]
+        src_commas = [m.start() for m in re.finditer(src_comma_str, src_text)]
         trans_commas = [m.start() for m in re.finditer(tgt_comma_str, translation)]
         if len(src_commas) != 0:
             src_split_idx = src_commas[len(src_commas) // 2] if len(src_commas) % 2 == 1 else src_commas[
                 len(src_commas) // 2 - 1]
         else:
             # split the text based on spaces
-            src_space = [m.start() for m in re.finditer(' ', source_text)]
+            src_space = [m.start() for m in re.finditer(' ', src_text)]
             if len(src_space) > 0:
                 src_split_idx = src_space[len(src_space) // 2] if len(src_space) % 2 == 1 else src_space[
                     len(src_space) // 2 - 1]
@@ -375,8 +422,8 @@ class SrtScript(object):
         # split the time duration based on text length
         time_split_ratio = trans_split_idx / (len(seg.translation) - 1)
 
-        src_seg1 = source_text[:src_split_idx]
-        src_seg2 = source_text[src_split_idx:]
+        src_seg1 = src_text[:src_split_idx]
+        src_seg2 = src_text[src_split_idx:]
         trans_seg1 = translation[:trans_split_idx]
         trans_seg2 = translation[trans_split_idx:]
 
@@ -458,13 +505,13 @@ class SrtScript(object):
 
             for word in keywords:
                 for i, seg in enumerate(self.segments):
-                    if word in seg.source_text.lower():
-                        seg.source_text = re.sub(fr"({word}es|{word}s?)\b", "{}".format(self.dict.get(word)),
-                                                seg.source_text, flags=re.IGNORECASE)
+                    if word in seg.src_text.lower():
+                        seg.src_text = re.sub(fr"({word}es|{word}s?)\b", "{}".format(self.dict.get(word)),
+                                                seg.src_text, flags=re.IGNORECASE)
                         self.task_logger.info(
                             "replace term: " + word + " --> " + self.dict.get(word) + " in time stamp {}".format(
                                 i + 1))
-                        self.task_logger.info("source text becomes: " + seg.source_text)
+                        self.task_logger.info("source text becomes: " + seg.src_text)
 
 
     def fetchfunc(self, word, threshold):
@@ -504,14 +551,14 @@ class SrtScript(object):
         dict = enchant.Dict('en_US')
 
         for seg in tqdm(self.segments):
-            ready_words = self.extract_words(seg.source_text, 2)
+            ready_words = self.extract_words(seg.src_text, 2)
             for i in range(len(ready_words)):
                 word_list = ready_words[i]
                 word, real_word, pos = self.get_real_word(word_list)
                 if not dict.check(real_word) and (real_word not in self.dict.keys()):
                     distance, correct_term = self.fetchfunc(real_word, 0.3)
                     if distance != 0:
-                        seg.source_text = re.sub(word[:pos], correct_term, seg.source_text, flags=re.IGNORECASE)
+                        seg.src_text = re.sub(word[:pos], correct_term, seg.src_text, flags=re.IGNORECASE)
                         self.task_logger.info(
                             "replace: " + word[:pos] + " to " + correct_term + "\t distance = " + str(distance))
 
@@ -537,7 +584,7 @@ class SrtScript(object):
         # return a string with pure source text
         result = ""
         for i, seg in enumerate(self.segments):
-            result += f'{seg.source_text}\n\n\n'  # f'SENTENCE {i+1}: {seg.source_text}\n\n\n'
+            result += f'{seg.src_text}\n\n\n'  # f'SENTENCE {i+1}: {seg.src_text}\n\n\n'
 
         return result
 
