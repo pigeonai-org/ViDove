@@ -394,7 +394,7 @@ class Task:
         Executes the entire pipeline process for the task.
         """
         self.get_speaker_segments()
-        #self.get_visual_cues()
+        self.get_visual_cues()
         self.transcribe()
         #self.preprocess()
         self.translation()
