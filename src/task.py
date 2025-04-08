@@ -351,6 +351,7 @@ class Task:
         results_dir = f"{self.task_local_dir}/results"
 
         subtitle_path = f"{results_dir}/{self.task_id}_{self.target_lang}.srt"
+        print(subtitle_path)
         self.SRT_Script.write_srt_file_translate(subtitle_path)
         if is_bilingual:
             subtitle_path = f"{results_dir}/{self.task_id}_{self.source_lang}_{self.target_lang}.srt"
@@ -394,11 +395,11 @@ class Task:
         Executes the entire pipeline process for the task.
         """
         self.get_speaker_segments()
-        self.get_visual_cues()
+        #self.get_visual_cues()
         self.transcribe()
         #self.preprocess()
         self.translation()
-        self.postprocess()
+        #self.postprocess()
         self.result = self.output_render()
 
         # print(self.result)

@@ -10,47 +10,47 @@ import logging
 
 # punctuation dictionary for supported languages
 punctuation_dict = {
-    "EN": {
+    "en": {
         "punc_str": ". , ? ! : ; - ( ) [ ] { }",
         "comma": ", ",
         "sentence_end": [".", "!", "?", ";"]
     },
-    "ES": {
+    "es": {
         "punc_str": ". , ? ! : ; - ( ) [ ] { } ¡ ¿",
         "comma": ", ",
         "sentence_end": [".", "!", "?", ";", "¡", "¿"]
     },
-    "FR": {
+    "fr": {
         "punc_str": ".,?!:;«»—",
         "comma": ", ",
         "sentence_end": [".", "!", "?", ";"]
     },
-    "DE": {
+    "de": {
         "punc_str": ".,?!:;„“–",
         "comma": ", ",
         "sentence_end": [".", "!", "?", ";"]
     },
-    "RU": {
+    "ru": {
         "punc_str": ".,?!:;-«»—",
         "comma": ", ",
         "sentence_end": [".", "!", "?", ";"]
     },
-    "ZH": {
+    "zh": {
         "punc_str": "。，？！：；（）",
         "comma": "，",
         "sentence_end": ["。", "！", "？"]
     },
-    "JA": {
+    "ja": {
         "punc_str": "。、？！：；（）",
         "comma": "、",
         "sentence_end": ["。", "！", "？"]
     },
-    "AR": {
+    "ar": {
         "punc_str": ".,?!:;-()[]،؛ ؟ «»",
         "comma": "، ",
         "sentence_end": [".", "!", "?", ";", "؟"]
     },
-    "KR": {
+    "kr": {
         "punc_str": ".,?!:;()[]{}",
         "comma": ", ",
         "sentence_end": [".", "!", "?", ";"]
@@ -73,12 +73,13 @@ class SrtSegment(object):
         self.duration = self.end_time - self.start_time
         self.audio_path = None
         self.video_path = None
+        self.start_time_str = self.format_time(self.start_time)
+        self.end_time_str = self.format_time(self.end_time)        
         if not timestamp_str:
-            self.timestamp_str = f"{self.start_time} --> {self.end_time}"
+            self.timestamp_str = f"{self.start_time_str} --> {self.end_time_str}"
         else:
             self.timestamp_str = timestamp_str
-        self.start_time_str = self.format_time(self.start_time)
-        self.end_time_str = self.format_time(self.end_time)
+
  
             
     def format_time(self, seconds):
@@ -133,13 +134,13 @@ class SrtSegment(object):
         # self.translation = self.translation.translate(translator)
 
     def __str__(self) -> str:
-        return f'{self.duration}\n{self.src_text}\n\n'
+        return f'{self.timestamp_str}\n{self.src_text}\n\n'
 
     def get_trans_str(self) -> str:
-        return f'{self.duration}\n{self.translation}\n\n'
+        return f'{self.timestamp_str}\n{self.translation}\n\n'
 
     def get_bilingual_str(self) -> str:
-        return f'{self.duration}\n{self.src_text}\n{self.translation}\n\n'
+        return f'{self.timestamp_str}\n{self.src_text}\n{self.translation}\n\n'
 
 
 class SrtScript(object):
@@ -291,6 +292,14 @@ class SrtScript(object):
         self.task_logger.info("Removed punctuation in translation.")
 
     def set_translation(self, translate: str, id_range: tuple, model, video_name, video_link=None):
+        for i, seg in enumerate(self.segments[id_range[0] - 1:id_range[1]]):
+            seg.translation = translate.split('\n\n')[i]
+            #self.task_logger.info(f"Setting translation for segment {seg.idx} to {translate}")
+
+    def _set_translation(self, translate: str, id_range: tuple, model, video_name, video_link=None):
+        """
+        Obsolete function, used to set translation for segments
+        """
         start_seg_id = id_range[0]
         end_seg_id = id_range[1]
 
@@ -298,6 +307,7 @@ class SrtScript(object):
         for i, seg in enumerate(self.segments[start_seg_id - 1:end_seg_id]):
             src_text += seg.src_text
             src_text += '\n\n'
+            #tgt_text = seg.translation
 
         def inner_func(target, input_str):
             # handling merge sentences issue.
@@ -319,7 +329,7 @@ class SrtScript(object):
         if len(lines) < (end_seg_id - start_seg_id + 1):
             count = 0
             solved = True
-            while count < 5 and len(lines) != (end_seg_id - start_seg_id + 1):
+            while False:  #count < 5 and len(lines) != (end_seg_id - start_seg_id + 1):
                 count += 1
                 print("Solving Unmatched Lines|iteration {}".format(count))
                 self.task_logger.error("Solving Unmatched Lines|iteration {}".format(count))
@@ -337,10 +347,10 @@ class SrtScript(object):
                         flag = True
                 lines = translate.split('\n')
 
-            if len(lines) < (end_seg_id - start_seg_id + 1):
-                solved = False
-                print("Failed Solving unmatched lines, Manually parse needed")
-                self.task_logger.error("Failed Solving unmatched lines, Manually parse needed")
+            #if len(lines) < (end_seg_id - start_seg_id + 1):
+            #    solved = False
+            #    print("Failed Solving unmatched lines, Manually parse needed")
+            #    self.task_logger.error("Failed Solving unmatched lines, Manually parse needed")
 
             # FIXME: put the error log in our log file
             if not os.path.exists("./logs"):
@@ -363,19 +373,19 @@ class SrtScript(object):
                         len(self.segments)) + ',' + video_name + "\n")
             # print(lines)
 
-        for i, seg in enumerate(self.segments[start_seg_id - 1:end_seg_id]):
+        #for i, seg in enumerate(self.segments[start_seg_id - 1:end_seg_id]):
             # naive way to due with merge translation problem
             # TODO: need a smarter solution
 
-            if i < len(lines):
-                if "Note:" in lines[i]:  # to avoid note
-                    lines.remove(lines[i])
-                    max_num -= 1
-                    if i == len(lines) - 1:
-                        break
-                if lines[i][0] in [' ', '\n']:
-                    lines[i] = lines[i][1:]
-                seg.translation = lines[i]
+        #    if i < len(lines):
+        #        if "Note:" in lines[i]:  # to avoid note
+        #            lines.remove(lines[i])
+        #            max_num -= 1
+        #            if i == len(lines) - 1:
+        #                break
+        #        if lines[i][0] in [' ', '\n']:
+        #            lines[i] = lines[i][1:]
+        #        seg.translation = lines[i]
 
     def split_seg(self, seg, text_threshold, time_threshold):
         # evenly split seg to 2 parts and add new seg into self.segments
@@ -428,8 +438,8 @@ class SrtScript(object):
         trans_seg2 = translation[trans_split_idx:]
 
         start_seg1 = seg.start
-        end_seg1 = start_seg2 = seg.start + (seg.end - seg.start) * time_split_ratio
-        end_seg2 = seg.end
+        end_seg1 = start_seg2 = seg.start + (seg.end_time - seg.start_time) * time_split_ratio
+        end_seg2 = seg.end_time
 
         seg1_dict = {}
         seg1_dict['text'] = src_seg1
@@ -463,7 +473,7 @@ class SrtScript(object):
         self.task_logger.info("performing check_len_and_split")
         segments = []
         for i, seg in enumerate(self.segments):
-            if len(seg.translation) > text_threshold and (seg.end - seg.start) > time_threshold:
+            if len(seg.translation) > text_threshold and (seg.end_time - seg.start_time) > time_threshold:
                 seg_list = self.split_seg(seg, text_threshold, time_threshold)
                 self.task_logger.info("splitting segment {} in to {} parts".format(i + 1, len(seg_list)))
                 segments += seg_list
@@ -481,7 +491,7 @@ class SrtScript(object):
         extra_len = 0
         segments = []
         for i, seg in enumerate(self.segments[start_seg_id - 1:end_seg_id]):
-            if len(seg.translation) > text_threshold and (seg.end - seg.start) > time_threshold:
+            if len(seg.translation) > text_threshold and (seg.end_time - seg.start_time) > time_threshold:
                 seg_list = self.split_seg(seg, text_threshold, time_threshold)
                 segments += seg_list
                 extra_len += len(seg_list) - 1
@@ -593,6 +603,7 @@ class SrtScript(object):
         for i, seg in enumerate(self.segments):
             result += f'{i + 1}\n'
             result += str(seg)
+            print(str(seg))
         return result
 
     def reform_trans_str(self):
@@ -600,6 +611,7 @@ class SrtScript(object):
         for i, seg in enumerate(self.segments):
             result += f'{i + 1}\n'
             result += seg.get_trans_str()
+            print(seg.get_trans_str())
         return result
 
     def form_bilingual_str(self):
