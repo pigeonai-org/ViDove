@@ -266,13 +266,17 @@ class Task:
                 self.task_logger.info(f"Transcribing audio file: {segment.audio_path}")
                 temp_segment = self.audio_agent.transcribe(segment.audio_path, segment.visual_cues)
                 for seg in temp_segment:
+                    print('==============================================================================')
+                    print(f"Transcribed segment: {seg['text'],seg['start'],seg['end']}")
                     seg['start'] = segment.timestr_to_seconds(seg['start']) + segment.start_time
                     seg['end'] = segment.timestr_to_seconds(seg['end']) + segment.start_time
+                    print('==============================================================================')
                 srt.add_temp_segment(idx, srt.convert_transcribed_segments(temp_segment))
                 self.task_logger.info(f"Transcribed Length: {len(temp_segment)}")
             else:
                 self.task_logger.info("No audio file found for this segment.")
         srt.replace_seg()
+        exit()
 
     # Module 2: SRT preprocess: perform preprocess steps
     def preprocess(self):
