@@ -20,8 +20,9 @@ from src.memory.basic_rag import BasicRAG
 from src.memory.direct_search_RAG import TavilySearchRAG
 from src.translators.translator import Translator
 from src.vision.gpt_vision_agent import GptVisionAgent, CLIPVisionAgent, assistant_vision_api
-from src.VAD.VAD import VAD
-from src.ASR.ASR import ASR
+from src.audio.audio_agent import GeminiAudioAgent, ClassicAudioAgent
+#from src.VAD.VAD import VAD
+#from src.ASR.ASR import ASR
 
 class TaskStatus(str, Enum):
     """
@@ -68,8 +69,8 @@ class Task:
         self.task_id = task_id
 
         self.task_local_dir = task_local_dir
-        self.ASR_setting = task_cfg["ASR"]
         self.vision_setting = task_cfg["vision"]
+        self.audio_setting = task_cfg["audio"]
         self.memory_setting = task_cfg["MEMEORY"]
         self.translation_setting = task_cfg["translation"]
         self.translation_model = self.translation_setting["model"]
@@ -129,7 +130,6 @@ class Task:
         )
         self.task_logger.info(f"Translation Model: {self.translation_model}")
         self.task_logger.info(f"Chunk Size: {self.chunk_size}")
-        self.task_logger.info(f"ASR Model: {self.ASR_setting['ASR_model']}")
         self.task_logger.info(f"subtitle_type: {self.output_type['subtitle']}")
         self.task_logger.info(f"video_ouput: {self.output_type['video']}")
         self.task_logger.info(f"bilingual_ouput: {self.output_type['bilingual']}")
@@ -195,9 +195,13 @@ class Task:
                 )
             else:
                 raise ValueError(f"Unsupported vision model: {self.vision_setting['vision_model']}")
-            
-        # initialize ASR
-        self.asr = ASR.create(self.ASR_setting["ASR_model"], logger=self.task_logger)
+        
+        self.audio_agent = None   
+        if self.audio_setting["enable_audio"]:
+            if self.audio_setting["audio_agent"] == "GeminiAudioAgent":
+                self.audio_agent = GeminiAudioAgent(audio_config=self.audio_setting)
+            else:
+                raise ValueError(f"Unsupported vision model: {self.vision_setting['vision_model']}")
 
 
     @staticmethod
@@ -233,11 +237,9 @@ class Task:
         """
         Handles the VAD module to convert audio to speaker segments.
         """
-        vad = VAD("pyannote/speaker-diarization-3.1", self.source_lang, self.target_lang)
-        self.SRT_Script = vad.get_speaker_segments(self.audio_path)
-        vad.clip_audio_and_save(self.SRT_Script, self.audio_path, f"{self.task_local_dir}/.cache/audio")
+        self.SRT_Script = self.audio_agent.segment_audio(self.audio_path, f"{self.task_local_dir}/.cache/audio")
         if self.video_path is not None and self.vision_agent is not None:
-            vad.clip_video_and_save(self.SRT_Script, self.video_path, f"{self.task_local_dir}/.cache/video")
+            self.audio_agent.clip_video_and_save(self.video_path, f"{self.task_local_dir}/.cache/video")
 
     def get_visual_cues(self):
         """
@@ -253,65 +255,28 @@ class Task:
                 visual_cues = self.vision_agent.analyze_video(segment_path)
                 self.vision_knowledge.add_to_index(visual_cues, chunk_size=100, chunk_overlap=5)
                 self.SRT_Script.segments[idx].visual_cues = visual_cues
+                print(f"SRT_Script.segments[{idx}].visual_cues: {self.SRT_Script.segments[idx].visual_cues}")
             print(self.vision_knowledge.retrieve_relevant_nodes("Protoss"))
 
     # Module 1 ASR: audio --> SRT_script
-    def get_srt_class(self, pre_load_asr_model=None):
-        """
-        Handles the ASR module to convert audio to SRT script format.
-        """
-        # Instead of using the script_en variable directly, we'll use script_input
-        self.status = TaskStatus.INITIALIZING_ASR
-
-        if self.SRT_Script.segments[0].src_text != "":
-            self.task_logger.info("SRT input mode, skip ASR Module")
-            return
-        # get configs
-        # shoud be modified after we incorporate more ASR methods
-        method = self.ASR_setting["ASR_model"]
-        # whisper_model = self.ASR_setting["whisper_config"]["whisper_model"]
-        src_srt_path = self.task_local_dir.joinpath(
-            f"task_{self.task_id}_{self.source_lang}.srt"
-        )
-        
-        self.SRT_Script.asr = self.asr
-
-        self.SRT_Script.get_transcription(output_dir=src_srt_path)
-        # get transcript
-        transcript = get_transcript(method, 
-                                    src_srt_path, 
-                                    self.source_lang,
-                                    self.video_path,
-                                    self.audio_path, 
-                                    self.client, 
-                                    self.task_logger,
-                                    pre_load_asr_model)
-
-        if transcript != None:  # if the audio is transfered
-            if isinstance(transcript, str):
-                self.SRT_Script = SrtScript.parse_from_srt_file(
-                    self.source_lang,
-                    self.target_lang,
-                    self.task_logger,
-                    self.client,
-                    domain=self.domain,
-                    srt_str=transcript.rstrip(),
-                )
+    def transcribe(self):
+        srt = self.SRT_Script
+        for idx,segment in enumerate(srt.segments):
+            if segment.audio_path is not None:
+                self.task_logger.info(f"Transcribing audio file: {segment.audio_path}")
+                temp_segment = self.audio_agent.transcribe(segment.audio_path, segment.visual_cues)
+                for seg in temp_segment:
+                    print('==============================================================================')
+                    print(f"Transcribed segment: {seg['text'],seg['start'],seg['end']}")
+                    seg['start'] = segment.timestr_to_seconds(seg['start']) + segment.start_time
+                    seg['end'] = segment.timestr_to_seconds(seg['end']) + segment.start_time
+                    print('==============================================================================')
+                srt.add_temp_segment(idx, srt.convert_transcribed_segments(temp_segment))
+                self.task_logger.info(f"Transcribed Length: {len(temp_segment)}")
             else:
-                self.SRT_Script = SrtScript(
-                    self.source_lang,
-                    self.target_lang,
-                    transcript,
-                    self.task_logger,
-                    self.client,
-                    self.domain,
-                )
-            # save the srt script to local
-            self.SRT_Script.write_srt_file_src(src_srt_path)
-        else:
-            raise RuntimeError(
-                f"Failed to get transcript from audio file: {self.audio_path}"
-            )
+                self.task_logger.info("No audio file found for this segment.")
+        srt.replace_seg()
+        exit()
 
     # Module 2: SRT preprocess: perform preprocess steps
     def preprocess(self):
@@ -390,6 +355,7 @@ class Task:
         results_dir = f"{self.task_local_dir}/results"
 
         subtitle_path = f"{results_dir}/{self.task_id}_{self.target_lang}.srt"
+        print(subtitle_path)
         self.SRT_Script.write_srt_file_translate(subtitle_path)
         if is_bilingual:
             subtitle_path = f"{results_dir}/{self.task_id}_{self.source_lang}_{self.target_lang}.srt"
@@ -433,11 +399,11 @@ class Task:
         Executes the entire pipeline process for the task.
         """
         self.get_speaker_segments()
-        self.get_visual_cues()
-        self.get_srt_class(pre_load_asr_model)
-        self.preprocess()
+        #self.get_visual_cues()
+        self.transcribe()
+        #self.preprocess()
         self.translation()
-        self.postprocess()
+        #self.postprocess()
         self.result = self.output_render()
 
         # print(self.result)

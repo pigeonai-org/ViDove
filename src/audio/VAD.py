@@ -32,6 +32,8 @@ class VAD:
         srt = SrtScript(src_lang=self.src_lang, tgt_lang=self.tgt_lang)
         segments = self.model(audio_path)  
         for turn, _, speaker in segments.itertracks(yield_label=True):
+            if turn.end - turn.start < 1:
+                continue
             srt.segments.append(SrtSegment(src_lang=self.src_lang, tgt_lang=self.tgt_lang, src_text="", translation="", speaker=speaker, start_time=turn.start, end_time=turn.end, idx=len(srt.segments)))  
         self.srt = srt
         return srt

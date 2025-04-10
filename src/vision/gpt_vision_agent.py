@@ -14,6 +14,7 @@ from transformers import (
     pipeline
 )
 from src.vision.vision_agent import VisionAgent
+import clip
 
 class GptVisionAgent(VisionAgent):
     def __init__(self, model_name, model_path, frame_per_seg, cache_dir=None):
@@ -84,7 +85,7 @@ class GptVisionAgent(VisionAgent):
         if total_frames < 4:
             extract_indices = list(range(total_frames))
         else:
-            extract_indices = [int(i * total_frames / self.frame_per_seg) for i in range(1, 5)]
+            extract_indices = [int(i * total_frames / self.frame_per_seg) for i in range(1, self.frame_per_seg + 1) if i * total_frames / self.frame_per_seg > 0]
 
         frame_count = 0
         self.visual_cues = []
@@ -117,6 +118,7 @@ class assistant_vision_api(VisionAgent):
         self.model = model_path
         self.thread_id = self.client.beta.threads.create().id
         self.file_ids = []
+        self.cache_dir = cache_dir
 
     def load_model(self, model_path=None):
         return None
@@ -174,7 +176,8 @@ class assistant_vision_api(VisionAgent):
 
     def analyze_frame(self, frame):
         """Processes a single video frame: saves, uploads, analyzes, and deletes it."""
-        temp_image_path = "temp_frame.jpg"
+        timestamp = int(time.time())
+        temp_image_path = f"{self.cache_dir}/temp_frame_{timestamp}.jpg"
         
         # Save the frame
         cv2.imwrite(temp_image_path, frame)
@@ -271,6 +274,10 @@ class CLIPVisionAgent(VisionAgent):
         # Load category database
         self.category_database = self.load_category_database(file_path)
 
+        self.cache_dir = cache_dir
+
+        self.extract_interval = extract_interval
+
     def load_category_database(self, file_path):
         """ Load category database from file """
         category_list = []
@@ -286,12 +293,12 @@ class CLIPVisionAgent(VisionAgent):
 
         return list(set(word.replace("_", " ") for word in category_list))
 
-    def extract_frames(self, video_path, interval=1):
+    def extract_frames(self, video_path):
         """ Extract key frames from the video """
         video = cv2.VideoCapture(video_path)
         frames = []
         fps = video.get(cv2.CAP_PROP_FPS)
-        frame_interval = int(fps * interval)
+        frame_interval = int(fps * self.extract_interval)
         success, frame = video.read()
         frame_count = 0
 

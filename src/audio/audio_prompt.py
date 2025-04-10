@@ -15,6 +15,7 @@ output in json format:
 
 AUDIO_TRANSCRIBE_PROMPT_WITH_VISUAL_CUES = """
 Transcribe the audio into text, keep the original text and timestamps.
+Break each part of the transcription into shorter sentences or phrases wherever possible to improve readability and clarity.
 This audio is from a video, and the visual information of the video is provided below. please use the visual information to help you transcribe the audio(e.g. correct the term).
 
 Visual information: {visual_cues}

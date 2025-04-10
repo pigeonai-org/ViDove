@@ -14,12 +14,20 @@ MEMEORY:
   local_knowledge_path: "/Users/liujiaen/Documents/Codes/ViDove/domain_dict"
 
 # VAD config
-VAD:
-  VAD_model: "pyannote/speaker-diarization-3.1"
+#VAD:
+#  VAD_model: "pyannote/speaker-diarization-3.1"
 
 # ASR config
-ASR:
-  ASR_model: openai/whisper-large-v3 # openai/whisper-large-v3, stable-whisper-base, stable-whisper-medium, stable-whisper-large, whisper-api
+#ASR:
+#  ASR_model: openai/whisper-large-v3 # openai/whisper-large-v3, stable-whisper-base, stable-whisper-medium, stable-whisper-large, whisper-api
+
+audio:
+  enable_audio: True
+  audio_agent: GeminiAudioAgent # clip or other vLLMs
+  model_path:  # replace it with your own model path
+  VAD_model: pyannote/speaker-diarization-3.1 # pyannote/speaker-diarization-3.1
+  src_lang: en
+  tgt_lang: zh
 
 vision:
   enable_vision: True
