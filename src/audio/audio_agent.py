@@ -11,7 +11,6 @@ import json
 from ASR import ASR
 from VAD import VAD
 
-
 class AudioAgent(ABC):
     def __init__(self, model_name, audio_config: dict=None):
         self.model_name = model_name
@@ -25,50 +24,7 @@ class AudioAgent(ABC):
         VAD.clip_audio_and_save(self.segments, audio_path, self.audio_config["cache_dir"])
         return self.segments
 
-    @abstractmethod
-    def load_model(self):
-        pass
-    
-    @abstractmethod
-    def transcribe(self, audio_path, visual_cues=None):
-        pass
-    
-    @abstractmethod
-    def analyze_audio(self, audio_path):
-        pass
-
-class ClassicAudioAgent(AudioAgent):
-    def __init__(self, model_name="whisper-api"):
-        super().__init__(model_name)
-
-    def load_model(self):
-        self.ASR_model = ASR.create(self.model_name)
-        
-    def transcribe(self, audio_path):
-        return self.ASR_model.get_transcript(audio_path)
-
-
-# TODO: @George please implement this
-class QwenAudioAgent(AudioAgent):
-    def __init__(self, model_name="qwen/qwen2-audio-instruct"):
-        super().__init__(model_name)
-
-    def load_model(self):
-        ...
-        
-
-class GeminiAudioAgent(AudioAgent):
-    def __init__(self, model_name="gemini-1.5-pro"):
-        super().__init__(model_name)
-
-    def load_model(self):
-        api_key = os.environ.get("GEMINI_API_KEY")
-        if not api_key:
-            raise ValueError("API key must be provided either directly or via GEMINI_API_KEY environment variable")
-        
-        self.model = genai.Client(api_key=api_key)
-    
-    def parse_response(self, response, parsing_retries=5):
+    def parse_json_response(self, response, parsing_retries=5):
         for retry in range(parsing_retries):
             try:
                 # Check if response is wrapped in code block markers
@@ -90,6 +46,57 @@ class GeminiAudioAgent(AudioAgent):
                 else:
                     print(f"Failed to parse response after {parsing_retries} attempts")
                     return None
+                
+    @abstractmethod
+    def load_model(self):
+        pass
+    
+    @abstractmethod
+    def transcribe(self, audio_path, visual_cues=None):
+        pass
+    
+    @abstractmethod
+    def analyze_audio(self, audio_path):
+        pass
+
+
+class ClassicAudioAgent(AudioAgent):
+    """
+    This class is used to transcribe and analyze audio using the classic ASR model, and single task models like CLAP/BEATs.
+    """
+    def __init__(self, model_name="whisper-api"):
+        super().__init__(model_name)
+
+    def load_model(self):
+        self.ASR_model = ASR.create(self.model_name)
+        
+    def transcribe(self, audio_path):
+        return self.ASR_model.get_transcript(audio_path)
+    
+    def analyze_audio(self, audio_path):
+        # TODO: add small models e.g. CLAP/BEATs for audio analysis
+        raise NotImplementedError("ClassicAudioAgent currently does not support audio analysis")
+
+# TODO: @George please implement this
+class QwenAudioAgent(AudioAgent):
+    def __init__(self, model_name="qwen/qwen2-audio-instruct"):
+        super().__init__(model_name)
+
+    def load_model(self):
+        ...
+        
+
+class GeminiAudioAgent(AudioAgent):
+    def __init__(self, model_name="gemini-1.5-pro"):
+        super().__init__(model_name)
+
+    def load_model(self):
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            raise ValueError("API key must be provided either directly or via GEMINI_API_KEY environment variable")
+        
+        self.model = genai.Client(api_key=api_key)
+    
     
     def transcribe(self, audio_path, visual_cues=None):
         with open(audio_path, "rb") as audio:
@@ -113,7 +120,7 @@ class GeminiAudioAgent(AudioAgent):
             contents=contents,
         )
 
-        return self.parse_response(response.text)
+        return self.parse_json_response(response.text)
     
     def analyze_audio(self, audio_path):
         with open(audio_path, "rb") as audio:
@@ -137,7 +144,7 @@ class GeminiAudioAgent(AudioAgent):
             contents=contents,
         )
 
-        return self.parse_response(response.text)
+        return self.parse_json_response(response.text)
 
 
 if __name__ == "__main__":
