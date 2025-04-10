@@ -270,12 +270,12 @@ class Task:
                     seg['start'] = segment.timestr_to_seconds(seg['start']) + segment.start_time
                     seg['end'] = segment.timestr_to_seconds(seg['end']) + segment.start_time
                     print('==============================================================================')
-                self.SRT_Script.add_temp_segment(idx, srt.convert_transcribed_segments(temp_segment))
+                self.SRT_Script.add_temp_segment(idx, self.SRT_Script.convert_transcribed_segments(temp_segment))
                 self.task_logger.info(f"Transcribed Length: {len(temp_segment)}")
             else:
                 self.task_logger.info("No audio file found for this segment.")
         self.SRT_Script.replace_seg()
-        exit()
+        #exit()
 
     # Module 2: SRT preprocess: perform preprocess steps
     def preprocess(self):

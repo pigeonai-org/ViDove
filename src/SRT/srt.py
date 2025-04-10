@@ -91,7 +91,11 @@ class SrtSegment(object):
         try:
             dt = datetime.datetime.strptime(time_str, "%H:%M:%S,%f")
         except ValueError:
-            dt = datetime.datetime.strptime(time_str, "%H:%M:%S.%f")
+            try:
+                dt = datetime.datetime.strptime(time_str, "%H:%M:%S.%f")
+            except ValueError:
+                dt = datetime.datetime.strptime(time_str, "%M:%S:%f")
+                return dt.minute * 60 + dt.second + dt.microsecond / 1e6
         
         seconds = dt.hour * 3600 + dt.minute * 60 + dt.second + dt.microsecond / 1e6
         return seconds
