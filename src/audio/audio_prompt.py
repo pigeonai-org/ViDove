@@ -1,22 +1,38 @@
 AUDIO_TRANSCRIBE_PROMPT = """
-Transcribe the following audio into text, keep the original text and timestamps.
+Transcribe the audio into text, maintaining the original text and timestamps.
+Please follow these guidelines:
+- Split sentences naturally at sentence boundaries
+- Keep sentences concise and not too long
+- Pay special attention to technical terms and proper nouns
+- Ensure timestamps align with sentence breaks
+
 output in json format:
 {
     [
         {
+            "index": 0,
+            "text": <text> (text of the transcript),
+            "start": <start_time> (hh:mm:ss, ms), 
+            "end": <end_time> (hh:mm:ss, ms)
+        },
+        {
+            "index": 1,
             "text": <text> (text of the transcript),
             "start": <start_time> (hh:mm:ss, ms),
             "end": <end_time> (hh:mm:ss, ms)
         }
-        ...
     ]
 }
 """
 
 AUDIO_TRANSCRIBE_PROMPT_WITH_VISUAL_CUES = """
-Transcribe the audio into text, keep the original text and timestamps.
-Break each part of the transcription into shorter sentences or phrases wherever possible to improve readability and clarity.
-This audio is from a video, and the visual information of the video is provided below. please use the visual information to help you transcribe the audio(e.g. correct the term).
+Transcribe the audio into text, maintaining the original text and timestamps.
+Please follow these guidelines:
+- Split sentences naturally at sentence boundaries
+- Keep sentences concise and not too long
+- Use the provided visual context to improve transcription accuracy
+- Pay special attention to technical terms and proper nouns that appear in the video
+- Ensure timestamps align with sentence breaks
 
 Visual information: {visual_cues}
 
@@ -24,11 +40,18 @@ output in json format:
 {{
     [
         {{
+            "index": 0
             "text": <text> (text of the transcript),
             "start": <start_time> (hh:mm:ss, ms),
             "end": <end_time> (hh:mm:ss, ms)
-        }}
-        ...
+        }},
+        {{
+            "index": 1,
+            "text": <text> (text of the transcript),
+            "start": <start_time> (hh:mm:ss, ms),
+            "end": <end_time> (hh:mm:ss, ms)
+        }},
+        ...        
     ]
 }}
 """

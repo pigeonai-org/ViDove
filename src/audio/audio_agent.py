@@ -110,7 +110,7 @@ class QwenAudioAgent(AudioAgent):
 
 
 class GeminiAudioAgent(AudioAgent):
-    def __init__(self, model_name="gemini-1.5-pro",audio_config: dict=None):
+    def __init__(self, model_name="gemini-2.5-pro-preview-03-25",audio_config: dict=None):
         super().__init__(model_name,audio_config)
 
     def load_model(self):
