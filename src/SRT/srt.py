@@ -87,15 +87,20 @@ class SrtSegment(object):
         time_str = str(datetime.timedelta(seconds=int(seconds)))
         return f"{time_str},{milliseconds:03d}"
     
-    def timestr_to_seconds(self,time_str):
-        try:
-            dt = datetime.datetime.strptime(time_str, "%H:%M:%S,%f")
-        except ValueError:
-            try:
-                dt = datetime.datetime.strptime(time_str, "%H:%M:%S.%f")
-            except ValueError:
-                dt = datetime.datetime.strptime(time_str, "%M:%S:%f")
+    def timestr_to_seconds(self, time_str):
+        # Use regex to normalize the time string to HH:MM:SS,ms format
+        time_str = re.sub(r'\D', ':', time_str)  # Replace non-digit characters with ':'
+        parts = time_str.split(':')
         
+        # Ensure the time string has exactly 4 parts (HH, MM, SS, ms), filling missing entries from the left
+        while len(parts) < 4:
+            parts.insert(0, '0')
+        
+        # Reconstruct the normalized time string
+        normalized_time_str = f"{parts[0]}:{parts[1]}:{parts[2]},{parts[3]}"
+        
+        # Parse the normalized time string to seconds
+        dt = datetime.datetime.strptime(normalized_time_str, "%H:%M:%S,%f")
         seconds = dt.hour * 3600 + dt.minute * 60 + dt.second + dt.microsecond / 1e6
         return seconds
     
