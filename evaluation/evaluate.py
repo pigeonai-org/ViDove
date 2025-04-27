@@ -1,6 +1,8 @@
 # import argparse
 # import pandas as pd
 from scores.multi_scores import cal_all_scores
+from scores.score import SubERscore
+
 
 
 # #     3. eval 的主程序把结果和数据集每行加入src_list / mt_list / ref_list 变量，传入multiscore去做评判，return的结果在eval通过csv储存
@@ -112,5 +114,3 @@ if __name__ == "__main__":
     src_list, mt_list, ref_list = load_data("./evaluation/test_data/text_data_test.en", "./evaluation/test_data/eval_result.zh", "./evaluation/test_data/text_data_test.zh")
     print("-----------data loaded-----------")
     cal_all_scores(src_list, mt_list, ref_list)
-    
-    

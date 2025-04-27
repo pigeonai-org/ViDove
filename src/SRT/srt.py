@@ -242,25 +242,31 @@ class SrtScript(object):
         #self.task_logger.info("temp_segments_idx: %s", self.temp_segments_idx)
         #self.task_logger.info("temp_segments: %s", self.temp_segments)
 
-    def replace_seg(self):
+    def replace_seg(self, temp_segments_info):
         """
-        Replace segments at temp_segments_idx with temp_segments
-        :return: None
+        Replace original segments with transcribed smaller segments,
+        ensuring no loss and correct ordering.
         """
-        self.task_logger.info("Total segments: %d", len(self.segments))
-        self.task_logger.info("Replacing segments...")
-        for i, idx in enumerate(self.temp_segments_idx):
-            if len(self.temp_segments[i]) > 1:
-                self.task_logger.info("replacing segments: %s", idx)
-            self.segments[idx] = self.temp_segments[i][0]
-            for j in range(1, len(self.temp_segments[i])):
-                self.segments.insert(idx + j, self.temp_segments[i][j])
-                #self.task_logger.info(f"Replacing segments at index {idx + j} with {self.temp_segments[i][j].src_text}")
-        # remove temp_segments and temp_segments_idx
-        self.temp_segments = []
-        self.temp_segments_idx = []
-        self.task_logger.info("Replacing segments finished.")
-        self.task_logger.info("Total segments after replacing: %d", len(self.segments))
+
+        self.task_logger.info("Total original segments: %d", len(self.segments))
+        self.task_logger.info("Replacing segments safely...")
+
+        new_segments = self.segments.copy()
+
+        for info in sorted(temp_segments_info, key=lambda x: x['orig_idx'], reverse=True):
+            idx = info['orig_idx']
+            del new_segments[idx]
+
+        for info in sorted(temp_segments_info, key=lambda x: x['orig_idx']):
+            idx = info['orig_idx']
+            new_segs = info['new_segments']
+            for i, seg in enumerate(new_segs):
+                new_segments.insert(idx + i, seg)
+
+        new_segments.sort(key=lambda s: s.start_time)
+
+        self.segments = new_segments
+        self.task_logger.info("Segments replacement complete. New total: %d", len(self.segments))
 
     def form_whole_sentence(self):
         """
@@ -300,9 +306,19 @@ class SrtScript(object):
         self.task_logger.info("Removed punctuation in translation.")
 
     def set_translation(self, translate: str, id_range: tuple, model, video_name, video_link=None):
-        for i, seg in enumerate(self.segments[id_range[0] - 1:id_range[1]]):
-            seg.translation = translate.split('\n\n')[i]
-            #self.task_logger.info(f"Setting translation for segment {seg.idx} to {translate}")
+        segments = translate.strip().split('\n\n')
+        expected_len = id_range[1] - id_range[0] 
+
+        if len(segments) != expected_len:
+            print(f"[WARN] Translated segments: {len(segments)}; Expected: {expected_len} (id_range: {id_range})")
+
+        for i, seg in enumerate(self.segments[id_range[0]-1:id_range[1]]):
+            if i < len(segments):
+                seg.translation = segments[i].strip()
+                print("NO missing")
+                print(seg.translation)
+            else:
+                pass
 
     def _set_translation(self, translate: str, id_range: tuple, model, video_name, video_link=None):
         """
@@ -681,7 +697,6 @@ class SrtScript(object):
                 audio_path = seg.audio_path
                 init_prompt = seg.visual_cues if seg.visual_cues is not None else "Hello, welcome to my lecture."
                 seg_transcript = self.asr.get_transcript(audio_path=audio_path, source_lang=self.src_lang, init_prompt=init_prompt)
-                print(seg_transcript)
                 exit()
 
 def split_script(script_in, chunk_size=1000):
