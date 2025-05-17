@@ -67,6 +67,7 @@ class SrtSegment(object):
         self.src_text = src_text
         self.translation = translation
         self.visual_cues = None
+        self.audio_cues = None
         self.speaker = speaker
         self.start_time = start_time
         self.end_time = end_time

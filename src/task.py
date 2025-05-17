@@ -20,7 +20,7 @@ from src.memory.basic_rag import BasicRAG
 from src.memory.direct_search_RAG import TavilySearchRAG
 from src.translators.translator import Translator
 from src.vision.gpt_vision_agent import GptVisionAgent, CLIPVisionAgent, assistant_vision_api
-from src.audio.audio_agent import GeminiAudioAgent, ClassicAudioAgent
+from src.audio.audio_agent import GeminiAudioAgent, ClassicAudioAgent, QwenAudioAgent
 #from src.VAD.VAD import VAD
 #from src.ASR.ASR import ASR
 
@@ -94,6 +94,7 @@ class Task:
         self.local_knowledge = None
         self.web_search = None
         self.vision_knowledge = None
+        self.audio_knowledge = None
 
         # logging setting
         self.task_logger = logging.getLogger(f"task_{task_id}")
@@ -162,6 +163,10 @@ class Task:
             self.vision_knowledge = BasicRAG(self.task_logger, "vision")
             self.vision_knowledge.load_knowledge_base(data_dir=None)
 
+        if self.memory_setting["enable_audio_knowledge"]:
+            self.audio_knowledge = BasicRAG(self.task_logger, "audio")
+            self.audio_knowledge.load_knowledge_base(data_dir=None)
+
         # initialize translator
         self.translator = Translator(
             self.translation_model,
@@ -200,8 +205,10 @@ class Task:
         if self.audio_setting["enable_audio"]:
             if self.audio_setting["audio_agent"] == "GeminiAudioAgent":
                 self.audio_agent = GeminiAudioAgent(audio_config=self.audio_setting)
+            elif self.audio_setting["audio_agent"] == "QwenAudioAgent":
+                self.audio_agent = QwenAudioAgent()
             else:
-                raise ValueError(f"Unsupported vision model: {self.vision_setting['vision_model']}")
+                raise ValueError(f"Unsupported vision model: {self.audio_setting['audio_agent']}")
 
 
     @staticmethod
@@ -256,6 +263,19 @@ class Task:
                 self.vision_knowledge.add_to_index(visual_cues, chunk_size=100, chunk_overlap=5)
                 self.SRT_Script.segments[idx].visual_cues = visual_cues
             print(self.vision_knowledge.retrieve_relevant_nodes("Protoss"))
+
+    def get_audio_cues(self):
+        if self.audio_agent is None:
+            self.task_logger.info("No audio agent found, skipping audio cues extraction")
+            return
+        else:
+            self.task_logger.info(f"Extracting audio cues from audio using {self.audio_agent.model_name}")
+            for idx, segment_path in enumerate(os.listdir(f"{self.task_local_dir}/.cache/audio")):
+                segment_path = f"{self.task_local_dir}/.cache/audio/{segment_path}"
+                audio_cues = self.audio_agent.analyze_audio(segment_path)
+                self.audio_knowledge.add_to_index(audio_cues, chunk_size=100, chunk_overlap=5)
+                self.SRT_Script.segments[idx].audio_cues = audio_cues
+            print(self.audio_knowledge.retrieve_relevant_nodes("Protoss"))
 
     # Module 1 ASR: audio --> SRT_script
     def transcribe(self):
@@ -409,6 +429,7 @@ class Task:
         """
         self.get_speaker_segments()
         self.get_visual_cues()
+        self.get_audio_cues()
         self.transcribe()
         # self.preprocess()
         self.translation()
