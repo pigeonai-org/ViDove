@@ -10,6 +10,7 @@ video_download:
 MEMEORY: 
   enable_local_knowledge: True
   enable_vision_knowledge: True
+  enable_audio_knowledge: True
   enable_web_search: True
   local_knowledge_path: "/Users/liujiaen/Documents/Codes/ViDove/domain_dict"
 
