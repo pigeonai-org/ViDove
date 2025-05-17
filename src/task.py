@@ -201,6 +201,7 @@ class Task:
             else:
                 raise ValueError(f"Unsupported vision model: {self.vision_setting['vision_model']}")
         
+        # initialize audio agent
         self.audio_agent = None   
         if self.audio_setting["enable_audio"]:
             if self.audio_setting["audio_agent"] == "GeminiAudioAgent":
