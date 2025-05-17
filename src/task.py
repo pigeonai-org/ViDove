@@ -208,7 +208,7 @@ class Task:
             elif self.audio_setting["audio_agent"] == "QwenAudioAgent":
                 self.audio_agent = QwenAudioAgent()
             else:
-                raise ValueError(f"Unsupported vision model: {self.audio_setting['audio_agent']}")
+                raise ValueError(f"Unsupported audio model: {self.audio_setting['audio_agent']}")
 
 
     @staticmethod
