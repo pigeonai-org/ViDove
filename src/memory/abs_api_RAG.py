@@ -16,7 +16,7 @@ class AbsApiRAG(ABC):
 
     @abstractmethod
     def retrieve_relevant_nodes(self, query):
-        # Retrieve relevant nodes from the knowledge base
+        # Retrieve relevant nodes from the knowledge base based on the semantic similarity of the query
         pass
 
     @abstractmethod
