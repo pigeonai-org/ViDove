@@ -255,7 +255,7 @@ class Task:
                 visual_cues = self.vision_agent.analyze_video(segment_path)
                 self.vision_knowledge.add_to_index(visual_cues, chunk_size=100, chunk_overlap=5)
                 self.SRT_Script.segments[idx].visual_cues = visual_cues
-            print(self.vision_knowledge.retrieve_relevant_nodes("Protoss"))
+            # print(self.vision_knowledge.retrieve_relevant_nodes("Protoss"))
 
     # Module 1 ASR: audio --> SRT_script
     def transcribe(self):
