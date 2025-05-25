@@ -1,78 +1,59 @@
 import os
 import openai
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Optional, List, Tuple
 from src.SRT.srt import SrtScript
-from src.translators.abs_api_model import AbstractAPIModel
 from src.memory.abs_api_RAG import AbsApiRAG
 
-class ProofreaderAgent(AbstractAPIModel):
+class ProofreaderAgent():
     def __init__(
         self,
         client,
         srt: SrtScript,
         local_knowledge: Optional[AbsApiRAG] = None,
         web_search: Optional[AbsApiRAG] = None,
-        vision_knowledge: Optional[AbsApiRAG] = None,
         handlers: Optional[Dict[str, Callable]] = None,
-        logger=None
+        logger=None,
+        batch_size: int = 5,
+        stm_len: int = 10,
+        verbose: int = 2
     ):
-        """
-        client: an OpenAI or AzureOpenAI instance
-        srt: your parsed SrtScript
-        local_knowledge: BasicRAG for domain memory
-        web_search: TavilySearchRAG for web memory
-        vision_knowledge: BasicRAG for visual context
-        handlers: dict[name -> function(idx, src, trans, suggestions)->suggestions]
-        """
-        super().__init__(client)
+        self.client = client
         self.srt = srt
         self.local_knowledge = local_knowledge
         self.web_search = web_search
         self.handlers = handlers or {}
         self.logger = logger
-        self.client = client
+        self.batch_size = batch_size
+        self.stm_len = stm_len
+        self.verbose = verbose
+        self.short_term_memory = ""
+
+    def set_srt(self, srt: SrtScript):
+        self.srt = srt
 
     def register_handler(self, name: str, func: Callable):
-        """Add or replace a handler by name."""
         self.handlers[name] = func
 
-    def build_prompt(self, src_text: str, translation: str) -> str:
-        """Construct a prompt for one subtitle segment."""
-        # retrieve contexts if available
-        local_ctx = "\n".join(
-            n.text for n in self.local_knowledge.retrieve_relevant_nodes(translation)
-        ) if self.local_knowledge else "None"
-        web_ctx = "\n".join(
-            n.text for n in self.web_search.retrieve_relevant_nodes(translation)
-        ) if self.web_search else "None"
+    def srt_iterator(self):
+        for idx, seg in enumerate(self.srt.segments):
+            yield idx, seg.src_text, seg.translation
 
+    def apply_handlers(self, idx: int, src: str, trans: str, suggestion: str):
+        for name, handler in self.handlers.items():
+            updated = handler(idx=idx, src=src, trans=trans, suggestions=suggestion)
+            if updated is not None:
+                self.srt.segments[idx].translation = updated
+            if self.verbose > 0 and self.logger:
+                self.logger.info(f"Handler {name} applied to segment {idx}: {updated}")
 
-        return f"""You are a proofreader agent for translation tasks.
-                Refine the translation below from {self.srt.src_lang} → {self.srt.tgt_lang} in domain `{self.srt.domain}`.
-
-                Source text:
-                {src_text}
-
-                Translated text:
-                {translation}
-
-                When writing suggestions, focus on:
-                1. Accuracy (fix additions, omissions, mistranslations)
-                2. Fluency (grammar, spelling, punctuation, no repetitions)
-                3. Terminology (consistent domain terms, correct idioms)
-
-                List specific corrections; if perfect, reply `PASS`.
-
-                ---
-                **Local memory context:**
-                {local_ctx}
-
-                **Web memory context:**
-                {web_ctx}
-                """
+    def conclude_to_stm(self, translation: str):
+        self.short_term_memory = self.send_request(
+            f"Briefly conclude this new translation: '{translation}' with context memory: '{self.short_term_memory}'. Focus on names, terminology, key info."
+        )
+        if self.verbose > 1 and self.logger:
+            self.logger.info(f"Updated STM: {self.short_term_memory}")
 
     def send_request(self, prompt: str):
-        """Calls the OpenAI Chat API and returns the assistant's reply."""
         resp = self.client.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
@@ -80,28 +61,83 @@ class ProofreaderAgent(AbstractAPIModel):
         )
         return resp.choices[0].message.content
 
-    def srt_iterator(self):
-        """Yield (index, src_text, translation) for each subtitle segment."""
-        for idx, seg in enumerate(self.srt.segments):
-            yield idx, seg.src_text, seg.translation
+    def build_batch_prompt(self, batch: List[Tuple[int, str, str]]) -> str:
+        segment_block = []
+        for idx, src, trans in batch:
+            segment_block.append(f"""Segment {idx}:
+                                    Source: {src}
+                                    Translation: {trans}
+                                    """)
+        segments_text = "\n".join(segment_block)
 
-    def apply_handlers(self, idx: int, src: str, trans: str, suggestions: str):
-        """
-        Pass suggestions through each registered handler in turn.
-        Each handler must accept (idx, src, trans, suggestions) and return new suggestions.
-        """
-        for name, handler in self.handlers.items():
-            suggestions = handler(idx=idx, src=src, trans=trans, suggestions=suggestions)
-            if suggestions is not None:
-                self.srt.segments[idx].translation = suggestions
-            self.logger.info(f"Handler {name} applied to segment {idx}: {suggestions}")
+        local_ctx = "\n".join(
+            n.text for n in self.local_knowledge.retrieve_relevant_nodes(
+                " ".join(t for _, _, t in batch)
+            )
+        ) if self.local_knowledge else "None"
+
+        web_ctx = "\n".join(
+            n.text for n in self.web_search.retrieve_relevant_nodes(
+                " ".join(t for _, _, t in batch)
+            )
+        ) if self.web_search else "None"
+
+        return f"""You are a translation proofreader. Below are {len(batch)} subtitle segments.
+                Some are full sentences, some are fragments. Give **specific advice** for each one.
+
+                Return suggestions in this format:
+                Segment 0: [your comment here]
+                Segment 1: [your comment here]
+                ...
+
+                DO NOT return JSON. DO NOT rewrite the translation. Just return suggestion texts.
+
+                ---
+                {segments_text}
+
+                **Short-term memory:**
+                {self.short_term_memory}
+
+                **Local memory context:**
+                {local_ctx}
+
+                **Web memory context:**
+                {web_ctx}
+
+                Focus on:
+                1. Translation accuracy (missing or incorrect meanings)
+                2. Fluency (grammar, spelling, repetition)
+                3. Terminology (idioms, domain-specific language)
+                4. If you have no suggestions, return "PASS" for that segment.
+                """
 
     def proofread_all(self):
-        """
-        Proofread every segment and run through handlers.
-        Returns a dict mapping segment index → final suggestions.
-        """
-        for idx, src, trans in self.srt_iterator():
-            prompt = self.build_prompt(src, trans)
-            suggestions = self.send_request(prompt)
-            self.apply_handlers(idx, src, trans, suggestions)
+        segments = list(self.srt_iterator())
+        for i in range(0, len(segments), self.batch_size):
+            batch = segments[i:i + self.batch_size]
+            prompt = self.build_batch_prompt(batch)
+
+            if self.logger:
+                self.logger.info(f"Prompting LLM for segments {[idx for idx, _, _ in batch]}")
+
+            content = self.send_request(prompt)
+
+            # Parse suggestions back line-by-line
+            lines = content.strip().splitlines()
+            suggestions = {}
+            for line in lines:
+                if line.startswith("Segment "):
+                    try:
+                        prefix, suggestion = line.split(":", 1)
+                        if self.verbose > 0 and self.logger:
+                            self.logger.info(f"Processing suggestion for {prefix.strip()}: {suggestion.strip()}")
+                        idx = int(prefix.replace("Segment ", "").strip())
+                        suggestions[idx] = suggestion.strip()
+                    except Exception:
+                        continue
+
+            for idx, src, trans in batch:
+                suggestion = suggestions.get(idx, "PASS")
+                if suggestion != "PASS":
+                    self.apply_handlers(idx, src, trans, suggestion)
+                    self.conclude_to_stm(trans)
