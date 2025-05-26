@@ -72,13 +72,18 @@ class ProofreaderAgent():
 
         local_ctx = "\n".join(
             n.text for n in self.local_knowledge.retrieve_relevant_nodes(
-                " ".join(t for _, _, t in batch)
+                " ".join(s for _, s, _ in batch)
             )
         ) if self.local_knowledge else "None"
+        
+        # DEBUG
+        print('sentences in batch:')
+        print(" ".join(s for _, s, _ in batch))
+        self.logger.info(f"Local context for batch: {local_ctx}") if self.logger else None
 
         web_ctx = "\n".join(
             n.text for n in self.web_search.retrieve_relevant_nodes(
-                " ".join(t for _, _, t in batch)
+                " ".join(s for _, s, _ in batch)
             )
         ) if self.web_search else "None"
 
@@ -120,6 +125,9 @@ class ProofreaderAgent():
             if self.logger:
                 self.logger.info(f"Prompting LLM for segments {[idx for idx, _, _ in batch]}")
 
+            if self.verbose > 1 and self.logger:
+                self.logger.info(f"Prompt content:\n{prompt}")
+
             content = self.send_request(prompt)
 
             # Parse suggestions back line-by-line
@@ -141,3 +149,5 @@ class ProofreaderAgent():
                 if suggestion != "PASS":
                     self.apply_handlers(idx, src, trans, suggestion)
                     self.conclude_to_stm(trans)
+                    
+        return self.short_term_memory
