@@ -1,11 +1,20 @@
-import base64
-import openai
-import torch
-import cv2
-from src.vision.vision_agent import VisionAgent
 import os
-from openai import OpenAI
 import time
+import base64
+from datetime import timedelta
+import cv2
+import ffmpeg
+import torch
+from PIL import Image
+import openai
+from openai import OpenAI
+from transformers import (
+    BlipProcessor,
+    BlipForConditionalGeneration,
+    pipeline
+)
+from src.vision.vision_agent import VisionAgent
+# import clip # use huggingface clip later
 
 class GptVisionAgent(VisionAgent):
     def __init__(self, model_name, model_path, frame_per_seg, cache_dir=None):
@@ -76,7 +85,7 @@ class GptVisionAgent(VisionAgent):
         if total_frames < 4:
             extract_indices = list(range(total_frames))
         else:
-            extract_indices = [int(i * total_frames / self.frame_per_seg) for i in range(1, 5)]
+            extract_indices = [int(i * total_frames / self.frame_per_seg) for i in range(1, self.frame_per_seg + 1) if i * total_frames / self.frame_per_seg > 0]
 
         frame_count = 0
         self.visual_cues = []
@@ -109,6 +118,7 @@ class assistant_vision_api(VisionAgent):
         self.model = model_path
         self.thread_id = self.client.beta.threads.create().id
         self.file_ids = []
+        self.cache_dir = cache_dir
 
     def load_model(self, model_path=None):
         return None
@@ -166,7 +176,8 @@ class assistant_vision_api(VisionAgent):
 
     def analyze_frame(self, frame):
         """Processes a single video frame: saves, uploads, analyzes, and deletes it."""
-        temp_image_path = "temp_frame.jpg"
+        timestamp = int(time.time())
+        temp_image_path = f"{self.cache_dir}/temp_frame_{timestamp}.jpg"
         
         # Save the frame
         cv2.imwrite(temp_image_path, frame)
@@ -263,6 +274,10 @@ class CLIPVisionAgent(VisionAgent):
         # Load category database
         self.category_database = self.load_category_database(file_path)
 
+        self.cache_dir = cache_dir
+
+        self.extract_interval = extract_interval
+
     def load_category_database(self, file_path):
         """ Load category database from file """
         category_list = []
@@ -278,12 +293,12 @@ class CLIPVisionAgent(VisionAgent):
 
         return list(set(word.replace("_", " ") for word in category_list))
 
-    def extract_frames(self, video_path, interval=1):
+    def extract_frames(self, video_path):
         """ Extract key frames from the video """
         video = cv2.VideoCapture(video_path)
         frames = []
         fps = video.get(cv2.CAP_PROP_FPS)
-        frame_interval = int(fps * interval)
+        frame_interval = int(fps * self.extract_interval)
         success, frame = video.read()
         frame_count = 0
 
@@ -324,3 +339,107 @@ class CLIPVisionAgent(VisionAgent):
 
         prompt = f"The key concepts in this video include: {', '.join(top_keywords[:3])}."
         return prompt
+
+def get_video_info_ffmpeg(video_path):
+    # Retrieve video information using ffmpeg
+    probe = ffmpeg.probe(video_path)
+    video_stream = next((s for s in probe['streams'] if s['codec_type'] == 'video'), None)
+    if video_stream is None:
+        raise ValueError("No video stream found")
+
+    fps = eval(video_stream['r_frame_rate'])
+    if 'nb_frames' in video_stream:
+        total_frames = int(video_stream['nb_frames'])
+    else:
+        duration = float(video_stream['duration'])
+        total_frames = int(duration * fps)
+
+    return fps, total_frames
+    
+class HfVisionAgent:
+    def __init__(self, model_name="llava-hf/llava-interleave-qwen-0.5b-hf", api="OPENAI_API_KEY", seconds_per_frame=30, device=None, verbose=True):
+        # Initialize the HfVisionAgent with model details, API key, frame interval, and device settings
+        self.model_name = model_name
+        self.interval_sec = seconds_per_frame  # Interval in seconds between frames to analyze
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.visual_cues = []
+        self.verbose = verbose
+        self.pipe = None
+        self.load_model()
+        self.client = OpenAI(api_key=api)
+
+    def load_model(self):
+        # Load the multimodal pipeline model
+        if self.verbose:
+            print(f"Loading multimodal pipeline: {self.model_name}")
+        self.pipe = pipeline("image-text-to-text", model=self.model_name, device=self.device)
+
+    def encode_image_to_caption(self, image):
+        # Convert an image to a caption using the loaded pipeline
+        image_pil = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "image": image_pil},
+                    {"type": "text", "text": "Briefly describe this image in 1-2 sentences (max 60 tokens)."}
+                ],
+            }
+        ]
+
+        outputs = self.pipe(text=messages, max_new_tokens=60, return_full_text=False)
+        caption = outputs[0]["generated_text"]
+        return caption
+
+    def summarize_cue(self):
+        # Summarize the collected visual descriptions into a coherent summary
+        prompt = f"Summarize the following visual description: { ' | '.join(self.visual_cues) }"
+        response = self.client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": "You are an AI model that summarizes visual description from a video."},
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+        )
+        return response.choices[0].message.content
+
+    def analyze_frame(self, frame):
+        # Analyze a single frame and obtain its caption
+        caption = self.encode_image_to_caption(frame)
+        if self.verbose:
+            print(f"[Caption]: {caption}")
+        return caption
+
+    def analyze_video(self, video_path):
+        # Analyze the video by extracting frames at specified intervals and summarizing their content
+        fps, total_frames = get_video_info_ffmpeg(video_path)
+        if self.verbose:
+            print(f"Using FFmpeg - FPS: {fps}, Total Frames: {total_frames}")
+
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise ValueError(f"Cannot open video: {video_path}")
+
+        duration_sec = int(total_frames / fps)
+        extract_indices = [int(t * fps) for t in range(0, duration_sec, self.interval_sec)]
+
+        self.visual_cues = []
+        frame_count = 0
+
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            if frame_count in extract_indices:
+                caption = self.analyze_frame(frame)
+                self.visual_cues.append(caption)
+
+            frame_count += 1
+
+        cap.release()
+        return self.summarize_cue()

@@ -143,7 +143,7 @@ class Translator:
                     if self.local_knowledge is not None:
                         input_dict["context_str"] = self.local_knowledge.retrieve_relevant_nodes(sentence)
                     if self.web_search is not None:
-                        input_dict["supporting_documents"] = self.web_search.seach_tavily(sentence)
+                        input_dict["supporting_documents"] = self.web_search.retrieve_relevant_nodes(sentence)
                     if self.vision_knowledge is not None:
                         input_dict["video_clips_description"] = self.vision_knowledge.retrieve_relevant_nodes(sentence)
                     input_dict["query_str"] = sentence

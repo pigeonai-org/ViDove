@@ -20,8 +20,9 @@ from src.memory.basic_rag import BasicRAG
 from src.memory.direct_search_RAG import TavilySearchRAG
 from src.translators.translator import Translator
 from src.vision.gpt_vision_agent import GptVisionAgent, CLIPVisionAgent, assistant_vision_api
-from src.VAD.VAD import VAD
-from src.ASR.ASR import ASR
+from src.audio.audio_agent import GeminiAudioAgent, ClassicAudioAgent
+#from src.VAD.VAD import VAD
+#from src.ASR.ASR import ASR
 
 class TaskStatus(str, Enum):
     """
@@ -68,8 +69,8 @@ class Task:
         self.task_id = task_id
 
         self.task_local_dir = task_local_dir
-        self.ASR_setting = task_cfg["ASR"]
         self.vision_setting = task_cfg["vision"]
+        self.audio_setting = task_cfg["audio"]
         self.memory_setting = task_cfg["MEMEORY"]
         self.translation_setting = task_cfg["translation"]
         self.translation_model = self.translation_setting["model"]
@@ -129,7 +130,6 @@ class Task:
         )
         self.task_logger.info(f"Translation Model: {self.translation_model}")
         self.task_logger.info(f"Chunk Size: {self.chunk_size}")
-        self.task_logger.info(f"ASR Model: {self.ASR_setting['ASR_model']}")
         self.task_logger.info(f"subtitle_type: {self.output_type['subtitle']}")
         self.task_logger.info(f"video_ouput: {self.output_type['video']}")
         self.task_logger.info(f"bilingual_ouput: {self.output_type['bilingual']}")
@@ -195,9 +195,13 @@ class Task:
                 )
             else:
                 raise ValueError(f"Unsupported vision model: {self.vision_setting['vision_model']}")
-            
-        # initialize ASR
-        self.asr = ASR.create(self.ASR_setting["ASR_model"], logger=self.task_logger)
+        
+        self.audio_agent = None   
+        if self.audio_setting["enable_audio"]:
+            if self.audio_setting["audio_agent"] == "GeminiAudioAgent":
+                self.audio_agent = GeminiAudioAgent(audio_config=self.audio_setting)
+            else:
+                raise ValueError(f"Unsupported vision model: {self.vision_setting['vision_model']}")
 
 
     @staticmethod
@@ -233,11 +237,9 @@ class Task:
         """
         Handles the VAD module to convert audio to speaker segments.
         """
-        vad = VAD("pyannote/speaker-diarization-3.1", self.source_lang, self.target_lang)
-        self.SRT_Script = vad.get_speaker_segments(self.audio_path)
-        vad.clip_audio_and_save(self.SRT_Script, self.audio_path, f"{self.task_local_dir}/.cache/audio")
+        self.SRT_Script = self.audio_agent.segment_audio(self.audio_path, f"{self.task_local_dir}/.cache/audio")
         if self.video_path is not None and self.vision_agent is not None:
-            vad.clip_video_and_save(self.SRT_Script, self.video_path, f"{self.task_local_dir}/.cache/video")
+            self.audio_agent.clip_video_and_save(self.video_path, f"{self.task_local_dir}/.cache/video")
 
     def get_visual_cues(self):
         """
@@ -253,65 +255,40 @@ class Task:
                 visual_cues = self.vision_agent.analyze_video(segment_path)
                 self.vision_knowledge.add_to_index(visual_cues, chunk_size=100, chunk_overlap=5)
                 self.SRT_Script.segments[idx].visual_cues = visual_cues
-            print(self.vision_knowledge.retrieve_relevant_nodes("Protoss"))
+            # print(self.vision_knowledge.retrieve_relevant_nodes("Protoss"))
 
     # Module 1 ASR: audio --> SRT_script
-    def get_srt_class(self, pre_load_asr_model=None):
+    def transcribe(self):
         """
-        Handles the ASR module to convert audio to SRT script format.
+        Perform ASR on each segment's audio, splitting into smaller segments if needed,
+        but maintaining mapping to original segments.
         """
-        # Instead of using the script_en variable directly, we'll use script_input
-        self.status = TaskStatus.INITIALIZING_ASR
+        self.temp_segments_info = []  
 
-        if self.SRT_Script.segments[0].src_text != "":
-            self.task_logger.info("SRT input mode, skip ASR Module")
-            return
-        # get configs
-        # shoud be modified after we incorporate more ASR methods
-        method = self.ASR_setting["ASR_model"]
-        # whisper_model = self.ASR_setting["whisper_config"]["whisper_model"]
-        src_srt_path = self.task_local_dir.joinpath(
-            f"task_{self.task_id}_{self.source_lang}.srt"
-        )
-        
-        self.SRT_Script.asr = self.asr
+        for idx, segment in enumerate(self.SRT_Script.segments):
+            if segment.audio_path is not None:
+                self.task_logger.info(f"Transcribing audio file: {segment.audio_path}")
+                temp_segment = self.audio_agent.transcribe(segment.audio_path, segment.visual_cues)
 
-        self.SRT_Script.get_transcription(output_dir=src_srt_path)
-        # get transcript
-        transcript = get_transcript(method, 
-                                    src_srt_path, 
-                                    self.source_lang,
-                                    self.video_path,
-                                    self.audio_path, 
-                                    self.client, 
-                                    self.task_logger,
-                                    pre_load_asr_model)
+                for seg in temp_segment:
+                    seg['start'] = segment.timestr_to_seconds(seg['start']) + segment.start_time
+                    seg['end'] = segment.timestr_to_seconds(seg['end']) + segment.start_time
 
-        if transcript != None:  # if the audio is transfered
-            if isinstance(transcript, str):
-                self.SRT_Script = SrtScript.parse_from_srt_file(
-                    self.source_lang,
-                    self.target_lang,
-                    self.task_logger,
-                    self.client,
-                    domain=self.domain,
-                    srt_str=transcript.rstrip(),
-                )
+                new_segments = self.SRT_Script.convert_transcribed_segments(temp_segment)
+
+                self.temp_segments_info.append({
+                    "orig_idx": idx,
+                    "orig_segment": segment,
+                    "new_segments": new_segments
+                })
+
+                self.task_logger.info(f"Transcribed Length: {len(new_segments)}")
             else:
-                self.SRT_Script = SrtScript(
-                    self.source_lang,
-                    self.target_lang,
-                    transcript,
-                    self.task_logger,
-                    self.client,
-                    self.domain,
-                )
-            # save the srt script to local
-            self.SRT_Script.write_srt_file_src(src_srt_path)
-        else:
-            raise RuntimeError(
-                f"Failed to get transcript from audio file: {self.audio_path}"
-            )
+                self.task_logger.info("No audio file found for this segment.")
+
+        self.SRT_Script.replace_seg(self.temp_segments_info)  
+
+
 
     # Module 2: SRT preprocess: perform preprocess steps
     def preprocess(self):
@@ -339,6 +316,7 @@ class Task:
             self.task_logger.info("ASS subtitle saved as: " + assSub_src)
         self.script_input = self.SRT_Script.get_source_only()
         pass
+        
 
     def update_translation_progress(self, new_progress):
         """
@@ -377,11 +355,7 @@ class Task:
             "---------------------Post-processing SRT class finished---------------------"
         )
 
-    # Module 5: output module
     def output_render(self):
-        """
-        Handles the output rendering process, including video and subtitle generation.
-        """
         self.status = TaskStatus.OUTPUT_MODULE
         video_out = self.output_type["video"]
         subtitle_type = self.output_type["subtitle"]
@@ -389,36 +363,36 @@ class Task:
 
         results_dir = f"{self.task_local_dir}/results"
 
-        subtitle_path = f"{results_dir}/{self.task_id}_{self.target_lang}.srt"
-        self.SRT_Script.write_srt_file_translate(subtitle_path)
+        # Always first save pure translation
+        subtitle_path_trans = f"{results_dir}/{self.task_id}_{self.target_lang}.srt"
+        self.SRT_Script.write_srt_file_translate(subtitle_path_trans)
+
+        # Optionally save bilingual version
         if is_bilingual:
-            subtitle_path = f"{results_dir}/{self.task_id}_{self.source_lang}_{self.target_lang}.srt"
-            self.SRT_Script.write_srt_file_bilingual(subtitle_path)
+            subtitle_path_bilingual = f"{results_dir}/{self.task_id}_{self.source_lang}_{self.target_lang}.srt"
+            self.SRT_Script.write_srt_file_bilingual(subtitle_path_bilingual)
 
+        # Output ass file if needed
         if subtitle_type == "ass":
-            self.task_logger.info("write .srt file to .ass")
-            subtitle_path = srt2ass(subtitle_path, "default", "No", "Modest")
-            self.task_logger.info("ASS subtitle saved as: " + subtitle_path)
+            ass_path = srt2ass(subtitle_path_trans, "default", "No", "Modest")
+            final_res = ass_path
+        else:
+            final_res = subtitle_path_trans  # Always return pure translation
 
-        final_res = subtitle_path
-
-        # encode to .mp4 video file
+        # Output video if needed
         if video_out and self.video_path is not None:
-            self.task_logger.info("encoding video file")
-            self.task_logger.info(
-                f'ffmpeg comand: \nffmpeg -i {self.video_path} -vf "subtitles={subtitle_path}" {results_dir}/{self.task_id}.mp4'
-            )
+            video_output_path = f"{results_dir}/{self.task_id}.mp4"
             subprocess.run(
                 [
                     "ffmpeg",
                     "-i",
-                    self.video_path,
+                    str(self.video_path),
                     "-vf",
-                    f"subtitles={subtitle_path}",
-                    f"{results_dir}/{self.task_id}.mp4",
+                    f"subtitles={final_res}:fontsdir=/Users/zonghengwu/ViDove-Clips/fonts:force_style='FontName=SourceHanSansCN-Normal'",
+                    video_output_path,
                 ]
             )
-            final_res = f"{results_dir}/{self.task_id}.mp4"
+            final_res = subtitle_path_trans
 
         self.t_e = time()
         self.task_logger.info(
@@ -428,19 +402,37 @@ class Task:
         )
         return final_res
 
+
     def run_pipeline(self, pre_load_asr_model=None):
         """
         Executes the entire pipeline process for the task.
         """
         self.get_speaker_segments()
         self.get_visual_cues()
-        self.get_srt_class(pre_load_asr_model)
-        self.preprocess()
+        self.transcribe()
+        # self.preprocess()
         self.translation()
-        self.postprocess()
+        # self.postprocess()
         self.result = self.output_render()
+        
+        if self.result.endswith(".srt"):
+            from evaluation.scores.score import SubERscore
+            from evaluation.scores.cleaning import clean_srt_file
 
-        # print(self.result)
+            hypo_srt_path = self.result
+            # reference srt file path, you need to input it
+            ref_srt_path = "/Users/zonghengwu/Desktop/Vidove Compare/dirty_subtitle.srt"
+
+            try:
+                cleaned_ref_srt_path = ref_srt_path.replace(".srt", "_cleaned.srt")
+                clean_srt_file(ref_srt_path, cleaned_ref_srt_path)
+
+                suber_result = SubERscore(hypo_srt_path, cleaned_ref_srt_path)
+                print(f"SubER Score: {suber_result:.2f}%")
+            except Exception as e:
+                print(f"SubER evaluation failed: {e}")
+        else:
+            print("[INFO] Output is not a subtitle file, skipping SubER evaluation.")
 
 
 class YoutubeTask(Task):
