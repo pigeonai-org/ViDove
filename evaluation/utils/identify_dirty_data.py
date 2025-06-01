@@ -2,6 +2,7 @@
 
 import os
 import sys
+from pathlib import Path
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -26,14 +27,45 @@ class DirtyDataProcessor:
         return dirty_data_list
     
     def clean_dirty_data(self,dirty_data_list):
+        cleaned_dirty_data = 0
         # dirty_data_list = self.identify_dirty_data()
         for file in dirty_data_list:
             # 写入这个文件，文件内容为""
             with open(os.path.join(self.srt_result_path, file), "w", encoding="utf-8") as f:
                 f.write("")
+                print("clean")
+                cleaned_dirty_data += 1
+        print(f"clean dirty data:{cleaned_dirty_data}")
+    def add_period_to_empty_lines(self,file):
+        # 遍历目录下的所有srt文件
+        file = Path(file)
+        # 读取文件内容
+        with open(file, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        
+        # 处理空行
+        new_lines = []
+        for line in lines:
+            if line.strip() == "":
+                new_lines.append("。\n")
+            else:
+                new_lines.append(line)
+        
+        # 写回文件
+        with open(file, "w", encoding="utf-8") as f:
+            f.writelines(new_lines)
+        print("successfully done")
 
 if __name__ == "__main__":
-    dirty_data_processor = DirtyDataProcessor("./evaluation/test_data/srt_output")
+    dirty_data_processor = DirtyDataProcessor("./evaluation/test_data/gemini_results")
+    
+    # 生成一个dirty_data_list
     # print(dirty_data_processor.identify_dirty_data())
-    print(len(dirty_data_list))
-    dirty_data_processor.clean_dirty_data(dirty_data_list)
+    # print(len(dirty_data_list))
+    
+    
+    # 把所有dirty data给变成无内容的文件
+    # dirty_data_processor.clean_dirty_data(dirty_data_list)
+    
+    # 给所有空行加上一个句号
+    dirty_data_processor.add_period_to_empty_lines("evaluation/test_data/gemini_eval_result.zh")
