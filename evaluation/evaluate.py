@@ -111,6 +111,7 @@ def load_data(src_file, mt_file, ref_file):
     return src_list, mt_list, ref_list
 
 if __name__ == "__main__":
-    src_list, mt_list, ref_list = load_data("./evaluation/test_data/text_data_test.en", "./evaluation/test_data/eval_result.zh", "./evaluation/test_data/text_data_test.zh")
+    src_list, mt_list, ref_list = load_data("./evaluation/test_data/text_data_test.en", "./evaluation/test_data/gemini_eval_result.zh", "./evaluation/test_data/text_data_test.zh")
     print("-----------data loaded-----------")
-    cal_all_scores(src_list, mt_list, ref_list)
+    cal_all_scores(src_list, mt_list, ref_list, csv_path="./evaluation/test_data/gemini_result.csv")
+    # cal_all_scores(src_list, mt_list, ref_list, csv_path="./evaluation/test_data/gemini_result.csv", scomet_enabled=True, dcomet_enabled=True, bleu_enabled=True, llm_enabled=False)
