@@ -7,10 +7,13 @@ from pathlib import Path
 from transformers import Qwen2_5OmniForConditionalGeneration, Qwen2_5OmniProcessor
 from qwen_omni_utils import process_mm_info
 
+# if you want to run this file, torch is required to be at least 2.6.0.
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Qwen2.5-Omni Video Translation")
-    parser.add_argument("--video_path", type=str, required=True, help="Path to the video file")
-    parser.add_argument("--output_path", type=str, default="./translation_result.txt", help="Path to save the translation text")
+    parser.add_argument("--video_path", type=str, default="./evaluation/test_data/videos/0k6b5W_fb4A_21.mp4",required=True, help="Path to the video file")
+    parser.add_argument("--output_path", type=str, default="./evaluation/test_data/qwen_result.txt", help="Path to save the translation text")
     parser.add_argument("--model_path", type=str, default="Qwen/Qwen2.5-Omni-7B", help="Path to the model")
     parser.add_argument("--source_lang", type=str, default="auto", help="Source language (auto for auto-detection)")
     parser.add_argument("--target_lang", type=str, default="en", help="Target language (en, zh, etc.)")
@@ -84,15 +87,18 @@ def translate_video(video_path, model_path, source_lang="auto", target_lang="en"
     # Generate translation
     print("Generating translation...")
     if save_audio:
+        print("saving audio")
         text_ids, audio = model.generate(**inputs, use_audio_in_video=use_audio)
     else:
         text_ids = model.generate(**inputs, use_audio_in_video=use_audio, return_audio=False)
     
     # Decode translation
+    print("decoding")
     translation = processor.batch_decode(text_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
     
     # Save audio if requested
     if save_audio:
+        print("saving audio")
         audio_output_path = os.path.splitext(video_path)[0] + "_translation.wav"
         sf.write(
             audio_output_path,
