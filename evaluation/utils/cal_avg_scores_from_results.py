@@ -19,5 +19,5 @@ class CalAvgScoresInCsv:
         print(f'LLM Score 栏位的平均值为: {average_llm_score}')
 
 if __name__ == "__main__":
-    cal_avg_scores_in_csv = CalAvgScoresInCsv('./evaluation/test_data/result.csv')
+    cal_avg_scores_in_csv = CalAvgScoresInCsv('./evaluation/test_data/gemini_result.csv')
     cal_avg_scores_in_csv.cal_avg_scores()
