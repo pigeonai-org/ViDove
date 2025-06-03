@@ -37,12 +37,18 @@ class multi_scores:
     # src: orginal sentence
     # mt: machine translation
     # ref: reference translation
-    def calculate_comet_llm(self, src:str, mt:str, ref:str) -> dict:
+    def calculate_comet_llm(self, src:str, mt:str, ref:str, scomet_evaluated:bool,dcomet_evaluated:bool, llm_evaluated:bool, bleu_evaluated:bool) -> dict:
         # preprocess the input
         src, mt, ref = self.__preprocess(src, mt, ref)
         # 这里将batch_size设置为1，gpus设置为0，表示使用CPU进行预测
         # batch_size=1意味着每次只处理一个样本，这可能会影响处理速度，但对于单个样本评估是合适的
         # gpus=0表示不使用GPU加速，而是使用CPU进行计算，这会影响计算速度，但在没有GPU的环境中是必要的
+        
+        self.llm_evaluated = llm_evaluated
+        self.bleu_evaluated = bleu_evaluated
+        self.scomet_evaluated = scomet_evaluated
+        self.dcomet_evaluated = dcomet_evaluated
+        
         comet_output = self.comet_model.predict([{"src":src, "mt":mt, "ref":ref}], batch_size=1, gpus=0)
         comet_score = comet_output.scores[0]
         
@@ -129,28 +135,32 @@ class multi_scores:
             mt = mt.strip()
             ref = ref.strip()
             
+            
+            # bleu_score = multi_scores().calculate_bleu(mt, [ref])
+            
             # Get COMET score individually
-            # comet_score = self.comet_model.predict([{"src": src, "mt": mt, "ref": ref}], batch_size=1, gpus=0).scores[0]
+            comet_score = self.comet_model.predict([{"src": src, "mt": mt, "ref": ref}], batch_size=1, gpus=0).scores[0]
             
             # Get directional COMET score (no reference needed)
-            # dcomet_score = self.dcomet_model.predict([{"src": src, "mt": mt}], batch_size=1, gpus=0).scores[0]
+            dcomet_score = self.dcomet_model.predict([{"src": src, "mt": mt}], batch_size=1, gpus=0).scores[0]
             
-            # result = {
-            #     'comet_score': comet_score,
-            #     'dcomet_score': dcomet_score,
-            #     'llm_score': "" , 
-            #     'llm_explanation': ""
-            # }
+            result = {
+                # 'bleu_score': bleu_score,
+                'comet_score': comet_score,
+                'dcomet_score': dcomet_score,
+                'llm_score': "" , 
+                'llm_explanation': ""
+            }
             
             # Get LLM evaluation
-            llm_acc, llm_completeness = LLM_eval.evaluate_prediction(src, ref, mt, self.LLM_model)
+            # llm_acc, llm_completeness = LLM_eval.evaluate_prediction(src, ref, mt, self.LLM_model)
             
             # # Store results
-            result = {
-                # 'comet_score': comet_score,
-                'llm_score': llm_acc[0], 
-                'llm_explanation': llm_acc[1]
-            }
+            # result = {
+            #     # 'comet_score': comet_score,
+            #     'llm_score': llm_acc[0], 
+            #     'llm_explanation': llm_acc[1]
+            # }
             
             results.append(result)
             
@@ -202,6 +212,7 @@ class multi_scores:
                     srcs[i],                          # Source
                     mts[i],                           # MT
                     refs[i],                          # Reference
+                    result.get("bleu_score", ""),     # BLEU
                     result.get("comet_score", ""),    # COMET
                     result.get("dcomet_score", ""),   # dCOMET
                     result.get("llm_score", ""),      # LLM Score
@@ -209,29 +220,30 @@ class multi_scores:
                 ]
                 csv_writer.writerow(row)
 
-def cal_all_scores(src_list, mt_list, ref_list):
+def cal_all_scores(src_list, mt_list, ref_list, csv_path="./evaluation/test_data/result.csv"):
     """Calculate all scores for a list of src, mt, and ref."""
     import csv
     import json
     
     # Set up the CSV file with headers
-    with open("result.csv", "w", encoding="utf-8") as f:
-        csv_writer = csv.writer(f)
-        csv_writer.writerow(["Source", "MT", "Reference", "BLEU", "COMET", "dCOMET", "LLM Score", "LLM Explanation"])
+    # with open("result.csv", "w", encoding="utf-8") as f:
+    #     csv_writer = csv.writer(f)
+    #     csv_writer.writerow(["Source", "MT", "Reference", "BLEU", "COMET", "dCOMET", "LLM Score", "LLM Explanation"])
     
     # Calculate BLEU score
     
     # TODO 已经处理完了BLEU，因此注释
-    # bleu_score = multi_scores().calculate_bleu(mt_list, [ref_list])
+    # 在这个地方bleu只会处理一整个batch，不是单句的，但是貌似一个list就可以包括一个batch的所有单句了
+    bleu_score = multi_scores().calculate_bleu(mt_list, [ref_list])
     
     # # 将bleu_score写入csv文件
-    # with open("./evaluation/test_data/bleu_result.csv", "a", encoding="utf-8") as f:
-    #     csv_writer = csv.writer(f)
-    #     csv_writer.writerow(["BLEU", bleu_score])
-    # print(f"BLEU: {bleu_score}")
+    with open("./evaluation/test_data/bleu_result.csv", "a", encoding="utf-8") as f:
+        csv_writer = csv.writer(f)
+        csv_writer.writerow(["BLEU", bleu_score])
+    print(f"BLEU: {bleu_score}")
     
     # Calculate scores for each example and write to CSV
-    results = multi_scores().calculate_comet_llm_batch(src_list, mt_list, ref_list)
+    results = multi_scores().calculate_comet_llm_batch(src_list, mt_list, ref_list, csv_path=csv_path)
     for i, result in enumerate(results):
         print(result)
         
@@ -245,7 +257,7 @@ if __name__ == "__main__":
     ref = " 来自南韩的玩家遇到了来自蓝色人族的SCV"
     ref_list = [ref,"你好，我认为BLEU是一个非常糟糕的评价指标。","第二，我推荐磨合训练法，单杠训练一天多次，锻炼时间保持在你最长记录的50%，也就是做次强度训练。勤加练习，同时保持精力充沛。每天如是磨合训练。"]
     
-    cal_all_scores(src_list, mt_list, ref_list)
+    cal_all_scores(src_list, mt_list, ref_list, csv_path="./evaluation/test_data/gemini_result.csv")
     
     #  print(multi_scores().get_scores(src, mt, ref))
     # print(multi_scores().calculate_comet_llm(src, mt, ref))

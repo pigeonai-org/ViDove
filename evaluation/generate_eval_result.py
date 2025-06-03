@@ -84,7 +84,7 @@ if __name__ == "__main__":
     #               srt_dir="./evaluation/test_data/test_eval/srt_output") 
     
     generate_eval_result(id_file="./evaluation/test_data/text_data_test.id",
-                output="./evaluation/test_data/eval_result.zh",
-                srt_dir="./evaluation/test_data/srt_output") 
+                output="./evaluation/test_data/gemini_eval_result.zh",
+                srt_dir="./evaluation/test_data/gemini_results") 
 
     
