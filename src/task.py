@@ -202,6 +202,19 @@ class Task:
                 self.audio_agent = GeminiAudioAgent(audio_config=self.audio_setting)
             else:
                 raise ValueError(f"Unsupported vision model: {self.vision_setting['vision_model']}")
+            
+        self.proofreader = None
+        if True:  # self.translation_setting["enable_proofreading"]:
+            from src.editorial.proofreader import ProofreaderAgent
+            self.proofreader = ProofreaderAgent(
+                client=self.client,
+                srt=None,  # Will be set later
+                local_knowledge=self.local_knowledge,
+                web_search=self.web_search,
+                handlers=None,
+                logger=self.task_logger
+            )
+            self.task_logger.info("Proofreader initialized.")
 
 
     @staticmethod
@@ -355,6 +368,21 @@ class Task:
             "---------------------Post-processing SRT class finished---------------------"
         )
 
+    def proofread(self):
+        """
+        Handles the proofreading of the translated SRT script.
+        """
+        self.status = TaskStatus.POST_PROCESSING
+        self.task_logger.info(
+            "---------------------Start Proofreading---------------------"
+        )
+        if self.proofreader is not None:
+            self.proofreader.set_srt(self.SRT_Script)
+            self.proofreader.proofread_all()
+            self.SRT_Script = self.proofreader.srt
+        else:
+            self.task_logger.warning("Proofreader is not initialized, skipping proofreading.")
+
     def output_render(self):
         self.status = TaskStatus.OUTPUT_MODULE
         video_out = self.output_type["video"]
@@ -408,20 +436,24 @@ class Task:
         Executes the entire pipeline process for the task.
         """
         self.get_speaker_segments()
-        self.get_visual_cues()
+        #self.get_visual_cues()
         self.transcribe()
         # self.preprocess()
         self.translation()
+
         # self.postprocess()
+        self.proofread()
+
         self.result = self.output_render()
-        
+
+        """
         if self.result.endswith(".srt"):
             from evaluation.scores.score import SubERscore
             from evaluation.scores.cleaning import clean_srt_file
 
             hypo_srt_path = self.result
             # reference srt file path, you need to input it
-            ref_srt_path = "/Users/zonghengwu/Desktop/Vidove Compare/dirty_subtitle.srt"
+            ref_srt_path = "dirty_subtitle.srt"
 
             try:
                 cleaned_ref_srt_path = ref_srt_path.replace(".srt", "_cleaned.srt")
@@ -433,6 +465,7 @@ class Task:
                 print(f"SubER evaluation failed: {e}")
         else:
             print("[INFO] Output is not a subtitle file, skipping SubER evaluation.")
+        """    
 
 
 class YoutubeTask(Task):

@@ -21,7 +21,7 @@ class BasicRAG(AbsApiRAG):
         self,
         logger: Logger,
         domain="starcraft2",
-        embedding_name: str = "text-embedding-3-small",
+        embedding_name: str = "text-embedding-3-large",
         is_azure: bool = False,
     ) -> None:
         super().__init__()
@@ -45,14 +45,14 @@ class BasicRAG(AbsApiRAG):
             self.logger.info("Creating a new VectorStoreIndex with no initial data")
             index = VectorStoreIndex.from_documents([])
         else:    
-            if not os.path.exists(persist_dir):
+            if not persist_dir:  # os.path.exists(persist_dir):
                 self.logger.info("Loading the RAG from the data directory")
                 documents = SimpleDirectoryReader(data_dir).load_data()
                 index = VectorStoreIndex.from_documents(
                     documents,
                     transformations=[SentenceSplitter(chunk_size=40, chunk_overlap=5)],
                 )
-                index.storage_context.persist(persist_dir)
+                #index.storage_context.persist(persist_dir)
             else:
                 self.logger.info("Loading the RAG from the storage directory")
                 storage_context = StorageContext.from_defaults(persist_dir=persist_dir)
