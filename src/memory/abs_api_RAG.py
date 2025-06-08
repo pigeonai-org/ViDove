@@ -15,8 +15,9 @@ class AbsApiRAG(ABC):
         pass
 
     @abstractmethod
-    def retrieve_relevant_nodes(self, query):
+    def retrieve_relevant_nodes(self, query, use_window_retrieval=True):
         # Retrieve relevant nodes from the knowledge base based on the semantic similarity of the query
+        # with optional window retrieval for adjacent nodes
         pass
 
     @abstractmethod

@@ -70,11 +70,12 @@ class ProofreaderAgent():
                                     """)
         segments_text = "\n".join(segment_block)
 
-        local_ctx = "\n".join(
-            n.text for n in self.local_knowledge.retrieve_relevant_nodes(
-                " ".join(s for _, s, _ in batch)
-            )
-        ) if self.local_knowledge else "None"
+        local_ctx = []
+        
+        for b in batch:
+            local_ctx.append("\n".join(
+                [n.text for n in self.local_knowledge.retrieve_relevant_nodes(b[1]) if n.text]
+            ) if self.local_knowledge else "None")
         
         # DEBUG
         print('sentences in batch:')
