@@ -122,79 +122,6 @@ class CSVParser:
         """
         return CSVParser.parse_csv_files(os.path.dirname(file_path), encoding)
 
-
-class WindowRetriever(BaseRetriever):
-    """Custom retriever that fetches adjacent k nodes around each retrieved node."""
-    
-    def __init__(self, base_retriever: BaseRetriever, window_size: int = 1):
-        """
-        Initialize window retriever.
-        
-        Args:
-            base_retriever: The base retriever to use for initial retrieval
-            window_size: Number of adjacent nodes to retrieve on each side (k)
-        """
-        super().__init__()
-        self.base_retriever = base_retriever
-        self.window_size = window_size
-        
-    def _retrieve(self, query_bundle: QueryBundle) -> List[NodeWithScore]:
-        """Retrieve nodes with window expansion."""
-        # Get initial retrieved nodes
-        base_nodes = self.base_retriever.retrieve(query_bundle)
-        
-        if not base_nodes:
-            return base_nodes
-            
-        # Get all nodes from the index
-        all_nodes = self.base_retriever._index.docstore.docs
-        all_node_ids = list(all_nodes.keys())
-        
-        expanded_nodes = []
-        seen_node_ids = set()
-        
-        for node_with_score in base_nodes:
-            node_id = node_with_score.node.node_id
-            
-            # Add the original node
-            if node_id not in seen_node_ids:
-                seen_node_ids.add(node_id)
-                expanded_nodes.append(node_with_score)
-            
-            # Find adjacent nodes based on document order
-            try:
-                current_idx = all_node_ids.index(node_id)
-                
-                # Add preceding nodes
-                for i in range(max(0, current_idx - self.window_size), current_idx):
-                    adj_node_id = all_node_ids[i]
-                    if adj_node_id not in seen_node_ids:
-                        seen_node_ids.add(adj_node_id)
-                        adj_node = all_nodes[adj_node_id]
-                        # Give adjacent nodes a slightly lower score
-                        adj_score = node_with_score.score * 0.7 if node_with_score.score else 0.7
-                        expanded_nodes.append(NodeWithScore(node=adj_node, score=adj_score))
-                
-                # Add following nodes
-                for i in range(current_idx + 1, min(len(all_node_ids), current_idx + self.window_size + 1)):
-                    adj_node_id = all_node_ids[i]
-                    if adj_node_id not in seen_node_ids:
-                        seen_node_ids.add(adj_node_id)
-                        adj_node = all_nodes[adj_node_id]
-                        # Give adjacent nodes a slightly lower score
-                        adj_score = node_with_score.score * 0.7 if node_with_score.score else 0.7
-                        expanded_nodes.append(NodeWithScore(node=adj_node, score=adj_score))
-                        
-            except ValueError:
-                # Node ID not found in list, skip window expansion for this node
-                continue
-        
-        # Sort by score (highest first) while maintaining some document order
-        expanded_nodes.sort(key=lambda x: x.score if x.score else 0, reverse=True)
-        
-        return expanded_nodes
-
-
 class BasicRAG(AbsApiRAG):
     def __init__(
         self,
@@ -211,11 +138,9 @@ class BasicRAG(AbsApiRAG):
         self.domain = domain
         self.index = None
         self.retriever = None
-        self.window_retriever = None
         self.memory = None
         self.logger = logger
         self.loaded = False
-        self.window_size = 1  # Default window size
 
     def load_knowledge_base(self, data_dir, num_retrievals=5, window_size=1, chunk_size=50, chunk_overlap=10, parse_csv=True):
         Settings.embed_model = self.embeddings
@@ -287,16 +212,10 @@ class BasicRAG(AbsApiRAG):
         self.index = index
         self.retriever = index.as_retriever(similarity_top_k=num_retrievals)
         
-        # Create window retriever for enhanced context
-        self.window_retriever = WindowRetriever(
-            base_retriever=self.retriever,
-            window_size=window_size
-        )
-        
         self.loaded = True
         self.logger.info(f"Model loaded with window retrieval (window_size={window_size})")
 
-    def retrieve_relevant_nodes(self, query, use_window_retrieval=True):
+    def retrieve_relevant_nodes(self, query, use_window_retrieval=False):
         """
         Retrieve relevant nodes with optional window retrieval.
         
@@ -306,21 +225,8 @@ class BasicRAG(AbsApiRAG):
         """
         if self.retriever is None:
             self.load_knowledge_base()
-        
-        if use_window_retrieval and self.window_retriever:
-            return self.window_retriever.retrieve(query)
-        else:
-            return self.retriever.retrieve(query)
 
-    def set_window_size(self, window_size: int):
-        """Update the window size for retrieval."""
-        self.window_size = window_size
-        if self.retriever:
-            self.window_retriever = WindowRetriever(
-                base_retriever=self.retriever,
-                window_size=window_size
-            )
-            self.logger.info(f"Updated window size to {window_size}")
+        return self.retriever.retrieve(query)
 
     def add_csv_to_index(self, csv_file_path: str, encoding: str = 'utf-8'):
         """
@@ -357,10 +263,6 @@ class BasicRAG(AbsApiRAG):
 
         # Update the retrievers
         self.retriever = self.index.as_retriever(similarity_top_k=5)
-        self.window_retriever = WindowRetriever(
-            base_retriever=self.retriever,
-            window_size=self.window_size
-        )
         
         self.logger.info(f"Successfully added {len(nodes)} CSV rows to index")
 
@@ -391,7 +293,3 @@ class BasicRAG(AbsApiRAG):
 
         # Update the retrievers
         self.retriever = self.index.as_retriever(similarity_top_k=5)
-        self.window_retriever = WindowRetriever(
-            base_retriever=self.retriever,
-            window_size=self.window_size
-        )
