@@ -13,8 +13,9 @@ from llama_index.core import (
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.schema import NodeWithScore, QueryBundle
 from llama_index.core.retrievers import BaseRetriever
-# from llama_index.embeddings.azure_openai import AzureOpenAIEmbedding
 from llama_index.embeddings.cohere import CohereEmbedding
+
+CO_API_KEY = os.getenv("CO_API_KEY", None)
 
 from ..memory.abs_api_RAG import AbsApiRAG
 
@@ -206,7 +207,7 @@ class BasicRAG(AbsApiRAG):
         # if is_azure:
         #     self.embeddings = AzureOpenAIEmbedding(model=embedding_name)
         # else:
-        self.embeddings = CohereEmbedding(model_name=embedding_name, cohere_api_key="IRiEATzPvBrBG8Gwx5fcglIaUEWNmomcmsC5yF6y")
+        self.embeddings = CohereEmbedding(model_name=embedding_name, api_key=CO_API_KEY)
         self.domain = domain
         self.index = None
         self.retriever = None
