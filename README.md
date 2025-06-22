@@ -104,12 +104,12 @@ Here's why:
    git clone https://github.com/project-kxkg/ViDove.git
    cd ViDove
    ```
-3. Install Requirments
+3. Install Requirments, we switch to use `uv` as our package manager, so you need to install `uv` first.
    ```sh
-   conda create -n ViDove python=3.10 -y
-   conda activate ViDove
-   pip install --upgrade pip
-   pip install -r requirements.txt
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   uv venv --python 3.10
+   uv sync
+   source .venv/bin/activate
    ```
 4. Enter your API in bash
    

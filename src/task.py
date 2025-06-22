@@ -383,6 +383,23 @@ class Task:
         else:
             self.task_logger.warning("Proofreader is not initialized, skipping proofreading.")
 
+    def editor(self):
+        """
+        Handles the editing of the translated SRT script.
+        """
+        self.status = TaskStatus.POST_PROCESSING
+        self.task_logger.info(
+            "---------------------Start Editing---------------------"
+        )
+        from src.editorial.editor import EditorAgent
+        editor = EditorAgent(
+            client=self.client,
+            srt=self.SRT_Script,
+            memory=self.local_knowledge,
+            logger=self.task_logger
+        )
+        editor.edit_all()
+
     def output_render(self):
         self.status = TaskStatus.OUTPUT_MODULE
         video_out = self.output_type["video"]
@@ -443,7 +460,7 @@ class Task:
 
         # self.postprocess()
         self.proofread()
-
+        self.editor()
         self.result = self.output_render()
 
         """

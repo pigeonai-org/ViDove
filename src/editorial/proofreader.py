@@ -48,7 +48,7 @@ class ProofreaderAgent():
 
     def conclude_to_stm(self, translation: str):
         self.short_term_memory = self.send_request(
-            f"Briefly conclude this new translation: '{translation}' with context memory: '{self.short_term_memory}'. Focus on names, terminology, key info."
+            f"Briefly conclude the content: '{translation}' with context memory: '{self.short_term_memory}'. ."
         )
         if self.verbose > 1 and self.logger:
             self.logger.info(f"Updated STM: {self.short_term_memory}")
@@ -70,11 +70,12 @@ class ProofreaderAgent():
                                     """)
         segments_text = "\n".join(segment_block)
 
-        local_ctx = "\n".join(
-            n.text for n in self.local_knowledge.retrieve_relevant_nodes(
-                " ".join(s for _, s, _ in batch)
-            )
-        ) if self.local_knowledge else "None"
+        local_ctx = []
+        
+        for b in batch:
+            local_ctx.append("\n".join(
+                [n.text for n in self.local_knowledge.retrieve_relevant_nodes(b[1]) if n.text]
+            ) if self.local_knowledge else "None")
         
         # DEBUG
         print('sentences in batch:')
@@ -103,7 +104,7 @@ class ProofreaderAgent():
                 **Short-term memory:**
                 {self.short_term_memory}
 
-                **Local memory context:**
+                **Term context:**
                 {local_ctx}
 
                 **Web memory context:**
@@ -112,7 +113,7 @@ class ProofreaderAgent():
                 Focus on:
                 1. Translation accuracy (missing or incorrect meanings)
                 2. Fluency (grammar, spelling, repetition)
-                3. Terminology (idioms, domain-specific language)
+                3. Terminology (Use term context to edit idioms, ensure every sentence is translated into domain-specific language)
                 4. If you have no suggestions, return "PASS" for that segment.
                 """
 
@@ -147,7 +148,8 @@ class ProofreaderAgent():
             for idx, src, trans in batch:
                 suggestion = suggestions.get(idx, "PASS")
                 if suggestion != "PASS":
-                    self.apply_handlers(idx, src, trans, suggestion)
+                    self.srt.segments[idx].suggestion = suggestion
+                    self.logger.info(f"Added suggestion for segment {self.srt.segments[idx].translation}") if self.logger else None
                     self.conclude_to_stm(trans)
                     
         return self.short_term_memory
