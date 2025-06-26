@@ -256,7 +256,11 @@ class SrtScript(object):
 
         for info in sorted(temp_segments_info, key=lambda x: x['orig_idx'], reverse=True):
             idx = info['orig_idx']
-            del new_segments[idx]
+            try:
+                del new_segments[idx]
+            except IndexError:
+                self.task_logger.error("Index %d out of range when trying to delete segment", idx)
+                continue
 
         for info in sorted(temp_segments_info, key=lambda x: x['orig_idx']):
             idx = info['orig_idx']

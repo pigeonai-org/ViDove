@@ -11,44 +11,33 @@ class ProofreaderAgent():
         srt: SrtScript,
         local_knowledge: Optional[AbsApiRAG] = None,
         web_search: Optional[AbsApiRAG] = None,
-        handlers: Optional[Dict[str, Callable]] = None,
         logger=None,
         batch_size: int = 5,
         stm_len: int = 10,
+        use_short_term_memory: bool = False,
         verbose: int = 2
     ):
         self.client = client
         self.srt = srt
         self.local_knowledge = local_knowledge
         self.web_search = web_search
-        self.handlers = handlers or {}
         self.logger = logger
         self.batch_size = batch_size
         self.stm_len = stm_len
         self.verbose = verbose
+        self.use_short_term_memory = use_short_term_memory
         self.short_term_memory = ""
 
     def set_srt(self, srt: SrtScript):
         self.srt = srt
 
-    def register_handler(self, name: str, func: Callable):
-        self.handlers[name] = func
-
     def srt_iterator(self):
         for idx, seg in enumerate(self.srt.segments):
             yield idx, seg.src_text, seg.translation
 
-    def apply_handlers(self, idx: int, src: str, trans: str, suggestion: str):
-        for name, handler in self.handlers.items():
-            updated = handler(idx=idx, src=src, trans=trans, suggestions=suggestion)
-            if updated is not None:
-                self.srt.segments[idx].translation = updated
-            if self.verbose > 0 and self.logger:
-                self.logger.info(f"Handler {name} applied to segment {idx}: {updated}")
-
     def conclude_to_stm(self, translation: str):
         self.short_term_memory = self.send_request(
-            f"Briefly conclude the content: '{translation}' with context memory: '{self.short_term_memory}'. ."
+            f"Briefly conclude the content: '{translation}' with context memory: '{self.short_term_memory}'."
         )
         if self.verbose > 1 and self.logger:
             self.logger.info(f"Updated STM: {self.short_term_memory}")
@@ -78,9 +67,11 @@ class ProofreaderAgent():
             ) if self.local_knowledge else "None")
         
         # DEBUG
-        print('sentences in batch:')
-        print(" ".join(s for _, s, _ in batch))
-        self.logger.info(f"Local context for batch: {local_ctx}") if self.logger else None
+        if self.logger:
+            self.logger.info('sentences in batch:')
+            self.logger.info(" ".join(s for _, s, _ in batch))
+            self.logger.info(f"Local context for batch: {local_ctx}") if self.logger else None
+            self.logger.info(f"Local context for batch: {local_ctx}")
 
         web_ctx = "\n".join(
             n.text for n in self.web_search.retrieve_relevant_nodes(
@@ -89,7 +80,8 @@ class ProofreaderAgent():
         ) if self.web_search else "None"
 
         return f"""You are a translation proofreader. Below are {len(batch)} subtitle segments.
-                Some are full sentences, some are fragments. Give **specific advice** for each one.
+                Some are full sentences, some are fragments. Give **specific advice** for each one, 
+                but do not treat each segment separatly you need information across segment.
 
                 Return suggestions in this format:
                 Segment 0: [your comment here]
@@ -111,10 +103,12 @@ class ProofreaderAgent():
                 {web_ctx}
 
                 Focus on:
-                1. Translation accuracy (missing or incorrect meanings)
-                2. Fluency (grammar, spelling, repetition)
+                1. Translation accuracy while stick to domain({self.srt.domain}) (missing or incorrect meanings)
+                2. Fluency (grammar, spelling, repetition. Only if it affects understanding) and ensure the translation is smooth and fluent across segments.
                 3. Terminology (Use term context to edit idioms, ensure every sentence is translated into domain-specific language)
                 4. If you have no suggestions, return "PASS" for that segment.
+                5. Source text isn't 100% accurate. If you have doubt about the source text, return "UNCLEAR" and specify the location, editor will check the issue.
+                6. Only make suggestion if you believe revision is necessary.
                 """
 
     def proofread_all(self):
@@ -147,9 +141,9 @@ class ProofreaderAgent():
 
             for idx, src, trans in batch:
                 suggestion = suggestions.get(idx, "PASS")
+                if self.use_short_term_memory:
+                    self.conclude_to_stm(trans)
                 if suggestion != "PASS":
                     self.srt.segments[idx].suggestion = suggestion
                     self.logger.info(f"Added suggestion for segment {self.srt.segments[idx].translation}") if self.logger else None
-                    self.conclude_to_stm(trans)
                     
-        return self.short_term_memory

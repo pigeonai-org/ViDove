@@ -226,7 +226,12 @@ class BasicRAG(AbsApiRAG):
         if self.retriever is None:
             self.load_knowledge_base()
 
-        return self.retriever.retrieve(query)
+        if query is None or not isinstance(query, str) or not query.strip():
+            self.logger.error("Empty or invalid query provided to retrieve_relevant_nodes.")
+            return []
+        
+        ret = self.retriever.retrieve(query)
+        return ret
 
     def add_csv_to_index(self, csv_file_path: str, encoding: str = 'utf-8'):
         """
@@ -263,7 +268,6 @@ class BasicRAG(AbsApiRAG):
 
         # Update the retrievers
         self.retriever = self.index.as_retriever(similarity_top_k=5)
-        
         self.logger.info(f"Successfully added {len(nodes)} CSV rows to index")
 
     def add_to_index(self, text_or_texts, chunk_size=50, chunk_overlap=5):
@@ -277,7 +281,7 @@ class BasicRAG(AbsApiRAG):
         """
         if self.index is None:
             self.load_knowledge_base()
-
+        
         # Normalize input to a list of Documents
         if isinstance(text_or_texts, str):
             documents = [Document(text=text_or_texts)]
@@ -289,7 +293,13 @@ class BasicRAG(AbsApiRAG):
         # Split documents into nodes and insert
         splitter = SentenceSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
         nodes = splitter.get_nodes_from_documents(documents)
-        self.index.insert_nodes(nodes)
+        for i in range(5):
+            try:
+                self.index.insert_nodes(nodes)
+                break  # Exit loop if successful
+            except Exception as e:
+                self.logger.error(f"{i}: Error adding to index: {e}. Retrying...")
+                continue
 
         # Update the retrievers
         self.retriever = self.index.as_retriever(similarity_top_k=5)
