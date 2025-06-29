@@ -110,7 +110,7 @@ class QwenAudioAgent(AudioAgent):
 
 
 class GeminiAudioAgent(AudioAgent):
-    def __init__(self, model_name="gemini-2.5-pro-preview-03-25",audio_config: dict=None):
+    def __init__(self, model_name="gemini-2.5-flash",audio_config: dict=None):
         super().__init__(model_name,audio_config)
 
     def load_model(self):
@@ -160,12 +160,20 @@ class GeminiAudioAgent(AudioAgent):
             )
         ]
 
-        response = self.model.models.generate_content(
-            model=self.model_name,
-            contents=contents,
-        )
-        return self.parse_response(response.text)
-    
+        resp = None
+
+        for retry in range(5):
+            if resp is None:
+                response = self.model.models.generate_content(
+                    model=self.model_name,
+                    contents=contents,
+                )
+                resp = self.parse_response(response.text)
+            else:
+                return resp
+        self.logger.error("Failed to transcribe audio after 5 retries.")
+        return resp
+
     def analyze_audio(self, audio_path):
         with open(audio_path, "rb") as audio:
             audio_data = audio.read()
