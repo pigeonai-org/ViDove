@@ -27,3 +27,5 @@ testdata/
 *.avi
 *.mkv
 .venv
+eval
+evaluation_experiment
