@@ -292,7 +292,7 @@ def translate_srt_file(srt_path, src_lang="en", tgt_lang="zh", task_cfg=None):
         print(f"Converted SRT to text: {text_input_path}")
         
         # Run DocMTAgent translation
-        docmt_script = Path("./evaluation/DocMTAgent/demo/run_gpt.sh")
+        docmt_script = Path("./evaluation/delta_eval/DocMTAgent/demo/run_gpt.sh")
         if not docmt_script.exists():
             print(f"DocMTAgent script not found: {docmt_script}")
             return None
@@ -305,7 +305,7 @@ def translate_srt_file(srt_path, src_lang="en", tgt_lang="zh", task_cfg=None):
         
         # Change to DocMTAgent demo directory for execution
         original_cwd = os.getcwd()
-        docmt_demo_dir = Path("./evaluation/DocMTAgent/demo")
+        docmt_demo_dir = Path("./evaluation/delta_eval/DocMTAgent/demo")
         
         # Get absolute path of input file before changing directory
         abs_input_path = text_input_path.resolve()
