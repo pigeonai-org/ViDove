@@ -45,7 +45,7 @@ def SubERscore(hypothesis_file: str, reference_file: str) -> float:
 def SubSONARscore(hypothesis_file: str, reference_file: str) -> float:
     """
     Calculate SubSONAR score between hypothesis and reference SRT files.
-    
+    tests if SubSONAR is available, otherwise falls back to SubER.
     Args:
         hypothesis_file: Path to hypothesis SRT file
         reference_file: Path to reference SRT file
