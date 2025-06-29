@@ -1,18 +1,30 @@
+# DEPENDENCIES FOR LOCAL WHISPER:
+# - stable-ts: pip install stable-ts
+# - torch: pip install torch torchvision torchaudio
+# 
+# For local Whisper usage, make sure you have sufficient GPU memory (8GB+ recommended for large models)
+# To use local Whisper and avoid 25MB API file size limits, add --use-local-whisper flag
+
 import os
 import sys
 import json
 import subprocess
+import argparse
+import re
+import shutil
+import traceback
 from pathlib import Path
 
 # Add the project root to the Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(current_dir)
+project_root = os.path.dirname(os.path.dirname(current_dir))  # Go up two levels to get to ViDove root
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 # Import local modules after path setup
 try:
     from src.audio.ASR import WhisperAPIASR
+    from src.audio.ASR import StableWhisperASR
     from evaluation.utils.dataset_parser.to_big_video_format import to_big_video_format
 except ImportError as e:
     print(f"Import error: {e}")
@@ -75,7 +87,7 @@ except ImportError as e:
 BIGVIDEO_DATA_PATH = Path("./evaluation_experiment/BigVideo-test")
 DOVEBENCH_DATA_PATH = Path("./evaluation_experiment/DoveBench")
 
-def extract_audio(video_path, output_path, max_size_mb=25):
+def extract_audio(video_path, output_path, max_size_mb=25, use_local_whisper=False):
     """
     Extract audio from video file using ffmpeg with size optimization.
     
@@ -83,33 +95,59 @@ def extract_audio(video_path, output_path, max_size_mb=25):
         video_path (str or Path): Path to the video file.
         output_path (str or Path): Path to save the extracted audio.
         max_size_mb (int): Maximum file size in MB for OpenAI API compatibility.
+        use_local_whisper (bool): If True, skip size restrictions (local whisper can handle large files).
     
     Returns:
         Path: Path to the extracted audio file if successful, None otherwise.
     """
     try:
-        # First, try with lower bitrate to reduce file size
-        subprocess.run(
-            [
-                "ffmpeg", "-y",  # -y to overwrite output files
-                "-i", str(video_path),
-                "-f", "mp3",
-                "-ab", "128000",  # Lower bitrate: 64kbps instead of 192kbps
-                "-ar", "32000",  # Lower sample rate: 16kHz instead of default
-                "-ac", "1",      # Mono instead of stereo
-                "-vn",  # no video
-                str(output_path)
-            ],
-            check=True,
-            capture_output=True
-        )
+        # Choose audio quality based on whether we're using local whisper
+        if use_local_whisper:
+            # Higher quality for local whisper (no API size limits)
+            print("Using higher quality audio extraction for local Whisper...")
+            subprocess.run(
+                [
+                    "ffmpeg", "-y",  # -y to overwrite output files
+                    "-i", str(video_path),
+                    "-f", "mp3",
+                    "-ab", "192000",  # Higher bitrate: 192kbps
+                    "-ar", "44100",   # Higher sample rate: 44.1kHz
+                    "-ac", "1",       # Mono
+                    "-vn",  # no video
+                    str(output_path)
+                ],
+                check=True,
+                capture_output=True
+            )
+        else:
+            # Lower quality for API whisper (size constraints)
+            print("Using compressed audio extraction for API Whisper...")
+            subprocess.run(
+                [
+                    "ffmpeg", "-y",  # -y to overwrite output files
+                    "-i", str(video_path),
+                    "-f", "mp3",
+                    "-ab", "128000",  # Lower bitrate: 128kbps
+                    "-ar", "32000",   # Lower sample rate: 32kHz
+                    "-ac", "1",       # Mono
+                    "-vn",  # no video
+                    str(output_path)
+                ],
+                check=True,
+                capture_output=True
+            )
         
         # Check file size
         output_path = Path(output_path)
         file_size_mb = output_path.stat().st_size / (1024 * 1024)
         print(f"Audio extracted: {output_path} ({file_size_mb:.1f} MB)")
         
-        # If still too large, try even lower bitrate
+        # If using local whisper, we can handle large files
+        if use_local_whisper:
+            print(f"✅ Using local Whisper - file size {file_size_mb:.1f}MB is acceptable")
+            return output_path
+        
+        # For API whisper, apply size restrictions
         if file_size_mb > max_size_mb:
             print(f"File too large ({file_size_mb:.1f} MB), trying lower quality...")
             subprocess.run(
@@ -129,9 +167,10 @@ def extract_audio(video_path, output_path, max_size_mb=25):
             file_size_mb = output_path.stat().st_size / (1024 * 1024)
             print(f"Compressed audio: {output_path} ({file_size_mb:.1f} MB)")
         
-        # If still too large, split the audio
-        if file_size_mb > max_size_mb:
+        # If still too large for API, split the audio
+        if not use_local_whisper and file_size_mb > max_size_mb:
             print(f"File still too large ({file_size_mb:.1f} MB), splitting audio...")
+            print("💡 Tip: Use --use-local-whisper to avoid file size limits")
             return split_audio_file(output_path, max_size_mb)
         
         return output_path
@@ -139,12 +178,13 @@ def extract_audio(video_path, output_path, max_size_mb=25):
         print(f"Failed to extract audio from {video_path}: {e}")
         return None
 
-def audio_extractor(video_path):
+def audio_extractor(video_path, use_local_whisper=False):
     """
     Extract audio from video files for a single video.
     
     Args:
         video_path (str or Path): Path to the video file.
+        use_local_whisper (bool): If True, use higher quality extraction for local whisper.
     
     Returns:
         Path or List[Path]: Path(s) to the extracted audio file(s).
@@ -153,22 +193,28 @@ def audio_extractor(video_path):
     video_name = video_path.stem  # Get the base name without extension
     output_path = video_path.parent / f"{video_name}.mp3"
     
-    result = extract_audio(video_path, output_path)
+    result = extract_audio(video_path, output_path, use_local_whisper=use_local_whisper)
     return result
 
-def whisper_transcription(audio_paths, source_lang="en"):
+def whisper_transcription(audio_paths, source_lang="en", use_local_whisper=False):
     """
-    Transcribe audio using Whisper API ASR. Handles both single files and multiple chunks.
+    Transcribe audio using Whisper ASR. Handles both single files and multiple chunks.
     
     Args:
         audio_paths (str, Path, or List): Path(s) to the audio file(s).
         source_lang (str): Source language code.
+        use_local_whisper (bool): If True, use StableWhisperASR (local), otherwise use WhisperAPIASR.
     
     Returns:
         str: Transcription result in SRT format.
     """
     try:
-        asr = WhisperAPIASR()
+        if use_local_whisper:
+            print("Using local Whisper model (StableWhisperASR)...")
+            asr = StableWhisperASR()
+        else:
+            print("Using Whisper API (WhisperAPIASR)...")
+            asr = WhisperAPIASR()
         
         # Handle single file or list of files
         if isinstance(audio_paths, (str, Path)):
@@ -198,12 +244,23 @@ def whisper_transcription(audio_paths, source_lang="en"):
             else:
                 chunk_duration = 0.0
             
+            # Check file size and recommend local whisper for large files
+            audio_file_size = Path(audio_path).stat().st_size / (1024 * 1024)  # Size in MB
+            if not use_local_whisper and audio_file_size > 25:
+                print(f"⚠️ Warning: Audio file is {audio_file_size:.1f}MB (>25MB limit for API)")
+                print("   Consider using --use-local-whisper flag to avoid file size limits")
+            
             transcription = asr.get_transcript(str(audio_path), source_lang=source_lang)
             
             if transcription:
-                # Adjust timestamps if this is not the first chunk
-                if cumulative_time_offset > 0:
-                    transcription = adjust_srt_timestamps(transcription, cumulative_time_offset)
+                # Convert different formats to SRT format
+                if use_local_whisper:
+                    # StableWhisperASR returns segments format, convert to SRT
+                    transcription = convert_segments_to_srt(transcription, cumulative_time_offset)
+                else:
+                    # WhisperAPIASR returns SRT format, adjust timestamps if needed
+                    if cumulative_time_offset > 0:
+                        transcription = adjust_srt_timestamps(transcription, cumulative_time_offset)
                 
                 all_transcriptions.append(transcription)
                 cumulative_time_offset += chunk_duration
@@ -262,7 +319,6 @@ def translate_srt_file(srt_path, src_lang="en", tgt_lang="zh", task_cfg=None):
             srt_content = f.read()
         
         # Parse SRT and extract text lines (simple parsing)
-        import re
         # Extract subtitle text (ignore timestamps and sequence numbers)
         subtitle_pattern = r'\d+\n\d{2}:\d{2}:\d{2},\d{3} --> \d{2}:\d{2}:\d{2},\d{3}\n(.+?)(?=\n\d+\n|\n\n|\Z)'
         matches = re.findall(subtitle_pattern, srt_content, re.DOTALL)
@@ -384,7 +440,7 @@ def translate_srt_file(srt_path, src_lang="en", tgt_lang="zh", task_cfg=None):
         print(f"Error translating SRT file {srt_path}: {e}")
         return None
 
-def process_bigvideo_dataset(test_ids_file, video_dir, output_dir):
+def process_bigvideo_dataset(test_ids_file, video_dir, output_dir, use_local_whisper=False):
     """
     Process BigVideo dataset: extract audio, transcribe, translate, and evaluate.
     
@@ -392,6 +448,7 @@ def process_bigvideo_dataset(test_ids_file, video_dir, output_dir):
         test_ids_file (str or Path): Path to the test IDs file.
         video_dir (str or Path): Directory containing video files.
         output_dir (str or Path): Output directory for results.
+        use_local_whisper (bool): If True, use local Whisper model instead of API.
     
     Returns:
         dict: Evaluation results.
@@ -406,6 +463,10 @@ def process_bigvideo_dataset(test_ids_file, video_dir, output_dir):
         test_ids = [line.strip() for line in f if line.strip()]
     
     print(f"Found {len(test_ids)} test IDs to process")
+    if use_local_whisper:
+        print("🏠 Using local Whisper model (no file size limits)")
+    else:
+        print("☁️ Using Whisper API (25MB file size limit)")
     
     results = {
         "processed_files": [],
@@ -449,7 +510,7 @@ def process_bigvideo_dataset(test_ids_file, video_dir, output_dir):
                 continue
             
             # Extract audio
-            audio_file = audio_extractor(video_file)
+            audio_file = audio_extractor(video_file, use_local_whisper=use_local_whisper)
             if not audio_file:
                 print(f"Audio extraction failed for {test_id}")
                 results["failed_files"].append(test_id)
@@ -469,7 +530,7 @@ def process_bigvideo_dataset(test_ids_file, video_dir, output_dir):
                     continue
             
             # Transcribe audio
-            transcription = whisper_transcription(audio_file, source_lang="en")
+            transcription = whisper_transcription(audio_file, source_lang="en", use_local_whisper=use_local_whisper)
             if not transcription:
                 print(f"Transcription failed for {test_id}")
                 results["failed_files"].append(test_id)
@@ -505,13 +566,14 @@ def process_bigvideo_dataset(test_ids_file, video_dir, output_dir):
     
     return results
 
-def process_dovebench_dataset(dataset_dir, output_dir):
+def process_dovebench_dataset(dataset_dir, output_dir, use_local_whisper=False):
     """
     Process DoveBench dataset: extract audio, transcribe, translate, and evaluate.
     
     Args:
         dataset_dir (str or Path): Directory containing DoveBench data.
         output_dir (str or Path): Output directory for results.
+        use_local_whisper (bool): If True, use local Whisper model instead of API.
     
     Returns:
         dict: Evaluation results.
@@ -519,6 +581,11 @@ def process_dovebench_dataset(dataset_dir, output_dir):
     dataset_dir = Path(dataset_dir)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    
+    if use_local_whisper:
+        print("🏠 Using local Whisper model for DoveBench processing")
+    else:
+        print("☁️ Using Whisper API for DoveBench processing")
     
     results = {
         "processed_files": [],
@@ -556,7 +623,7 @@ def process_dovebench_dataset(dataset_dir, output_dir):
                 video_id = f"{domain_dir.name}/{video_dir.name}"
                 
                 # Extract audio
-                audio_file = audio_extractor(video_file)
+                audio_file = audio_extractor(video_file, use_local_whisper=use_local_whisper)
                 if not audio_file:
                     print(f"Audio extraction failed for {video_id}")
                     results["failed_files"].append(video_id)
@@ -576,7 +643,7 @@ def process_dovebench_dataset(dataset_dir, output_dir):
                         continue
                 
                 # Transcribe audio
-                transcription = whisper_transcription(audio_file, source_lang="en")
+                transcription = whisper_transcription(audio_file, source_lang="en", use_local_whisper=use_local_whisper)
                 if not transcription:
                     print(f"Transcription failed for {video_id}")
                     results["failed_files"].append(video_id)
@@ -595,7 +662,6 @@ def process_dovebench_dataset(dataset_dir, output_dir):
                 
                 # Copy translated SRT to the original data folder
                 translated_srt_file = video_dir / f"{video_dir.name}_translated.srt"
-                import shutil
                 shutil.copy2(translated_srt_path, translated_srt_file)
                 
                 # Load reference translation if exists
@@ -607,7 +673,6 @@ def process_dovebench_dataset(dataset_dir, output_dir):
                         with open(ref_files[0], 'r', encoding='utf-8') as f:
                             ass_content = f.read()
                             # Extract dialogue lines (this is a simplified approach)
-                            import re
                             dialogue_lines = re.findall(r'Dialogue:.*?,(.*)', ass_content)
                             ref_text = ' '.join(dialogue_lines).strip()
                     except Exception as e:
@@ -848,24 +913,29 @@ def save_results(results, scores, output_file):
     
     print(f"Results saved to: {output_file}")
 
-def test_single_video(video_path, output_dir="./test_output"):
+def test_single_video(video_path, output_dir="./test_output", use_local_whisper=False):
     """
     Test the evaluation pipeline on a single video file.
     
     Args:
         video_path (str or Path): Path to a single video file for testing.
         output_dir (str or Path): Output directory for test results.
+        use_local_whisper (bool): If True, use StableWhisperASR instead of OpenAI API.
     """
     video_path = Path(video_path)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
     print(f"Testing evaluation pipeline on: {video_path}")
+    if use_local_whisper:
+        print("🔧 Using local Whisper model (StableWhisperASR)")
+    else:
+        print("🌐 Using OpenAI Whisper API")
     
     try:
         # Extract audio
         print("1. Extracting audio...")
-        audio_file = audio_extractor(video_path)
+        audio_file = audio_extractor(video_path, use_local_whisper=use_local_whisper)
         if not audio_file:
             print("❌ Audio extraction failed")
             return False
@@ -885,7 +955,7 @@ def test_single_video(video_path, output_dir="./test_output"):
         
         # Transcribe
         print("2. Transcribing audio...")
-        transcription = whisper_transcription(audio_file, source_lang="en")
+        transcription = whisper_transcription(audio_file, source_lang="en", use_local_whisper=use_local_whisper)
         if not transcription:
             print("❌ Transcription failed")
             return False
@@ -913,7 +983,7 @@ def test_single_video(video_path, output_dir="./test_output"):
         print(f"❌ Test failed with error: {e}")
         return False
 
-def test_single_video_with_scoring(video_path, reference_text=None, source_text=None, output_dir="./test_scoring_output"):
+def test_single_video_with_scoring(video_path, reference_text=None, source_text=None, output_dir="./test_scoring_output", use_local_whisper=False):
     """
     Test the evaluation pipeline on a single video file with comprehensive scoring.
     
@@ -922,17 +992,22 @@ def test_single_video_with_scoring(video_path, reference_text=None, source_text=
         reference_text (str): Optional reference translation for scoring.
         source_text (str): Optional source text for COMET scoring.
         output_dir (str or Path): Output directory for test results.
+        use_local_whisper (bool): If True, use StableWhisperASR instead of OpenAI API.
     """
     video_path = Path(video_path)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
     print(f"Testing evaluation pipeline with scoring on: {video_path}")
+    if use_local_whisper:
+        print("🔧 Using local Whisper model (StableWhisperASR)")
+    else:
+        print("🌐 Using OpenAI Whisper API")
     
     try:
         # Extract audio
         print("1. Extracting audio...")
-        audio_file = audio_extractor(video_path)
+        audio_file = audio_extractor(video_path, use_local_whisper=use_local_whisper)
         if not audio_file:
             print("❌ Audio extraction failed")
             return False
@@ -955,7 +1030,7 @@ def test_single_video_with_scoring(video_path, reference_text=None, source_text=
         
         # Transcribe
         print("2. Transcribing audio...")
-        transcription = whisper_transcription(audio_file, source_lang="en")
+        transcription = whisper_transcription(audio_file, source_lang="en", use_local_whisper=use_local_whisper)
         if not transcription:
             print("❌ Transcription failed")
             return False
@@ -1045,7 +1120,6 @@ def test_single_video_with_scoring(video_path, reference_text=None, source_text=
         
     except Exception as e:
         print(f"❌ Test failed with error: {e}")
-        import traceback
         traceback.print_exc()
         return False
 
@@ -1121,7 +1195,6 @@ def adjust_srt_timestamps(srt_content, time_offset_seconds):
     Returns:
         str: SRT content with adjusted timestamps.
     """
-    import re
     
     def adjust_timestamp(match):
         start_time = match.group(1)
@@ -1168,7 +1241,6 @@ def combine_srt_transcriptions(transcriptions):
     Returns:
         str: Combined SRT content.
     """
-    import re
     
     combined_lines = []
     subtitle_counter = 1
@@ -1184,11 +1256,54 @@ def combine_srt_transcriptions(transcriptions):
     
     return '\n'.join(combined_lines)
 
-def main():
+def convert_segments_to_srt(segments, time_offset=0.0):
+    """
+    Convert segments format (from StableWhisperASR) to SRT format.
+    
+    Args:
+        segments (list): List of segment dictionaries with 'start', 'end', 'text' keys.
+        time_offset (float): Time offset in seconds to add to all timestamps.
+    
+    Returns:
+        str: SRT formatted transcription.
+    """
+    srt_content = []
+    
+    for i, segment in enumerate(segments):
+        # Extract data from segment
+        start_time = segment.get('start', 0.0) + time_offset
+        end_time = segment.get('end', start_time + 1.0) + time_offset
+        text = segment.get('text', '').strip()
+        
+        if not text:
+            continue
+        
+        # Convert seconds to SRT timestamp format (HH:MM:SS,mmm)
+        def format_timestamp(seconds):
+            hours = int(seconds // 3600)
+            minutes = int((seconds % 3600) // 60)
+            secs = int(seconds % 60)
+            milliseconds = int((seconds % 1) * 1000)
+            return f"{hours:02d}:{minutes:02d}:{secs:02d},{milliseconds:03d}"
+        
+        # Create SRT entry
+        srt_entry = f"{i + 1}\n{format_timestamp(start_time)} --> {format_timestamp(end_time)}\n{text}\n"
+        srt_content.append(srt_entry)
+    
+    return '\n'.join(srt_content)
+
+def main(use_local_whisper=False):
     """
     Main evaluation function for DocMTAgent on DoveBench and BigVideo datasets.
+    
+    Args:
+        use_local_whisper (bool): If True, use StableWhisperASR instead of OpenAI API.
     """
     print("Starting DocMTAgent evaluation...")
+    if use_local_whisper:
+        print("🔧 Using local Whisper model (StableWhisperASR) - no file size limits")
+    else:
+        print("🌐 Using OpenAI Whisper API - 25MB file size limit applies")
     
     # Create output directories
     output_dir = Path("./evaluation_results")
@@ -1203,7 +1318,8 @@ def main():
     bigvideo_results = process_bigvideo_dataset(
         test_ids_file=BIGVIDEO_DATA_PATH / "text_data_test.id",
         video_dir=BIGVIDEO_DATA_PATH / "test",
-        output_dir=bigvideo_output
+        output_dir=bigvideo_output,
+        use_local_whisper=use_local_whisper
     )
     
     bigvideo_scores = calculate_bigvideo_scores(bigvideo_results, bigvideo_output)
@@ -1216,7 +1332,8 @@ def main():
     
     dovebench_results = process_dovebench_dataset(
         dataset_dir=DOVEBENCH_DATA_PATH,
-        output_dir=dovebench_output
+        output_dir=dovebench_output,
+        use_local_whisper=use_local_whisper
     )
     
     dovebench_scores = calculate_dovebench_scores(dovebench_results, dovebench_output)
@@ -1254,6 +1371,9 @@ if __name__ == "__main__":
                         help="Output directory for results")
     parser.add_argument("--reference-text", type=str, help="Reference translation for scoring test")
     parser.add_argument("--source-text", type=str, help="Source text for COMET scoring test")
+    parser.add_argument("--use-local-whisper", action="store_true", 
+                        help="Use local Whisper model (StableWhisperASR) instead of OpenAI API. "
+                             "Avoids 25MB file size limit but requires local model installation.")
     
     args = parser.parse_args()
     
@@ -1261,7 +1381,7 @@ if __name__ == "__main__":
         if not args.test_video:
             print("Error: --test-video is required for test mode")
             exit(1)
-        test_single_video(args.test_video, args.output_dir)
+        test_single_video(args.test_video, args.output_dir, use_local_whisper=args.use_local_whisper)
     elif args.mode == "test-scoring":
         if not args.test_video:
             print("Error: --test-video is required for test-scoring mode")
@@ -1270,10 +1390,11 @@ if __name__ == "__main__":
             args.test_video, 
             args.reference_text, 
             args.source_text, 
-            args.output_dir
+            args.output_dir,
+            use_local_whisper=args.use_local_whisper
         )
     elif args.mode == "full":
-        main()
+        main(use_local_whisper=args.use_local_whisper)
     elif args.mode == "bigvideo":
         print("Processing BigVideo dataset only...")
         output_dir = Path(args.output_dir)
@@ -1282,7 +1403,8 @@ if __name__ == "__main__":
         bigvideo_results = process_bigvideo_dataset(
             test_ids_file=BIGVIDEO_DATA_PATH / "text_data_test.id",
             video_dir=BIGVIDEO_DATA_PATH / "test",
-            output_dir=bigvideo_output
+            output_dir=bigvideo_output,
+            use_local_whisper=args.use_local_whisper
         )
         
         bigvideo_scores = calculate_bigvideo_scores(bigvideo_results, bigvideo_output)
@@ -1302,7 +1424,8 @@ if __name__ == "__main__":
         
         dovebench_results = process_dovebench_dataset(
             dataset_dir=DOVEBENCH_DATA_PATH,
-            output_dir=dovebench_output
+            output_dir=dovebench_output,
+            use_local_whisper=args.use_local_whisper
         )
         
         dovebench_scores = calculate_dovebench_scores(dovebench_results, dovebench_output)
