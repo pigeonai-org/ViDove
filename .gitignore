@@ -28,3 +28,6 @@ testdata/
 *.mkv
 .venv
 evaluation/test_data/
+eval
+evaluation_experiment
+
