@@ -3,6 +3,8 @@ from pyannote.audio import Pipeline
 import subprocess
 import sys
 import os
+import requests
+import time
 
 # Add the project root directory to the Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -12,13 +14,20 @@ import datetime
 
 class VAD:
     def __init__(self, model_name_or_path: str, src_lang: str, tgt_lang: str):
-        self.model = Pipeline.from_pretrained(
-        model_name_or_path,
-        use_auth_token=os.getenv("HF_TOKEN"),
-    )
         self.src_lang = src_lang
         self.tgt_lang = tgt_lang
         self.srt = None
+        
+        if model_name_or_path == "API":
+            self.model = None
+            self.api_key = os.getenv("PYANNOTE_API_KEY")
+            if not self.api_key:
+                raise ValueError("PYANNOTE_API_KEY environment variable is required when using API mode")
+        else:
+            self.model = Pipeline.from_pretrained(
+                model_name_or_path,
+                use_auth_token=os.getenv("HF_TOKEN"),
+            )
     
     @staticmethod
     def load_audio(audio_path: str):
@@ -27,7 +36,72 @@ class VAD:
         audio = audio.set_frame_rate(16000)  # 16kHz
         return audio
 
-    def get_speaker_segments(self, audio_path: str):
+    def get_speaker_segments_api(self, audio_path: str, webhook_url: str = None):
+        print(f"Processing audio file via API: {audio_path}")
+        srt = SrtScript(src_lang=self.src_lang, tgt_lang=self.tgt_lang)
+        
+        # Upload the audio file to get a URL (you'll need to implement this part)
+        # For now, we'll assume audio_path is already a URL
+        file_url = audio_path
+        
+        url = "https://api.pyannote.ai/v1/diarize"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}"
+        }
+        data = {
+            'url': file_url
+        }
+        if webhook_url:
+            data['webhook'] = webhook_url
+            
+        response = requests.post(url, headers=headers, json=data)
+        
+        if response.status_code != 200:
+            raise Exception(f"API request failed with status code {response.status_code}: {response.text}")
+            
+        job_data = response.json()
+        job_id = job_data['jobId']
+        
+        # Poll for results
+        while True:
+            status_response = requests.get(f"{url}/{job_id}", headers=headers)
+            if status_response.status_code != 200:
+                raise Exception(f"Failed to get job status: {status_response.text}")
+                
+            status_data = status_response.json()
+            if status_data['status'] == 'completed':
+                # Process the results
+                for segment in status_data['segments']:
+                    start_time = segment['start']
+                    end_time = segment['end']
+                    speaker = segment['speaker']
+                    
+                    if end_time - start_time < 1:
+                        continue
+                        
+                    srt.segments.append(SrtSegment(
+                        src_lang=self.src_lang,
+                        tgt_lang=self.tgt_lang,
+                        src_text="",
+                        translation="",
+                        speaker=speaker,
+                        start_time=start_time,
+                        end_time=end_time,
+                        idx=len(srt.segments)
+                    ))
+                break
+            elif status_data['status'] == 'failed':
+                raise Exception(f"Job failed: {status_data.get('error', 'Unknown error')}")
+                
+            time.sleep(5)  # Wait 5 seconds before polling again
+            
+        self.srt = srt
+        return srt
+
+    def get_speaker_segments(self, audio_path: str, webhook_url: str = None):
+        if self.model is None:
+            return self.get_speaker_segments_api(audio_path, webhook_url)
+            
         print(f"Processing audio file: {audio_path}")
         srt = SrtScript(src_lang=self.src_lang, tgt_lang=self.tgt_lang)
         segments = self.model(audio_path)  
@@ -106,6 +180,6 @@ class VAD:
                 print(f"Error processing segment {start_ms}-{end_ms}: {e}")
 
 if __name__ == "__main__":
-    vad = VAD("pyannote/speaker-diarization-3.1", "en", "en")
-    segments = vad.get_speaker_segments("test.wav")
-    VAD.clip_audio_and_save(segments, "test.wav", ".output")
+    vad = VAD("API", "en", "en")
+    segments = vad.get_speaker_segments_api("/home/mlp/eason/Y0000003046_74RJksRTFSo_S00085.wav")
+    # VAD.clip_audio_and_save(segments, "/home/mlp/eason/Y0000003046_74RJksRTFSo_S00085.wav", ".output")
