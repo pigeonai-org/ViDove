@@ -26,3 +26,4 @@ testdata/
 *.mov
 *.avi
 *.mkv
+.venv

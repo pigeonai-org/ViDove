@@ -1,30 +1,18 @@
 from pathlib import Path
 import re
 
-def to_big_video_format(srt_path):
-    # big video is a dataset we plan to test on
+def remove_timestamp_and_num(lines):
+    """Remove timestamp and number lines from SRT file content
+    
+    Args:
+        lines: List of lines from SRT file
+        
+    Returns:
+        List of subtitle text lines with timestamps and numbers removed
     """
-    original file example:
-    1
-    00:00:00,000 --> 00:00:01,000
-    Hello
-    2
-    00:00:01,000 --> 00:00:02,000
-    World
-    
-    output example(big video dataset "test_data_test.zh" format):
-    Hello, World
-    """
-    
-    srt_path = Path(srt_path)
-    
-    with open(srt_path, 'r', encoding='utf-8') as f:
-        lines = f.readlines()
-    
     text_lines = []
     i = 0
     
-    # Iterate through each line, skip number lines and timestamp lines
     while i < len(lines):
         line = lines[i].strip()
         
@@ -33,13 +21,11 @@ def to_big_video_format(srt_path):
             i += 1
             continue
             
-        # Check if it's a number line (pure digit)
+        # Skip number and timestamp lines
         if line.isdigit():
             i += 1
-            # Next line should be a timestamp line
             if i < len(lines) and '-->' in lines[i]:
                 i += 1
-                # The following non-empty lines are subtitle text until next number or end of file
                 while i < len(lines) and lines[i].strip() and not lines[i].strip().isdigit():
                     text_line = lines[i].strip()
                     if text_line:
@@ -47,28 +33,71 @@ def to_big_video_format(srt_path):
                     i += 1
             continue
         
-        # If not a number line and not a known marker, treat as text line
+        # Keep non-timestamp text lines
         if '-->' not in line:
             text_lines.append(line)
         
         i += 1
+        
+    return text_lines
+
+def align_to_one_line(text_lines):
+    """Combine multiple lines into one line
     
-    # Combine all text lines into one line
-    combined_text = ' '.join(text_lines)
+    Args:
+        text_lines: List of subtitle text lines
+        
+    Returns:
+        Single string with all lines combined
+    """
+    return ' '.join(text_lines)
+
+def add_comma(text):
+    """Add commas between text segments and period at end
     
+    Args:
+        text: Combined text string
+        
+    Returns:
+        Text with commas between segments and period at end
+    """
     # Replace spaces with commas
-    combined_text = combined_text.replace(' ', '，')
+    text = text.replace(' ', '，')
     
-    # Handle possible consecutive commas
-    combined_text = re.sub('，+', '，', combined_text)
+    # Handle consecutive commas
+    text = re.sub('，+', '，', text)
     
-    # Remove trailing comma (if any) and add period
-    if combined_text.endswith('，'):
-        combined_text = combined_text[:-1]
+    # Remove trailing comma and add period
+    if text.endswith('，'):
+        text = text[:-1]
+        
+    if not text.endswith('。'):
+        text += '。'
+        
+    return text
+
+def to_big_video_format(srt_path):
+    """Convert SRT file to big video format
     
-    if not combined_text.endswith('。'):
-        combined_text += '。'
+    Args:
+        srt_path: Path to SRT file
+        
+    Returns:
+        Text in big video format (single line with commas)
+    """
+    srt_path = Path(srt_path)
     
+    with open(srt_path, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+    
+    text_lines = remove_timestamp_and_num(lines)
+    combined_text = align_to_one_line(text_lines)
+    formatted_text = add_comma(combined_text)
+    
+    # 需要remove comma就用这个
+    # return formatted_text
+
+    # 不需要remove comma就用这个
     return combined_text
 
 def batch_convert_srt_files(input_dir, output_dir=None, output_suffix="_plain"):

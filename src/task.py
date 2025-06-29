@@ -23,7 +23,7 @@ from src.vision.gpt_vision_agent import GptVisionAgent, CLIPVisionAgent, assista
 from src.audio.audio_agent import GeminiAudioAgent, ClassicAudioAgent
 #from src.VAD.VAD import VAD
 #from src.ASR.ASR import ASR
-
+from src.editorial.editor import EditorAgent
 class TaskStatus(str, Enum):
     """
     An enumeration class representing the different statuses a task can have in the translation pipeline.
@@ -83,6 +83,9 @@ class Task:
         self.post_setting = task_cfg["post_process"]
         self.chunk_size = task_cfg["translation"]["chunk_size"]
         self.api_source = task_cfg["api_source"]
+        
+        self.proofreader_setting = task_cfg["proofreader"]
+        self.editor_setting = task_cfg["editor"]
 
 
         self.audio_path = None
@@ -151,7 +154,7 @@ class Task:
             self.local_knowledge = BasicRAG(self.task_logger, self.domain)
             # persist_dir = f"{self.task_local_dir}/storage"
             data_dir = f"{self.memory_setting['local_knowledge_path']}/{self.domain}"
-            self.local_knowledge.load_knowledge_base(data_dir=data_dir)
+            self.local_knowledge.load_knowledge_base(data_dir=data_dir, num_retrievals = 10)
         
         if self.memory_setting["enable_web_search"]:
             #TODO: init web search
@@ -202,8 +205,22 @@ class Task:
                 self.audio_agent = GeminiAudioAgent(audio_config=self.audio_setting)
             else:
                 raise ValueError(f"Unsupported vision model: {self.vision_setting['vision_model']}")
-
-
+            
+        self.proofreader = None
+        if self.proofreader_setting["enable_proofreading"]:
+            from src.editorial.proofreader import ProofreaderAgent
+            self.proofreader = ProofreaderAgent(
+                client = self.client,
+                srt = None,  # Will be set later
+                local_knowledge = self.local_knowledge,
+                web_search = self.web_search,
+                logger = self.task_logger,
+                batch_size = self.proofreader_setting["window_size"],
+                stm_len = self.proofreader_setting["short_term_memory_len"],
+                use_short_term_memory = self.proofreader_setting["enable_short_term_memory"]
+            )
+            self.task_logger.info("Proofreader initialized.")
+        
     @staticmethod
     def fromYoutubeLink(youtube_url, task_id, task_dir, task_cfg):
         """
@@ -269,7 +286,26 @@ class Task:
             if segment.audio_path is not None:
                 self.task_logger.info(f"Transcribing audio file: {segment.audio_path}")
                 temp_segment = self.audio_agent.transcribe(segment.audio_path, segment.visual_cues)
+                if temp_segment is None:
+                    self.task_logger.warning(f"No transcription found for segment {idx}, skipping.")
+                    continue
 
+                for idx, seg in enumerate(temp_segment):
+                    # Ensure the segment starts before it ends, if violation occurs, adjust the start time to end time of a former segment, if no former segment, set to 0
+                    if segment.timestr_to_seconds(seg['start']) >= segment.timestr_to_seconds(seg['end']):
+                        if idx > 0:
+                            self.task_logger.warning(f"Segment {idx} start time is greater than or equal to end time, adjusting.")
+                            seg['start'] = temp_segment[idx - 1]['end']
+                        else:
+                            self.task_logger.warning(f"Segment {idx} start time is greater than or equal to end time, setting start time to 0.")
+                            seg['start'] = segment.format_time(0)
+
+                    # Sort and adjust the start and end times of the segments, ensure the former ends before the latter starts
+                    if idx < len(temp_segment) - 1:
+                        if segment.timestr_to_seconds(seg['end']) > segment.timestr_to_seconds(temp_segment[idx + 1]['start']):
+                            self.task_logger.warning(f"Segment {idx} end time is greater than next segment start time, adjusting.")
+                            seg['end'] = temp_segment[idx + 1]['start']
+                            
                 for seg in temp_segment:
                     seg['start'] = segment.timestr_to_seconds(seg['start']) + segment.start_time
                     seg['end'] = segment.timestr_to_seconds(seg['end']) + segment.start_time
@@ -355,6 +391,38 @@ class Task:
             "---------------------Post-processing SRT class finished---------------------"
         )
 
+    def proofread(self):
+        """
+        Handles the proofreading of the translated SRT script.
+        """
+        self.status = TaskStatus.POST_PROCESSING
+        self.task_logger.info(
+            "---------------------Start Proofreading---------------------"
+        )
+        if self.proofreader is not None:
+            self.proofreader.set_srt(self.SRT_Script)
+            self.proofreader.proofread_all()
+            self.SRT_Script = self.proofreader.srt
+        else:
+            self.task_logger.warning("Proofreader is not initialized, skipping proofreading.")
+
+    def editor(self):
+        """
+        Handles the editing of the translated SRT script.
+        """
+        editor = None
+        if self.editor_setting["enable_editor"]:
+            editor = EditorAgent(
+                client = self.client,
+                srt = self.SRT_Script,
+                memory = self.local_knowledge,
+                logger = self.task_logger,
+                history_len = self.editor_setting["history_length"],
+                user_instruction = self.editor_setting["user_instruction"]
+            )
+        if editor is None: return
+        editor.edit_all()
+
     def output_render(self):
         self.status = TaskStatus.OUTPUT_MODULE
         video_out = self.output_type["video"]
@@ -412,16 +480,20 @@ class Task:
         self.transcribe()
         # self.preprocess()
         self.translation()
+
         # self.postprocess()
+        self.proofread()
+        self.editor()
         self.result = self.output_render()
-        
+
+        """
         if self.result.endswith(".srt"):
             from evaluation.scores.score import SubERscore
             from evaluation.scores.cleaning import clean_srt_file
 
             hypo_srt_path = self.result
             # reference srt file path, you need to input it
-            ref_srt_path = "/Users/zonghengwu/Desktop/Vidove Compare/dirty_subtitle.srt"
+            ref_srt_path = "dirty_subtitle.srt"
 
             try:
                 cleaned_ref_srt_path = ref_srt_path.replace(".srt", "_cleaned.srt")
@@ -433,6 +505,7 @@ class Task:
                 print(f"SubER evaluation failed: {e}")
         else:
             print("[INFO] Output is not a subtitle file, skipping SubER evaluation.")
+        """    
 
 
 class YoutubeTask(Task):

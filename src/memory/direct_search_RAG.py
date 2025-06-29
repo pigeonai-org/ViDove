@@ -29,8 +29,9 @@ class TavilySearchRAG(BasicRAG):
         self.logger = logger
         self.max_results = max_results
 
-    def retrieve_relevant_nodes(self, query: str) -> list[Document]:
+    def retrieve_relevant_nodes(self, query: str, use_window_retrieval=True) -> list[Document]:
         #added this function for testing
+        # Note: use_window_retrieval is ignored for web search as it doesn't apply
         if not isinstance(query, str) or not query.strip():
             self.logger.error("Empty or invalid query provided to Tavily search.")
             return []

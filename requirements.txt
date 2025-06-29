@@ -46,3 +46,9 @@ pyenchant==3.2.2
 cryptography
 opencv-python
 yt-dlp
+starlette==0.36.3
+pydantic==2.9.2
+fastapi==0.110.0
+uvicorn==0.27.1
+tavily-python
+torchaudio==2.2.0

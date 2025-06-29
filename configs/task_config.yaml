@@ -1,17 +1,17 @@
 # configuration for each task
 source_lang: EN
 target_lang: ZH
-domain: General
+domain: CS:GO
 
 # YouTube Download Option
 video_download:
   resolution: 480 # 360, 480, 720, best(best we can find)
 
 MEMEORY: 
-  enable_local_knowledge: True
+  enable_local_knowledge: False
   enable_vision_knowledge: True
-  enable_web_search: True
-  local_knowledge_path: "/Users/liujiaen/Documents/Codes/ViDove/domain_dict"
+  enable_web_search: False
+  local_knowledge_path: "/home/macrodove/ViDove/domain_dict"
 
 # VAD config
 #VAD:
@@ -48,9 +48,21 @@ translation:
   chunk_size: 2000
 
 # post-process module config
-post_process: 
-  check_len_and_split: True
-  remove_trans_punctuation: True
+post_process:
+  enable_post_process: True
+
+proofreader: 
+  enable_proofreading: True
+  window_size: 5 # number of sentences per proofreading chunk
+  short_term_memory_len: 5 # maximum number of sentences stored in short term memory
+  enable_short_term_memory: False # whether to use short term memory for proofreading
+  verbose: True # whether to print the proofreading process
+
+editor:
+  enable_editor: True
+  user_instruction: None # "Any additional information that can help the editor to improve the translation quality, such as the target audience, tone, and style of the translation. If you don't have any specific requirements, you can leave it empty."
+  editor_context_window: 10 # number of sentences to be provided as context for the editor(previous and next {n} sentences)
+  history_length: 5 # number of sentences to be provided as history for the editor(previous {n} sentences)
 
 # output type that user receive
 output_type: 
