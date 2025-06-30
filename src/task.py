@@ -522,25 +522,25 @@ class YoutubeTask(Task):
         self.task_logger.info(f"Youtube URL: {self.youtube_url}")
         self.task_logger.info(f"Video Resolution: {self.video_resolution}")
         video_download_path = f"{self.task_local_dir}/task_{self.task_id}.mp4"
-        audio_download_dir = f"{self.task_local_dir}/task_{self.task_id}.mp3"
 
         if self.video_resolution == "best":
-            video_format = "bestvideo[ext=mp4]+bestaudio/bestvideo"
+            video_format = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio"
         elif self.video_resolution in [360, 480, 720]:
-            video_format = f"bestvideo[height={self.video_resolution}][ext=mp4]+bestaudio[ext=mp3]/worstvideo[ext=mp4]+bestaudio[ext=mp3]/worst[ext=mp4]"
+            video_format = f"bestvideo[height<={self.video_resolution}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<={self.video_resolution}]+bestaudio"
         else:
             raise RuntimeError(f"Unsupported video resolution: {self.video_resolution}")
 
         video_opts = {
             "format": video_format,
             "outtmpl": video_download_path,
+            "postprocessors": [{
+                "key": "FFmpegVideoConvertor",
+                "preferedformat": "mp4",
+            }],
+            "prefer_ffmpeg": True,
         }
 
-        audio_opts = {
-            "format": "bestaudio[ext=mp3]/bestaudio",
-            "outtmpl": audio_download_dir,
-        }
-
+        # Download video only - we'll extract audio using ffmpeg
         with yt_dlp.YoutubeDL(video_opts) as ydl:
             try:
                 ydl.download([self.youtube_url])
@@ -549,16 +549,34 @@ class YoutubeTask(Task):
                 raise RuntimeError(f"Failed to download video {self.youtube_url}")
             ydl.close()
 
-        with yt_dlp.YoutubeDL(audio_opts) as ydl:
-            try:
-                ydl.download([self.youtube_url])
-            except yt_dlp.utils.DownloadError as e:
-                self.task_logger.error(e)
-                raise RuntimeError(f"Failed to download audio {self.youtube_url}")
-            ydl.close()
-
+        # Extract audio from downloaded video using ffmpeg (same as VideoTask)
         self.video_path = self.task_local_dir.joinpath(f"task_{self.task_id}.mp4")
-        self.audio_path = self.task_local_dir.joinpath(f"task_{self.task_id}.mp3")
+        audio_path = self.task_local_dir.joinpath(f"task_{self.task_id}.mp3")
+        
+        self.task_logger.info("using ffmpeg to extract audio from downloaded video")
+        result = subprocess.run(
+            [
+                "ffmpeg",
+                "-i",
+                str(self.video_path),
+                "-f",
+                "mp3",
+                "-ab",
+                "192000",
+                "-vn",
+                str(audio_path),
+            ],
+            capture_output=True,
+            text=True
+        )
+        
+        if result.returncode != 0:
+            self.task_logger.error(f"FFmpeg audio extraction failed: {result.stderr}")
+            raise RuntimeError(f"Failed to extract audio from video: {result.stderr}")
+            
+        self.task_logger.info("audio extraction finished")
+        
+        self.audio_path = audio_path
 
         self.task_logger.info(f" Video File Dir: {self.video_path}")
         self.task_logger.info(f" Audio File Dir: {self.audio_path}")
