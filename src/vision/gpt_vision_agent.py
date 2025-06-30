@@ -14,6 +14,7 @@ from transformers import (
     pipeline
 )
 from src.vision.vision_agent import VisionAgent
+import logging
 # import clip # use huggingface clip later
 
 class GptVisionAgent(VisionAgent):
@@ -22,6 +23,12 @@ class GptVisionAgent(VisionAgent):
         self.visual_cues = []
         openai.api_key = os.getenv('OPENAI_API_KEY')
         self.client = OpenAI()
+        # Initialize agent history logger - will be set by task
+        self.agent_history_logger = None
+    
+    def set_agent_history_logger(self, logger):
+        """Set the agent history logger from task"""
+        self.agent_history_logger = logger
     
     def load_model(self, model_path = None):
         # TODO: Implement model loading logic (e.g., OpenAI API or local vLLM model)
@@ -65,6 +72,9 @@ class GptVisionAgent(VisionAgent):
         return response.choices[0].message.content
     
     def summarize_cue(self):
+        if self.agent_history_logger:
+            self.agent_history_logger.info('{"role": "vision_agent", "message": "Let me feast my eyes on these frames... Picasso mode: ON 🖼️"}')
+        
         prompt = f"Summarize the following visual description: {' '.join(self.visual_cues)}"
         response = openai.chat.completions.create(
             model="gpt-4.5-preview-2025-02-27",
@@ -76,9 +86,15 @@ class GptVisionAgent(VisionAgent):
                 }
             ],
         )
+        
+        if self.agent_history_logger:
+            self.agent_history_logger.info('{"role": "vision_agent", "message": "Visual summary ready! I could do this all day, but I won\'t."}')
         return response.choices[0].message.content
 
     def analyze_video(self, video_path):
+        if self.agent_history_logger:
+            self.agent_history_logger.info('{"role": "vision_agent", "message": "Alright, rolling up my sleeves to analyze this video. Hope it\'s not a horror flick! 🎬"}')
+        
         cap = cv2.VideoCapture(video_path)
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         
@@ -102,6 +118,10 @@ class GptVisionAgent(VisionAgent):
             frame_count += 1
 
         cap.release()
+        
+        if self.agent_history_logger:
+            self.agent_history_logger.info('{"role": "vision_agent", "message": "Video frame analysis done! My eyes need a break, but let\'s summarize first."}')
+        
         return self.summarize_cue()
 
 

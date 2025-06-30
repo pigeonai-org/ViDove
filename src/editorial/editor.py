@@ -1,6 +1,7 @@
 from typing import Callable, Dict, Optional
 from src.SRT.srt import SrtScript, SrtSegment
 from src.memory.abs_api_RAG import AbsApiRAG
+import logging
 
 class EditorAgent():
     def __init__(
@@ -23,6 +24,12 @@ class EditorAgent():
         self.logger = logger
         self.history_len = history_len
         self.user_instruction = user_instruction
+        # Initialize agent history logger - will be set by task
+        self.agent_history_logger = None
+
+    def set_agent_history_logger(self, logger):
+        """Set the agent history logger from task"""
+        self.agent_history_logger = logger
 
     def register_handler(self, name: str, func: Callable):
         """Register or replace a post-edit handler by name."""
@@ -49,6 +56,10 @@ class EditorAgent():
             nodes = self.memory.retrieve_relevant_nodes(translation)
             ltm = [n.text for n in nodes]
         ltm = "\n".join(ltm) if ltm else "None"
+
+        if self.user_instruction:
+            user_instruction_str = self.user_instruction.replace("\n", "; ")
+            self.agent_history_logger.info(f'{{"role": "editor", "message": "I received the following user instruction: {user_instruction_str}"}}')
 
         return f"""You are an Editor ensuring overall translation quality and coherence,
                 aligning the translation with the original video content in domain `{self.srt.domain}`, you must ensure the term and style are aligned with the domain's language.
@@ -119,8 +130,13 @@ class EditorAgent():
 
     def edit_all(self) -> Dict[int, str]:
         """Edit every segment and apply handlers. Returns dict index->final edits."""
+        self.agent_history_logger.info('{"role": "editor", "message": "Time to sprinkle some editorial magic. Let\'s make it smooth as butter!"}')
+        
         for idx, src, trans in self.srt_iterator():
             prompt = self.build_prompt(idx, src, trans)
             edits = self.send_request(prompt)
             self.srt.segments[idx].translation = edits.strip()
             self.logger.info(f"Edited segment {idx}: {edits.strip()}") if self.logger else None
+            self.agent_history_logger.info(f'{{"role": "editor", "message": "Edited segment {idx}: {edits.strip()}"}}')
+        
+        self.agent_history_logger.info('{"role": "editor", "message": "All done! These lines are now as polished as my morning coffee mug."}')

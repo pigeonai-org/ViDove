@@ -3,6 +3,7 @@ import openai
 from typing import Callable, Dict, Optional, List, Tuple
 from src.SRT.srt import SrtScript
 from src.memory.abs_api_RAG import AbsApiRAG
+import logging
 
 class ProofreaderAgent():
     def __init__(
@@ -27,9 +28,16 @@ class ProofreaderAgent():
         self.verbose = verbose
         self.use_short_term_memory = use_short_term_memory
         self.short_term_memory = ""
+        # Initialize agent history logger - will be set by task
+        self.agent_history_logger = None
+
+    def set_agent_history_logger(self, logger):
+        """Set the agent history logger from task"""
+        self.agent_history_logger = logger
 
     def set_srt(self, srt: SrtScript):
         self.srt = srt
+        self.agent_history_logger.info('{"role": "proofreader", "message": "Alright, let me put on my red pen and nitpick these lines. No mercy! ✏️"}')
 
     def srt_iterator(self):
         for idx, seg in enumerate(self.srt.segments):
@@ -112,6 +120,8 @@ class ProofreaderAgent():
                 """
 
     def proofread_all(self):
+        self.agent_history_logger.info('{"role": "proofreader", "message": "Let\'s see what we\'ve got here... time to hunt for typos and awkward phrasing!"}')
+        
         segments = list(self.srt_iterator())
         for i in range(0, len(segments), self.batch_size):
             batch = segments[i:i + self.batch_size]
@@ -134,6 +144,8 @@ class ProofreaderAgent():
                         prefix, suggestion = line.split(":", 1)
                         if self.verbose > 0 and self.logger:
                             self.logger.info(f"Processing suggestion for {prefix.strip()}: {suggestion.strip()}")
+                        if self.agent_history_logger:
+                            self.agent_history_logger.info(f'{{"role": "proofreader", "message": "My suggestion for {prefix.strip()}: {suggestion.strip()}"}}')
                         idx = int(prefix.replace("Segment ", "").strip())
                         suggestions[idx] = suggestion.strip()
                     except Exception:
@@ -146,4 +158,6 @@ class ProofreaderAgent():
                 if suggestion != "PASS":
                     self.srt.segments[idx].suggestion = suggestion
                     self.logger.info(f"Added suggestion for segment {self.srt.segments[idx].translation}") if self.logger else None
+        
+        self.agent_history_logger.info('{"role": "proofreader", "message": "Proofreading done! If I missed anything, it must be perfect already 😏"}')
                     
