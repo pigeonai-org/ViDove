@@ -256,7 +256,14 @@ def whisper_transcription(audio_paths, source_lang="en", use_local_whisper=False
                 # Convert different formats to SRT format
                 if use_local_whisper:
                     # StableWhisperASR returns segments format, convert to SRT
-                    transcription = convert_segments_to_srt(transcription, cumulative_time_offset)
+                    try:
+                        transcription = convert_segments_to_srt(transcription, cumulative_time_offset)
+                    except Exception as convert_error:
+                        print(f"Error converting segments to SRT: {convert_error}")
+                        print(f"Transcription format: {type(transcription)}")
+                        if isinstance(transcription, list) and len(transcription) > 0:
+                            print(f"First segment example: {transcription[0]}")
+                        return None
                 else:
                     # WhisperAPIASR returns SRT format, adjust timestamps if needed
                     if cumulative_time_offset > 0:
@@ -267,6 +274,7 @@ def whisper_transcription(audio_paths, source_lang="en", use_local_whisper=False
                 print(f"Transcription successful for chunk {i+1}")
             else:
                 print(f"Failed to transcribe chunk {i+1}: {audio_path}")
+                print(f"ASR returned: {transcription}")
                 return None
         
         # Combine all transcriptions
@@ -913,216 +921,6 @@ def save_results(results, scores, output_file):
     
     print(f"Results saved to: {output_file}")
 
-def test_single_video(video_path, output_dir="./test_output", use_local_whisper=False):
-    """
-    Test the evaluation pipeline on a single video file.
-    
-    Args:
-        video_path (str or Path): Path to a single video file for testing.
-        output_dir (str or Path): Output directory for test results.
-        use_local_whisper (bool): If True, use StableWhisperASR instead of OpenAI API.
-    """
-    video_path = Path(video_path)
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    
-    print(f"Testing evaluation pipeline on: {video_path}")
-    if use_local_whisper:
-        print("🔧 Using local Whisper model (StableWhisperASR)")
-    else:
-        print("🌐 Using OpenAI Whisper API")
-    
-    try:
-        # Extract audio
-        print("1. Extracting audio...")
-        audio_file = audio_extractor(video_path, use_local_whisper=use_local_whisper)
-        if not audio_file:
-            print("❌ Audio extraction failed")
-            return False
-            
-        # Handle case where audio_file might be a list (split files)
-        if isinstance(audio_file, list):
-            # Check if any of the chunks exist
-            if not any(f.exists() for f in audio_file):
-                print("❌ Audio extraction failed")
-                return False
-            print(f"✅ Audio extracted and split into {len(audio_file)} chunks")
-        else:
-            if not audio_file.exists():
-                print("❌ Audio extraction failed")
-                return False
-            print(f"✅ Audio extracted: {audio_file}")
-        
-        # Transcribe
-        print("2. Transcribing audio...")
-        transcription = whisper_transcription(audio_file, source_lang="en", use_local_whisper=use_local_whisper)
-        if not transcription:
-            print("❌ Transcription failed")
-            return False
-        print("✅ Transcription completed")
-        
-        # Save SRT
-        print("3. Saving SRT file...")
-        srt_file = output_dir / f"{video_path.stem}.srt"
-        save_srt_transcription(transcription, srt_file)
-        print(f"✅ SRT saved: {srt_file}")
-        
-        # Translate
-        print("4. Translating...")
-        translated_srt_path = translate_srt_file(srt_file, src_lang="en", tgt_lang="zh")
-        if not translated_srt_path:
-            print("❌ Translation failed")
-            return False
-        print("✅ Translation completed")
-        print(f"✅ Translated SRT saved: {translated_srt_path}")
-        
-        print("🎉 Test completed successfully!")
-        return True
-        
-    except Exception as e:
-        print(f"❌ Test failed with error: {e}")
-        return False
-
-def test_single_video_with_scoring(video_path, reference_text=None, source_text=None, output_dir="./test_scoring_output", use_local_whisper=False):
-    """
-    Test the evaluation pipeline on a single video file with comprehensive scoring.
-    
-    Args:
-        video_path (str or Path): Path to a single video file for testing.
-        reference_text (str): Optional reference translation for scoring.
-        source_text (str): Optional source text for COMET scoring.
-        output_dir (str or Path): Output directory for test results.
-        use_local_whisper (bool): If True, use StableWhisperASR instead of OpenAI API.
-    """
-    video_path = Path(video_path)
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    
-    print(f"Testing evaluation pipeline with scoring on: {video_path}")
-    if use_local_whisper:
-        print("🔧 Using local Whisper model (StableWhisperASR)")
-    else:
-        print("🌐 Using OpenAI Whisper API")
-    
-    try:
-        # Extract audio
-        print("1. Extracting audio...")
-        audio_file = audio_extractor(video_path, use_local_whisper=use_local_whisper)
-        if not audio_file:
-            print("❌ Audio extraction failed")
-            return False
-            
-        # Handle case where audio_file might be a list (split files)
-        if isinstance(audio_file, list):
-            if not any(f.exists() for f in audio_file):
-                print("❌ Audio extraction failed")
-                return False
-            print(f"✅ Audio extracted and split into {len(audio_file)} chunks")
-            for i, chunk in enumerate(audio_file):
-                file_size = chunk.stat().st_size / (1024 * 1024)
-                print(f"   Chunk {i+1}: {chunk.name} ({file_size:.1f} MB)")
-        else:
-            if not audio_file.exists():
-                print("❌ Audio extraction failed")
-                return False
-            file_size = audio_file.stat().st_size / (1024 * 1024)
-            print(f"✅ Audio extracted: {audio_file.name} ({file_size:.1f} MB)")
-        
-        # Transcribe
-        print("2. Transcribing audio...")
-        transcription = whisper_transcription(audio_file, source_lang="en", use_local_whisper=use_local_whisper)
-        if not transcription:
-            print("❌ Transcription failed")
-            return False
-        print("✅ Transcription completed")
-        
-        # Save SRT
-        print("3. Saving SRT file...")
-        srt_file = output_dir / f"{video_path.stem}.srt"
-        save_srt_transcription(transcription, srt_file)
-        print(f"✅ SRT saved: {srt_file}")
-        
-        # Translate
-        print("4. Translating...")
-        translated_srt_path = translate_srt_file(srt_file, src_lang="en", tgt_lang="zh")
-        if not translated_srt_path:
-            print("❌ Translation failed")
-            return False
-        print("✅ Translation completed")
-        print(f"✅ Translated SRT saved: {translated_srt_path}")
-        
-        # Extract texts for scoring
-        print("5. Extracting texts for scoring...")
-        original_text = to_big_video_format(srt_file)
-        translated_text = to_big_video_format(translated_srt_path)
-        
-        print(f"Original text preview: {original_text[:100]}...")
-        print(f"Translated text preview: {translated_text[:100]}...")
-        
-        # Test scoring functionality
-        print("6. Testing scoring functionality...")
-        scores = {}
-        
-        if SCORING_AVAILABLE:
-            try:
-                # Test BLEU score with a simple reference
-                test_reference = reference_text if reference_text else "这是一个测试翻译示例。"
-                test_translation = translated_text if translated_text else "这是翻译的文本。"
-                
-                print("   Testing BLEU score...")
-                bleu_score = BLEUscore([test_translation], [[test_reference]])
-                scores["BLEU"] = bleu_score.score
-                print(f"   ✅ BLEU Score: {bleu_score.score:.4f}")
-                
-                # Test COMET score
-                if source_text or original_text:
-                    print("   Testing COMET score...")
-                    test_source = source_text if source_text else original_text
-                    try:
-                        # Fix multiprocessing issue with COMET by using batch_size=1 and gpus=0
-                        comet_result = COMETscore([test_source], [test_translation], [test_reference])
-                        if hasattr(comet_result, 'scores'):
-                            scores["COMET"] = sum(comet_result.scores) / len(comet_result.scores)
-                            print(f"   ✅ COMET Score: {scores['COMET']:.4f}")
-                        else:
-                            scores["COMET"] = comet_result.score if hasattr(comet_result, 'score') else 0.0
-                            print(f"   ✅ COMET Score: {scores['COMET']:.4f}")
-                    except Exception as comet_error:
-                        print(f"   ⚠️ COMET scoring failed: {comet_error}")
-                        scores["COMET"] = 0.0
-                        print(f"   ⚠️ COMET Score (fallback): {scores['COMET']:.4f}")
-                
-            except Exception as e:
-                print(f"   ⚠️ Scoring failed: {e}")
-                print("   This is expected if scoring dependencies are not fully installed")
-        else:
-            print("   ⚠️ Scoring modules not available")
-        
-        # Save detailed results
-        results = {
-            "video_file": str(video_path),
-            "audio_file": str(audio_file) if not isinstance(audio_file, list) else [str(f) for f in audio_file],
-            "srt_file": str(srt_file),
-            "translated_srt_file": str(translated_srt_path),
-            "original_text": original_text,
-            "translated_text": translated_text,
-            "scores": scores,
-            "success": True
-        }
-        
-        results_file = output_dir / "test_results.json"
-        with open(results_file, 'w', encoding='utf-8') as f:
-            json.dump(results, f, indent=2, ensure_ascii=False)
-        
-        print(f"✅ Test results saved: {results_file}")
-        print("🎉 Comprehensive test completed successfully!")
-        return True
-        
-    except Exception as e:
-        print(f"❌ Test failed with error: {e}")
-        traceback.print_exc()
-        return False
-
 def split_audio_file(audio_path, max_size_mb=20):
     """
     Split audio file into smaller chunks that fit OpenAI's size limit.
@@ -1267,28 +1065,60 @@ def convert_segments_to_srt(segments, time_offset=0.0):
     Returns:
         str: SRT formatted transcription.
     """
+    if not segments:
+        print("Warning: Empty segments list provided")
+        return ""
+    
+    if not isinstance(segments, list):
+        print(f"Warning: Expected list of segments, got {type(segments)}")
+        return ""
+    
     srt_content = []
+    entry_counter = 1
     
     for i, segment in enumerate(segments):
-        # Extract data from segment
-        start_time = segment.get('start', 0.0) + time_offset
-        end_time = segment.get('end', start_time + 1.0) + time_offset
-        text = segment.get('text', '').strip()
-        
-        if not text:
+        try:
+            # Handle different segment formats
+            if isinstance(segment, dict):
+                # Standard format: {'start': float, 'end': float, 'text': str}
+                start_time = float(segment.get('start', 0.0)) + time_offset
+                end_time = float(segment.get('end', start_time + 1.0)) + time_offset
+                text = str(segment.get('text', '')).strip()
+            elif hasattr(segment, 'start') and hasattr(segment, 'end') and hasattr(segment, 'text'):
+                # Object format with attributes
+                start_time = float(getattr(segment, 'start', 0.0)) + time_offset
+                end_time = float(getattr(segment, 'end', start_time + 1.0)) + time_offset
+                text = str(getattr(segment, 'text', '')).strip()
+            else:
+                print(f"Warning: Unrecognized segment format at index {i}: {type(segment)}")
+                continue
+            
+            if not text:
+                continue
+            
+            # Convert seconds to SRT timestamp format (HH:MM:SS,mmm)
+            def format_timestamp(seconds):
+                if seconds < 0:
+                    seconds = 0
+                hours = int(seconds // 3600)
+                minutes = int((seconds % 3600) // 60)
+                secs = int(seconds % 60)
+                milliseconds = int((seconds % 1) * 1000)
+                return f"{hours:02d}:{minutes:02d}:{secs:02d},{milliseconds:03d}"
+            
+            # Create SRT entry
+            srt_entry = f"{entry_counter}\n{format_timestamp(start_time)} --> {format_timestamp(end_time)}\n{text}\n"
+            srt_content.append(srt_entry)
+            entry_counter += 1
+            
+        except Exception as e:
+            print(f"Warning: Error processing segment {i}: {e}")
+            print(f"Segment content: {segment}")
             continue
-        
-        # Convert seconds to SRT timestamp format (HH:MM:SS,mmm)
-        def format_timestamp(seconds):
-            hours = int(seconds // 3600)
-            minutes = int((seconds % 3600) // 60)
-            secs = int(seconds % 60)
-            milliseconds = int((seconds % 1) * 1000)
-            return f"{hours:02d}:{minutes:02d}:{secs:02d},{milliseconds:03d}"
-        
-        # Create SRT entry
-        srt_entry = f"{i + 1}\n{format_timestamp(start_time)} --> {format_timestamp(end_time)}\n{text}\n"
-        srt_content.append(srt_entry)
+    
+    if not srt_content:
+        print("Warning: No valid segments could be converted to SRT")
+        return ""
     
     return '\n'.join(srt_content)
 
@@ -1360,11 +1190,509 @@ def main(use_local_whisper=False):
     
     print(f"\nResults saved to: {output_dir}")
 
+def find_missing_files_bigvideo(test_ids_file, output_dir):
+    """
+    Find missing translation files for BigVideo dataset by comparing with ID file.
+    
+    Args:
+        test_ids_file (str or Path): Path to the test IDs file.
+        output_dir (str or Path): Output directory containing existing results.
+    
+    Returns:
+        tuple: (all_test_ids, missing_ids, existing_ids)
+    """
+    test_ids_file = Path(test_ids_file)
+    output_dir = Path(output_dir)
+    
+    # Read all test IDs
+    with open(test_ids_file, 'r', encoding='utf-8') as f:
+        all_test_ids = [line.strip() for line in f if line.strip()]
+    
+    # Check which files already have translations
+    existing_ids = []
+    missing_ids = []
+    
+    for test_id in all_test_ids:
+        translated_srt = output_dir / f"{test_id}_translated.srt"
+        if translated_srt.exists():
+            existing_ids.append(test_id)
+        else:
+            missing_ids.append(test_id)
+    
+    print("BigVideo dataset status:")
+    print(f"  Total files: {len(all_test_ids)}")
+    print(f"  Already processed: {len(existing_ids)}")
+    print(f"  Missing: {len(missing_ids)}")
+    
+    if missing_ids:
+        print(f"  Missing files: {missing_ids[:5]}{'...' if len(missing_ids) > 5 else ''}")
+    
+    return all_test_ids, missing_ids, existing_ids
+
+def find_missing_files_dovebench(dataset_dir, output_dir):
+    """
+    Find missing translation files for DoveBench dataset by checking video directories.
+    
+    Args:
+        dataset_dir (str or Path): Directory containing DoveBench data.
+        output_dir (str or Path): Output directory containing existing results.
+    
+    Returns:
+        tuple: (all_video_ids, missing_ids, existing_ids)
+    """
+    dataset_dir = Path(dataset_dir)
+    output_dir = Path(output_dir)
+    
+    all_video_ids = []
+    existing_ids = []
+    missing_ids = []
+    
+    # Scan all domains and videos
+    for domain_dir in dataset_dir.iterdir():
+        if not domain_dir.is_dir() or domain_dir.name.startswith('.'):
+            continue
+        
+        for video_dir in domain_dir.iterdir():
+            if not video_dir.is_dir():
+                continue
+            
+            video_id = f"{domain_dir.name}/{video_dir.name}"
+            all_video_ids.append(video_id)
+            
+            # Check if translation exists
+            translated_srt = output_dir / domain_dir.name / f"{video_dir.name}_translated.srt"
+            if translated_srt.exists():
+                existing_ids.append(video_id)
+            else:
+                missing_ids.append(video_id)
+    
+    print("DoveBench dataset status:")
+    print(f"  Total files: {len(all_video_ids)}")
+    print(f"  Already processed: {len(existing_ids)}")
+    print(f"  Missing: {len(missing_ids)}")
+    
+    if missing_ids:
+        print(f"  Missing files: {missing_ids[:5]}{'...' if len(missing_ids) > 5 else ''}")
+    
+    return all_video_ids, missing_ids, existing_ids
+
+def resume_bigvideo_dataset(test_ids_file, video_dir, output_dir, use_local_whisper=False):
+    """
+    Resume BigVideo dataset processing: only process missing translation files.
+    
+    Args:
+        test_ids_file (str or Path): Path to the test IDs file.
+        video_dir (str or Path): Directory containing video files.
+        output_dir (str or Path): Output directory for results.
+        use_local_whisper (bool): If True, use local Whisper model instead of API.
+    
+    Returns:
+        dict: Evaluation results.
+    """
+    test_ids_file = Path(test_ids_file)
+    video_dir = Path(video_dir)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    print("\n🔄 RESUMING BigVideo dataset processing...")
+    
+    # Find missing files
+    all_test_ids, missing_ids, existing_ids = find_missing_files_bigvideo(test_ids_file, output_dir)
+    
+    if not missing_ids:
+        print("✅ All files already processed! Loading existing results for evaluation...")
+        
+        # Load existing translations and apply metrics
+        results = {
+            "processed_files": existing_ids,
+            "failed_files": [],
+            "translations": {},
+            "original_texts": {},
+            "reference_texts": {}
+        }
+        
+        # Load reference texts
+        ref_en_file = BIGVIDEO_DATA_PATH / "text_data_test.en"
+        ref_zh_file = BIGVIDEO_DATA_PATH / "text_data_test.zh"
+        
+        ref_en_texts = {}
+        ref_zh_texts = {}
+        
+        if ref_en_file.exists():
+            with open(ref_en_file, 'r', encoding='utf-8') as f:
+                ref_en_lines = f.readlines()
+        
+        if ref_zh_file.exists():
+            with open(ref_zh_file, 'r', encoding='utf-8') as f:
+                ref_zh_lines = f.readlines()
+        
+        # Map reference texts to IDs
+        for i, test_id in enumerate(all_test_ids):
+            if i < len(ref_en_lines):
+                ref_en_texts[test_id] = ref_en_lines[i].strip()
+            if i < len(ref_zh_lines):
+                ref_zh_texts[test_id] = ref_zh_lines[i].strip()
+        
+        # Load existing results
+        for test_id in existing_ids:
+            srt_file = output_dir / f"{test_id}.srt"
+            translated_srt_file = output_dir / f"{test_id}_translated.srt"
+            
+            if srt_file.exists() and translated_srt_file.exists():
+                original_text = to_big_video_format(srt_file)
+                translated_text = to_big_video_format(translated_srt_file)
+                
+                results["translations"][test_id] = translated_text
+                results["original_texts"][test_id] = original_text
+                results["reference_texts"][test_id] = ref_zh_texts.get(test_id, "")
+        
+        return results
+    
+    if use_local_whisper:
+        print("🏠 Using local Whisper model for missing files")
+    else:
+        print("☁️ Using Whisper API for missing files")
+    
+    # Process only missing files
+    results = {
+        "processed_files": list(existing_ids),  # Start with existing files
+        "failed_files": [],
+        "translations": {},
+        "original_texts": {},
+        "reference_texts": {}
+    }
+    
+    # Load reference texts
+    ref_en_file = BIGVIDEO_DATA_PATH / "text_data_test.en"
+    ref_zh_file = BIGVIDEO_DATA_PATH / "text_data_test.zh"
+    
+    ref_en_texts = {}
+    ref_zh_texts = {}
+    
+    if ref_en_file.exists():
+        with open(ref_en_file, 'r', encoding='utf-8') as f:
+            ref_en_lines = f.readlines()
+    
+    if ref_zh_file.exists():
+        with open(ref_zh_file, 'r', encoding='utf-8') as f:
+            ref_zh_lines = f.readlines()
+    
+    # Map reference texts to IDs
+    for i, test_id in enumerate(all_test_ids):
+        if i < len(ref_en_lines):
+            ref_en_texts[test_id] = ref_en_lines[i].strip()
+        if i < len(ref_zh_lines):
+            ref_zh_texts[test_id] = ref_zh_lines[i].strip()
+    
+    # Load existing processed files first
+    for test_id in existing_ids:
+        srt_file = output_dir / f"{test_id}.srt"
+        translated_srt_file = output_dir / f"{test_id}_translated.srt"
+        
+        if srt_file.exists() and translated_srt_file.exists():
+            original_text = to_big_video_format(srt_file)
+            translated_text = to_big_video_format(translated_srt_file)
+            
+            results["translations"][test_id] = translated_text
+            results["original_texts"][test_id] = original_text
+            results["reference_texts"][test_id] = ref_zh_texts.get(test_id, "")
+    
+    # Process missing files
+    for test_id in missing_ids:
+        try:
+            print(f"\n📝 Processing missing file: {test_id}...")
+            
+            # Find video file
+            video_file = video_dir / f"{test_id}.mp4"
+            if not video_file.exists():
+                print(f"❌ Video file not found: {video_file}")
+                results["failed_files"].append(test_id)
+                continue
+            
+            # Extract audio
+            audio_file = audio_extractor(video_file, use_local_whisper=use_local_whisper)
+            if not audio_file:
+                print(f"❌ Audio extraction failed for {test_id}")
+                results["failed_files"].append(test_id)
+                continue
+            
+            # Handle case where audio_file might be a list (split files)
+            if isinstance(audio_file, list):
+                if not any(f.exists() for f in audio_file):
+                    print(f"❌ Audio extraction failed for {test_id}")
+                    results["failed_files"].append(test_id)
+                    continue
+            else:
+                if not audio_file.exists():
+                    print(f"❌ Audio extraction failed for {test_id}")
+                    results["failed_files"].append(test_id)
+                    continue
+            
+            # Transcribe audio
+            transcription = whisper_transcription(audio_file, source_lang="en", use_local_whisper=use_local_whisper)
+            if not transcription:
+                print(f"❌ Transcription failed for {test_id}")
+                results["failed_files"].append(test_id)
+                continue
+            
+            # Save transcription as SRT file
+            srt_file = output_dir / f"{test_id}.srt"
+            save_srt_transcription(transcription, srt_file)
+            
+            # Translate SRT file
+            translated_srt_path = translate_srt_file(srt_file, src_lang="en", tgt_lang="zh")
+            if not translated_srt_path:
+                print(f"❌ Translation failed for {test_id}")
+                results["failed_files"].append(test_id)
+                continue
+            
+            # Convert to BigVideo format
+            original_text = to_big_video_format(srt_file)
+            translated_text = to_big_video_format(translated_srt_path)
+            
+            results["translations"][test_id] = translated_text
+            results["original_texts"][test_id] = original_text
+            results["reference_texts"][test_id] = ref_zh_texts.get(test_id, "")
+            results["processed_files"].append(test_id)
+            
+            print(f"✅ Successfully processed {test_id}")
+            
+        except Exception as e:
+            print(f"❌ Error processing {test_id}: {e}")
+            results["failed_files"].append(test_id)
+    
+    print("\n📊 Resume completed!")
+    print(f"  Total files: {len(all_test_ids)}")
+    print(f"  Previously processed: {len(existing_ids)}")
+    print(f"  Newly processed: {len([f for f in results['processed_files'] if f not in existing_ids])}")
+    print(f"  Failed: {len(results['failed_files'])}")
+    
+    return results
+
+def resume_dovebench_dataset(dataset_dir, output_dir, use_local_whisper=False):
+    """
+    Resume DoveBench dataset processing: only process missing translation files.
+    
+    Args:
+        dataset_dir (str or Path): Directory containing DoveBench data.
+        output_dir (str or Path): Output directory for results.
+        use_local_whisper (bool): If True, use local Whisper model instead of API.
+    
+    Returns:
+        dict: Evaluation results.
+    """
+    dataset_dir = Path(dataset_dir)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    print("\n🔄 RESUMING DoveBench dataset processing...")
+    
+    # Find missing files
+    all_video_ids, missing_ids, existing_ids = find_missing_files_dovebench(dataset_dir, output_dir)
+    
+    if not missing_ids:
+        print("✅ All files already processed! Loading existing results for evaluation...")
+        
+        # Load existing translations and apply metrics
+        results = {
+            "processed_files": existing_ids,
+            "failed_files": [],
+            "translations": {},
+            "original_texts": {},
+            "reference_texts": {}
+        }
+        
+        # Load existing results
+        for video_id in existing_ids:
+            domain, video_name = video_id.split('/')
+            srt_file = output_dir / domain / f"{video_name}.srt"
+            translated_srt_file = output_dir / domain / f"{video_name}_translated.srt"
+            
+            if srt_file.exists() and translated_srt_file.exists():
+                original_text = to_big_video_format(srt_file)
+                translated_text = to_big_video_format(translated_srt_file)
+                
+                results["translations"][video_id] = translated_text
+                results["original_texts"][video_id] = original_text
+                
+                # Load reference translation if exists
+                video_dir = dataset_dir / domain / video_name
+                ref_files = list(video_dir.glob("*_ZH.ass"))
+                ref_text = ""
+                if ref_files:
+                    try:
+                        with open(ref_files[0], 'r', encoding='utf-8') as f:
+                            ref_content = f.read()
+                            # Simple ASS parsing - extract dialogue lines
+                            dialogue_lines = []
+                            for line in ref_content.split('\n'):
+                                if line.startswith('Dialogue:'):
+                                    parts = line.split(',', 9)
+                                    if len(parts) >= 10:
+                                        dialogue_lines.append(parts[9].strip())
+                            ref_text = ' '.join(dialogue_lines)
+                    except Exception as e:
+                        print(f"Error reading reference file {ref_files[0]}: {e}")
+                
+                results["reference_texts"][video_id] = ref_text
+        
+        return results
+    
+    if use_local_whisper:
+        print("🏠 Using local Whisper model for missing files")
+    else:
+        print("☁️ Using Whisper API for missing files")
+    
+    # Process missing files
+    results = {
+        "processed_files": list(existing_ids),  # Start with existing files
+        "failed_files": [],
+        "translations": {},
+        "original_texts": {},
+        "reference_texts": {}
+    }
+    
+    # Load existing processed files first
+    for video_id in existing_ids:
+        domain, video_name = video_id.split('/')
+        srt_file = output_dir / domain / f"{video_name}.srt"
+        translated_srt_file = output_dir / domain / f"{video_name}_translated.srt"
+        
+        if srt_file.exists() and translated_srt_file.exists():
+            original_text = to_big_video_format(srt_file)
+            translated_text = to_big_video_format(translated_srt_file)
+            
+            results["translations"][video_id] = translated_text
+            results["original_texts"][video_id] = original_text
+            
+            # Load reference translation if exists
+            video_dir = dataset_dir / domain / video_name
+            ref_files = list(video_dir.glob("*_ZH.ass"))
+            ref_text = ""
+            if ref_files:
+                try:
+                    with open(ref_files[0], 'r', encoding='utf-8') as f:
+                        ref_content = f.read()
+                        # Simple ASS parsing - extract dialogue lines
+                        dialogue_lines = []
+                        for line in ref_content.split('\n'):
+                            if line.startswith('Dialogue:'):
+                                parts = line.split(',', 9)
+                                if len(parts) >= 10:
+                                    dialogue_lines.append(parts[9].strip())
+                        ref_text = ' '.join(dialogue_lines)
+                except Exception as e:
+                    print(f"Error reading reference file {ref_files[0]}: {e}")
+            
+            results["reference_texts"][video_id] = ref_text
+    
+    # Process missing files
+    for video_id in missing_ids:
+        try:
+            domain, video_name = video_id.split('/')
+            print(f"\n📝 Processing missing file: {video_id}...")
+            
+            # Create domain output directory
+            domain_output = output_dir / domain
+            domain_output.mkdir(parents=True, exist_ok=True)
+            
+            # Find video file
+            video_dir = dataset_dir / domain / video_name
+            video_files = list(video_dir.glob("*.mp4"))
+            if not video_files:
+                print(f"❌ No video file found in {video_dir}")
+                results["failed_files"].append(video_id)
+                continue
+            
+            video_file = video_files[0]
+            
+            # Extract audio
+            audio_file = audio_extractor(video_file, use_local_whisper=use_local_whisper)
+            if not audio_file:
+                print(f"❌ Audio extraction failed for {video_id}")
+                results["failed_files"].append(video_id)
+                continue
+            
+            # Handle case where audio_file might be a list (split files)
+            if isinstance(audio_file, list):
+                if not any(f.exists() for f in audio_file):
+                    print(f"❌ Audio extraction failed for {video_id}")
+                    results["failed_files"].append(video_id)
+                    continue
+            else:
+                if not audio_file.exists():
+                    print(f"❌ Audio extraction failed for {video_id}")
+                    results["failed_files"].append(video_id)
+                    continue
+            
+            # Transcribe audio
+            transcription = whisper_transcription(audio_file, source_lang="en", use_local_whisper=use_local_whisper)
+            if not transcription:
+                print(f"❌ Transcription failed for {video_id}")
+                results["failed_files"].append(video_id)
+                continue
+            
+            # Save transcription as SRT file
+            srt_file = domain_output / f"{video_name}.srt"
+            save_srt_transcription(transcription, srt_file)
+            
+            # Translate SRT file
+            translated_srt_path = translate_srt_file(srt_file, src_lang="en", tgt_lang="zh")
+            if not translated_srt_path:
+                print(f"❌ Translation failed for {video_id}")
+                results["failed_files"].append(video_id)
+                continue
+            
+            # Copy translated SRT to the original data folder
+            translated_srt_file = video_dir / f"{video_name}_translated.srt"
+            shutil.copy2(translated_srt_path, translated_srt_file)
+            
+            # Load reference translation if exists
+            ref_files = list(video_dir.glob("*_ZH.ass"))
+            ref_text = ""
+            if ref_files:
+                try:
+                    with open(ref_files[0], 'r', encoding='utf-8') as f:
+                        ref_content = f.read()
+                        # Simple ASS parsing - extract dialogue lines
+                        dialogue_lines = []
+                        for line in ref_content.split('\n'):
+                            if line.startswith('Dialogue:'):
+                                parts = line.split(',', 9)
+                                if len(parts) >= 10:
+                                    dialogue_lines.append(parts[9].strip())
+                        ref_text = ' '.join(dialogue_lines)
+                except Exception as e:
+                    print(f"Error reading reference file {ref_files[0]}: {e}")
+            
+            # Convert to text format
+            original_text = to_big_video_format(srt_file)  # Original transcription
+            translated_text = to_big_video_format(translated_srt_path)  # Translated text
+            
+            results["translations"][video_id] = translated_text
+            results["original_texts"][video_id] = original_text
+            results["reference_texts"][video_id] = ref_text
+            results["processed_files"].append(video_id)
+            
+            print(f"✅ Successfully processed {video_id}")
+            
+        except Exception as e:
+            print(f"❌ Error processing {video_id}: {e}")
+            results["failed_files"].append(video_id)
+    
+    print("\n📊 Resume completed!")
+    print(f"  Total files: {len(all_video_ids)}")
+    print(f"  Previously processed: {len(existing_ids)}")
+    print(f"  Newly processed: {len([f for f in results['processed_files'] if f not in existing_ids])}")
+    print(f"  Failed: {len(results['failed_files'])}")
+    
+    return results
+
 if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description="DocMTAgent Evaluation Script")
-    parser.add_argument("--mode", choices=["full", "test", "test-scoring", "bigvideo", "dovebench"], 
+    parser.add_argument("--mode", choices=["full", "test", "test-scoring", "bigvideo", "dovebench", "resume", "resume-bigvideo", "resume-dovebench"], 
                         default="full", help="Evaluation mode")
     parser.add_argument("--test-video", type=str, help="Path to a single video file for testing")
     parser.add_argument("--output-dir", type=str, default="./evaluation_results", 
@@ -1377,23 +1705,7 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
-    if args.mode == "test":
-        if not args.test_video:
-            print("Error: --test-video is required for test mode")
-            exit(1)
-        test_single_video(args.test_video, args.output_dir, use_local_whisper=args.use_local_whisper)
-    elif args.mode == "test-scoring":
-        if not args.test_video:
-            print("Error: --test-video is required for test-scoring mode")
-            exit(1)
-        test_single_video_with_scoring(
-            args.test_video, 
-            args.reference_text, 
-            args.source_text, 
-            args.output_dir,
-            use_local_whisper=args.use_local_whisper
-        )
-    elif args.mode == "full":
+    if args.mode == "full":
         main(use_local_whisper=args.use_local_whisper)
     elif args.mode == "bigvideo":
         print("Processing BigVideo dataset only...")
@@ -1432,6 +1744,105 @@ if __name__ == "__main__":
         save_results(dovebench_results, dovebench_scores, dovebench_output / "evaluation_results.json")
         
         print("\nDoveBench Results:")
+        print(f"  Processed: {len(dovebench_results['processed_files'])} files")
+        print(f"  Failed: {len(dovebench_results['failed_files'])} files")
+        if dovebench_scores:
+            for metric, score in dovebench_scores.items():
+                print(f"  {metric}: {score:.4f}")
+    
+    elif args.mode == "resume":
+        print("Resuming evaluation for both datasets...")
+        output_dir = Path(args.output_dir)
+        bigvideo_output = output_dir / "bigvideo"
+        dovebench_output = output_dir / "dovebench"
+        
+        # Resume BigVideo dataset
+        print("\n" + "="*50)
+        print("Resuming BigVideo dataset...")
+        print("="*50)
+        
+        bigvideo_results = resume_bigvideo_dataset(
+            test_ids_file=BIGVIDEO_DATA_PATH / "text_data_test.id",
+            video_dir=BIGVIDEO_DATA_PATH / "test",
+            output_dir=bigvideo_output,
+            use_local_whisper=args.use_local_whisper
+        )
+        
+        bigvideo_scores = calculate_bigvideo_scores(bigvideo_results, bigvideo_output)
+        save_results(bigvideo_results, bigvideo_scores, bigvideo_output / "evaluation_results.json")
+        
+        # Resume DoveBench dataset
+        print("\n" + "="*50)
+        print("Resuming DoveBench dataset...")
+        print("="*50)
+        
+        dovebench_results = resume_dovebench_dataset(
+            dataset_dir=DOVEBENCH_DATA_PATH,
+            output_dir=dovebench_output,
+            use_local_whisper=args.use_local_whisper
+        )
+        
+        dovebench_scores = calculate_dovebench_scores(dovebench_results, dovebench_output)
+        save_results(dovebench_results, dovebench_scores, dovebench_output / "evaluation_results.json")
+        
+        # Print summary
+        print("\n" + "="*50)
+        print("RESUME EVALUATION SUMMARY")
+        print("="*50)
+        
+        print("\nBigVideo Dataset:")
+        print(f"  Processed: {len(bigvideo_results['processed_files'])} files")
+        print(f"  Failed: {len(bigvideo_results['failed_files'])} files")
+        if bigvideo_scores:
+            for metric, score in bigvideo_scores.items():
+                print(f"  {metric}: {score:.4f}")
+        
+        print("\nDoveBench Dataset:")
+        print(f"  Processed: {len(dovebench_results['processed_files'])} files")
+        print(f"  Failed: {len(dovebench_results['failed_files'])} files")
+        if dovebench_scores:
+            for metric, score in dovebench_scores.items():
+                print(f"  {metric}: {score:.4f}")
+        
+        print(f"\nResults saved to: {output_dir}")
+    
+    elif args.mode == "resume-bigvideo":
+        print("Resuming BigVideo dataset only...")
+        output_dir = Path(args.output_dir)
+        bigvideo_output = output_dir / "bigvideo"
+        
+        bigvideo_results = resume_bigvideo_dataset(
+            test_ids_file=BIGVIDEO_DATA_PATH / "text_data_test.id",
+            video_dir=BIGVIDEO_DATA_PATH / "test",
+            output_dir=bigvideo_output,
+            use_local_whisper=args.use_local_whisper
+        )
+        
+        bigvideo_scores = calculate_bigvideo_scores(bigvideo_results, bigvideo_output)
+        save_results(bigvideo_results, bigvideo_scores, bigvideo_output / "evaluation_results.json")
+        
+        print("\nBigVideo Resume Results:")
+        print(f"  Processed: {len(bigvideo_results['processed_files'])} files")
+        print(f"  Failed: {len(bigvideo_results['failed_files'])} files")
+        if bigvideo_scores:
+            for metric, score in bigvideo_scores.items():
+                print(f"  {metric}: {score:.4f}")
+    
+    elif args.mode == "resume-dovebench":
+        print("Resuming DoveBench dataset only...")
+        output_dir = Path(args.output_dir)
+        dovebench_output = output_dir / "dovebench"
+        
+        dovebench_results = resume_dovebench_dataset(
+            dataset_dir=DOVEBENCH_DATA_PATH,
+            output_dir=dovebench_output,
+            use_local_whisper=args.use_local_whisper
+        )
+        
+        dovebench_scores = calculate_dovebench_scores(dovebench_results, dovebench_output)
+        save_results(dovebench_results, dovebench_scores, dovebench_output / "evaluation_results.json")
+        
+        print("\nDoveBench Resume Results:")
         print(f"  Processed: {len(dovebench_results['processed_files'])} files")
         print(f"  Failed: {len(dovebench_results['failed_files'])} files")
         if dovebench_scores:
