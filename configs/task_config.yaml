@@ -58,7 +58,6 @@ proofreader:
 
 editor:
   enable_editor: True
-  user_instruction: None # "Any additional information that can help the editor to improve the translation quality, such as the target audience, tone, and style of the translation. If you don't have any specific requirements, you can leave it empty."
   editor_context_window: 10 # number of sentences to be provided as context for the editor(previous and next {n} sentences)
   history_length: 5 # number of sentences to be provided as history for the editor(previous {n} sentences)
 

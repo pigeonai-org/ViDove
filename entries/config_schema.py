@@ -149,10 +149,6 @@ class EditorConfig(BaseModel):
         default=True,
         description="Whether to enable editor"
     )
-    user_instruction: Optional[str] = Field(
-        default=None,
-        description="User instruction to help the editor improve translation quality, such as target audience, tone, and style"
-    )
     editor_context_window: int = Field(
         default=10,
         description="Editor context window size, number of sentences to be provided as context"
