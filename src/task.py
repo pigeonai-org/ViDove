@@ -68,6 +68,7 @@ class Task:
 
         self.task_id = task_id
 
+        self.base_dir = os.getcwd()
         self.task_local_dir = task_local_dir
         self.vision_setting = task_cfg["vision"]
         self.audio_setting = task_cfg["audio"]
@@ -79,6 +80,7 @@ class Task:
         self.target_lang = task_cfg["target_lang"]
         self.source_lang = task_cfg["source_lang"]
         self.domain = task_cfg["domain"]
+        self.instructions = task_cfg.get("instructions", [])
         self.pre_setting = task_cfg["pre_process"]
         self.post_setting = task_cfg["post_process"]
         self.chunk_size = task_cfg["translation"]["chunk_size"]
@@ -109,6 +111,12 @@ class Task:
         task_file_handler.setFormatter(logging.Formatter(logfmt))
         self.task_logger.addHandler(task_file_handler)
 
+        # log agent conversation history
+        self.agent_history_logger = logging.getLogger(f"agent_history_{task_id}")
+        self.agent_history_logger.setLevel(logging.INFO)
+        agent_history_file_handler = logging.FileHandler(f"{self.task_local_dir}/agent_history.jsonl", "w", encoding="utf-8")
+        self.agent_history_logger.addHandler(agent_history_file_handler)
+        
         print(f"Task ID: {self.task_id}")
         self.task_logger.info(f"Task ID: {self.task_id}")
 
@@ -152,14 +160,12 @@ class Task:
         # init memory module
         if self.memory_setting["enable_local_knowledge"] and self.domain != "General":
             self.local_knowledge = BasicRAG(self.task_logger, self.domain)
-            # persist_dir = f"{self.task_local_dir}/storage"
             data_dir = f"{self.memory_setting['local_knowledge_path']}/{self.domain}"
             self.local_knowledge.load_knowledge_base(data_dir=data_dir, num_retrievals = 10)
         
         if self.memory_setting["enable_web_search"]:
             #TODO: init web search
             self.web_search = TavilySearchRAG(self.task_logger, self.domain)
-            # self.web_search.load_knowledge_base()
         
         if self.memory_setting["enable_vision_knowledge"]:
             self.vision_knowledge = BasicRAG(self.task_logger, "vision")
@@ -196,15 +202,22 @@ class Task:
                     frame_per_seg = self.vision_setting["frame_per_seg"],
                     cache_dir = self.vision_setting["frame_cache_dir"],
                 )
+                # Set agent history logger for vision agent
+                if hasattr(self.vision_agent, 'set_agent_history_logger'):
+                    self.vision_agent.set_agent_history_logger(self.agent_history_logger)
             else:
                 raise ValueError(f"Unsupported vision model: {self.vision_setting['vision_model']}")
         
         self.audio_agent = None   
         if self.audio_setting["enable_audio"]:
             if self.audio_setting["audio_agent"] == "GeminiAudioAgent":
-                self.audio_agent = GeminiAudioAgent(audio_config=self.audio_setting)
+                # Add task_id to audio_config for logger
+                audio_config = self.audio_setting.copy()
+                audio_config["task_id"] = self.task_id
+                self.audio_agent = GeminiAudioAgent(audio_config=audio_config)
+                self.audio_agent.set_agent_history_logger(self.agent_history_logger)
             else:
-                raise ValueError(f"Unsupported vision model: {self.vision_setting['vision_model']}")
+                raise ValueError(f"Unsupported audio model: {self.audio_setting['audio_agent']}")
             
         self.proofreader = None
         if self.proofreader_setting["enable_proofreading"]:
@@ -219,7 +232,12 @@ class Task:
                 stm_len = self.proofreader_setting["short_term_memory_len"],
                 use_short_term_memory = self.proofreader_setting["enable_short_term_memory"]
             )
+            # Set agent history logger for proofreader
+            if hasattr(self.proofreader, 'set_agent_history_logger'):
+                self.proofreader.set_agent_history_logger(self.agent_history_logger)
             self.task_logger.info("Proofreader initialized.")
+        
+        self.agent_history_logger.info("{\"role\": \"pipeline_coordinator\", \"message\": \"All modules initialized successfully. Task ready for execution.\"}")
         
     @staticmethod
     def fromYoutubeLink(youtube_url, task_id, task_dir, task_cfg):
@@ -412,15 +430,28 @@ class Task:
         """
         editor = None
         if self.editor_setting["enable_editor"]:
+            # Combine user instructions from config
+            user_instructions = []
+            if hasattr(self, 'instructions') and self.instructions:
+                user_instructions.extend(self.instructions)
+            if self.editor_setting.get("user_instruction"):
+                user_instructions.append(self.editor_setting["user_instruction"])
+            
+            combined_instruction = "\n".join(user_instructions) if user_instructions else None
+            
             editor = EditorAgent(
                 client = self.client,
                 srt = self.SRT_Script,
                 memory = self.local_knowledge,
                 logger = self.task_logger,
                 history_len = self.editor_setting["history_length"],
-                user_instruction = self.editor_setting["user_instruction"]
+                user_instruction = combined_instruction
             )
-        if editor is None: return
+            # Set agent history logger for editor
+            if hasattr(editor, 'set_agent_history_logger'):
+                editor.set_agent_history_logger(self.agent_history_logger)
+        if editor is None: 
+            return
         editor.edit_all()
 
     def output_render(self):
@@ -450,16 +481,66 @@ class Task:
         # Output video if needed
         if video_out and self.video_path is not None:
             video_output_path = f"{results_dir}/{self.task_id}.mp4"
-            subprocess.run(
-                [
-                    "ffmpeg",
-                    "-i",
-                    str(self.video_path),
-                    "-vf",
-                    f"subtitles={final_res}:fontsdir=/Users/zonghengwu/ViDove-Clips/fonts:force_style='FontName=SourceHanSansCN-Normal'",
-                    video_output_path,
-                ]
-            )
+            
+            # Check if fonts directory exists
+            fonts_dir = f"{self.base_dir}/fonts"
+            if not os.path.exists(fonts_dir):
+                # Create fonts directory if it doesn't exist
+                os.makedirs(fonts_dir, exist_ok=True)
+                self.task_logger.warning(f"Fonts directory {fonts_dir} does not exist, created it.")
+            
+            # Use proper ffmpeg subtitles filter syntax with fallback font
+            try:
+                # Try with custom font first
+                subtitle_filter = f"subtitles='{final_res}':force_style='FontName=SourceHanSansCN-Normal,FontSize=24,PrimaryColour=&Hffffff,OutlineColour=&H000000,Bold=1'"
+                
+                result = subprocess.run(
+                    [
+                        "ffmpeg",
+                        "-i",
+                        str(self.video_path),
+                        "-vf",
+                        subtitle_filter,
+                        "-c:a",
+                        "copy",
+                        video_output_path,
+                    ],
+                    capture_output=True,
+                    text=True
+                )
+                
+                if result.returncode != 0:
+                    self.task_logger.warning(f"FFmpeg with custom font failed: {result.stderr}")
+                    # Fallback to default font
+                    subtitle_filter = f"subtitles='{final_res}':force_style='FontSize=24,PrimaryColour=&Hffffff,OutlineColour=&H000000,Bold=1'"
+                    
+                    result = subprocess.run(
+                        [
+                            "ffmpeg",
+                            "-i",
+                            str(self.video_path),
+                            "-vf",
+                            subtitle_filter,
+                            "-c:a",
+                            "copy",
+                            video_output_path,
+                        ],
+                        capture_output=True,
+                        text=True
+                    )
+                    
+                    if result.returncode != 0:
+                        self.task_logger.error(f"FFmpeg video generation failed: {result.stderr}")
+                        raise RuntimeError(f"Failed to generate video with subtitles: {result.stderr}")
+                    else:
+                        self.task_logger.info("Video generated with default font")
+                else:
+                    self.task_logger.info("Video generated with custom font")
+                    
+            except Exception as e:
+                self.task_logger.error(f"Error during video generation: {str(e)}")
+                raise RuntimeError(f"Video generation failed: {str(e)}")
+                
             final_res = subtitle_path_trans
 
         self.t_e = time()
@@ -475,6 +556,7 @@ class Task:
         """
         Executes the entire pipeline process for the task.
         """
+        self.agent_history_logger.info("{\"role\": \"pipeline_coordinator\", \"message\": \"Starting ViDove translation pipeline...\"}")
         self.get_speaker_segments()
         self.get_visual_cues()
         self.transcribe()
@@ -484,28 +566,8 @@ class Task:
         # self.postprocess()
         self.proofread()
         self.editor()
-        self.result = self.output_render()
-
-        """
-        if self.result.endswith(".srt"):
-            from evaluation.scores.score import SubERscore
-            from evaluation.scores.cleaning import clean_srt_file
-
-            hypo_srt_path = self.result
-            # reference srt file path, you need to input it
-            ref_srt_path = "dirty_subtitle.srt"
-
-            try:
-                cleaned_ref_srt_path = ref_srt_path.replace(".srt", "_cleaned.srt")
-                clean_srt_file(ref_srt_path, cleaned_ref_srt_path)
-
-                suber_result = SubERscore(hypo_srt_path, cleaned_ref_srt_path)
-                print(f"SubER Score: {suber_result:.2f}%")
-            except Exception as e:
-                print(f"SubER evaluation failed: {e}")
-        else:
-            print("[INFO] Output is not a subtitle file, skipping SubER evaluation.")
-        """    
+        self.result = self.output_render()  
+        self.agent_history_logger.info("{\"role\": \"pipeline_coordinator\", \"message\": \"ViDove pipeline execution completed successfully!\"}")
 
 
 class YoutubeTask(Task):
@@ -522,25 +584,25 @@ class YoutubeTask(Task):
         self.task_logger.info(f"Youtube URL: {self.youtube_url}")
         self.task_logger.info(f"Video Resolution: {self.video_resolution}")
         video_download_path = f"{self.task_local_dir}/task_{self.task_id}.mp4"
-        audio_download_dir = f"{self.task_local_dir}/task_{self.task_id}.mp3"
 
         if self.video_resolution == "best":
-            video_format = "bestvideo[ext=mp4]+bestaudio/bestvideo"
+            video_format = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio"
         elif self.video_resolution in [360, 480, 720]:
-            video_format = f"bestvideo[height={self.video_resolution}][ext=mp4]+bestaudio[ext=mp3]/worstvideo[ext=mp4]+bestaudio[ext=mp3]/worst[ext=mp4]"
+            video_format = f"bestvideo[height<={self.video_resolution}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<={self.video_resolution}]+bestaudio"
         else:
             raise RuntimeError(f"Unsupported video resolution: {self.video_resolution}")
 
         video_opts = {
             "format": video_format,
             "outtmpl": video_download_path,
+            "postprocessors": [{
+                "key": "FFmpegVideoConvertor",
+                "preferedformat": "mp4",
+            }],
+            "prefer_ffmpeg": True,
         }
 
-        audio_opts = {
-            "format": "bestaudio[ext=mp3]/bestaudio",
-            "outtmpl": audio_download_dir,
-        }
-
+        # Download video only - we'll extract audio using ffmpeg
         with yt_dlp.YoutubeDL(video_opts) as ydl:
             try:
                 ydl.download([self.youtube_url])
@@ -549,16 +611,34 @@ class YoutubeTask(Task):
                 raise RuntimeError(f"Failed to download video {self.youtube_url}")
             ydl.close()
 
-        with yt_dlp.YoutubeDL(audio_opts) as ydl:
-            try:
-                ydl.download([self.youtube_url])
-            except yt_dlp.utils.DownloadError as e:
-                self.task_logger.error(e)
-                raise RuntimeError(f"Failed to download audio {self.youtube_url}")
-            ydl.close()
-
+        # Extract audio from downloaded video using ffmpeg (same as VideoTask)
         self.video_path = self.task_local_dir.joinpath(f"task_{self.task_id}.mp4")
-        self.audio_path = self.task_local_dir.joinpath(f"task_{self.task_id}.mp3")
+        audio_path = self.task_local_dir.joinpath(f"task_{self.task_id}.mp3")
+        
+        self.task_logger.info("using ffmpeg to extract audio from downloaded video")
+        result = subprocess.run(
+            [
+                "ffmpeg",
+                "-i",
+                str(self.video_path),
+                "-f",
+                "mp3",
+                "-ab",
+                "192000",
+                "-vn",
+                str(audio_path),
+            ],
+            capture_output=True,
+            text=True
+        )
+        
+        if result.returncode != 0:
+            self.task_logger.error(f"FFmpeg audio extraction failed: {result.stderr}")
+            raise RuntimeError(f"Failed to extract audio from video: {result.stderr}")
+            
+        self.task_logger.info("audio extraction finished")
+        
+        self.audio_path = audio_path
 
         self.task_logger.info(f" Video File Dir: {self.video_path}")
         self.task_logger.info(f" Audio File Dir: {self.audio_path}")

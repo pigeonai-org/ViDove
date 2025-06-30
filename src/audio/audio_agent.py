@@ -11,6 +11,7 @@ import json
 from src.audio.ASR import ASR
 from src.audio.VAD import VAD
 import librosa
+import logging
 
 class AudioAgent(ABC):
     def __init__(self, model_name, audio_config: dict=None):
@@ -112,6 +113,12 @@ class QwenAudioAgent(AudioAgent):
 class GeminiAudioAgent(AudioAgent):
     def __init__(self, model_name="gemini-2.5-flash",audio_config: dict=None):
         super().__init__(model_name,audio_config)
+        # Initialize agent history logger - will be set by task
+        self.agent_history_logger = None
+
+    def set_agent_history_logger(self, logger):
+        """Set the agent history logger from task"""
+        self.agent_history_logger = logger
 
     def load_model(self):
         api_key = os.environ.get("GEMINI_API_KEY")
@@ -144,6 +151,9 @@ class GeminiAudioAgent(AudioAgent):
                     return None
     
     def transcribe(self, audio_path, visual_cues=None):
+        if self.agent_history_logger:
+            self.agent_history_logger.info('{"role": "audio_agent", "message": "Audio loaded, let me give it a good ol\' chomp... chomp chomp! 🎧"}')
+        
         with open(audio_path, "rb") as audio:
             audio_data = audio.read()
 
@@ -170,11 +180,19 @@ class GeminiAudioAgent(AudioAgent):
                 )
                 resp = self.parse_response(response.text)
             else:
+                if self.agent_history_logger:
+                    self.agent_history_logger.info('{"role": "audio_agent", "message": "Transcription done! If I missed a beat, blame the waveform, not me 😜"}')
                 return resp
+        
+        if self.agent_history_logger:
+            self.agent_history_logger.info('{"role": "audio_agent", "message": "Oops, 5 tries and still no luck. Even the best of us have off days!"}')
         self.logger.error("Failed to transcribe audio after 5 retries.")
         return resp
 
     def analyze_audio(self, audio_path):
+        if self.agent_history_logger:
+            self.agent_history_logger.info('{"role": "audio_agent", "message": "Analyzing audio... let me put on my sonic goggles! 🥽"}')
+        
         with open(audio_path, "rb") as audio:
             audio_data = audio.read()
 
@@ -196,7 +214,10 @@ class GeminiAudioAgent(AudioAgent):
             contents=contents,
         )
 
-        return self.parse_json_response(response.text)
+        result = self.parse_json_response(response.text)
+        if self.agent_history_logger:
+            self.agent_history_logger.info('{"role": "audio_agent", "message": "Audio analysis complete! If I missed a note, it was jazz."}')
+        return result
 
 
 if __name__ == "__main__":

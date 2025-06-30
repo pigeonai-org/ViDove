@@ -1,7 +1,13 @@
 # configuration for each task
 source_lang: EN
 target_lang: ZH
-domain: CS:GO
+domain: General
+
+# Customize User Instruction
+instructions:
+  - "Keep the translation natural and fluent"
+  - "Use appropriate terminology for the domain"
+  - "Maintain the original tone and style"
 
 # YouTube Download Option
 video_download:
@@ -12,14 +18,6 @@ MEMEORY:
   enable_vision_knowledge: True
   enable_web_search: False
   local_knowledge_path: "/home/macrodove/ViDove/domain_dict"
-
-# VAD config
-#VAD:
-#  VAD_model: "pyannote/speaker-diarization-3.1"
-
-# ASR config
-#ASR:
-#  ASR_model: openai/whisper-large-v3 # openai/whisper-large-v3, stable-whisper-base, stable-whisper-medium, stable-whisper-large, whisper-api
 
 audio:
   enable_audio: True
@@ -60,7 +58,6 @@ proofreader:
 
 editor:
   enable_editor: True
-  user_instruction: None # "Any additional information that can help the editor to improve the translation quality, such as the target audience, tone, and style of the translation. If you don't have any specific requirements, you can leave it empty."
   editor_context_window: 10 # number of sentences to be provided as context for the editor(previous and next {n} sentences)
   history_length: 5 # number of sentences to be provided as history for the editor(previous {n} sentences)
 

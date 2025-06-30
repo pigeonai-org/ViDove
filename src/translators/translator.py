@@ -36,6 +36,10 @@ class Translator:
     ):
         self.task_logger = logging.getLogger(f"task_{task_id}")
         self.task_logger.info("initializing translator")
+
+        self.agent_history_logger = logging.getLogger(f"agent_history_{task_id}")
+        self.agent_history_logger.setLevel(logging.INFO)
+
         self.model_name = model_name
         self.chunk_size = chunk_size
         self.src_lang = src_lang
@@ -86,6 +90,7 @@ class Translator:
             srt.get_source_only(), self.chunk_size
         )
         self.task_logger.info("SRT file set")
+        self.agent_history_logger.info('{"role": "translator", "message": "Got the SRT! Time to flex my translation muscles! 💪"}')
 
     def prompt_selector(self) -> PromptTemplate:
         try:
@@ -123,6 +128,9 @@ class Translator:
         if self.system_prompt is None:
             self.system_prompt = "你是一个翻译助理，你的任务是翻译视频，你会被提供一个按行分割的英文段落，你需要在保证句意和行数的情况下输出翻译后的文本。"
             self.task_logger.info(f"translation prompt: {self.system_prompt}")
+        
+        self.agent_history_logger.info('{"role": "translator", "message": "Starting translation process with knowledge retrieval... "}')
+        
         previous_length = 0
         for sentence, range_ in tqdm(zip(self.script_arr, self.range_arr)):
             # update the range based on previous length
@@ -190,3 +198,5 @@ class Translator:
             self.task_logger.info(f"source text: {sentence}")
             self.task_logger.info(f"translate text: {translation}")
             self.srt.set_translation(translation, range_, self.model_name, self.task_id)
+        
+        self.agent_history_logger.info('{"role": "translator", "message": "Whew, translation marathon complete! If you spot a typo, it was totally intentional..."}')
