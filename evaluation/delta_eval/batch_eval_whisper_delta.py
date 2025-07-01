@@ -80,7 +80,7 @@ except ImportError as e:
             return 0.0
             
     if not SUBSONAR_AVAILABLE:
-        def SubSONARscore(hyp_file, ref_file):
+        def SubSONARscore(hypothesis_file: str, audio_file: str, audio_lang: str, text_lang: str):
             return 0.0
 
 # Dataset paths
@@ -600,7 +600,8 @@ def process_dovebench_dataset(dataset_dir, output_dir, use_local_whisper=False):
         "failed_files": [],
         "translations": {},
         "original_texts": {},
-        "reference_texts": {}
+        "reference_texts": {},
+        "audio_files": []
     }
     
     # Process each domain (CS, manga, sc2)
@@ -694,6 +695,7 @@ def process_dovebench_dataset(dataset_dir, output_dir, use_local_whisper=False):
                 results["original_texts"][video_id] = original_text
                 results["reference_texts"][video_id] = ref_text
                 results["processed_files"].append(video_id)
+                results["audio_files"].append(audio_file)
                 
                 print(f"Successfully processed {video_id}")
                 
@@ -705,11 +707,12 @@ def process_dovebench_dataset(dataset_dir, output_dir, use_local_whisper=False):
 
 def calculate_bigvideo_scores(results, output_dir=None):
     """
-    Calculate BLEU, dCOMET, SubER, and SubSONAR scores for BigVideo dataset.
+    Calculate BLEU and dCOMET scores for BigVideo dataset.
+    Note: SubER and SubSONAR are NOT applied to BigVideo dataset as per requirements.
     
     Args:
         results (dict): Processing results containing translations and references.
-        output_dir (Path): Output directory containing SRT files for SubER/SubSONAR.
+        output_dir (Path): Output directory containing SRT files (not used for BigVideo).
     
     Returns:
         dict: Evaluation scores.
@@ -717,26 +720,19 @@ def calculate_bigvideo_scores(results, output_dir=None):
     translations = []
     references = []
     sources = []
-    srt_pairs = []  # For SubER and SubSONAR
     
     for test_id in results["processed_files"]:
         if test_id in results["translations"] and test_id in results["reference_texts"]:
             translations.append(results["translations"][test_id])
             references.append(results["reference_texts"][test_id])
             sources.append(results["original_texts"].get(test_id, ""))
-            
-            # Collect SRT file pairs for SubER/SubSONAR
-            if output_dir:
-                translated_srt = output_dir / f"{test_id}_translated.srt"
-                original_srt = output_dir / f"{test_id}.srt"
-                if translated_srt.exists() and original_srt.exists():
-                    srt_pairs.append((str(translated_srt), str(original_srt)))
     
     if not translations:
         print("No valid translations found for evaluation")
         return {}
     
     print(f"Calculating scores for {len(translations)} translations...")
+    print("📝 Note: Only BLEU and dCOMET are calculated for BigVideo dataset")
     
     scores = {}
     
@@ -757,43 +753,8 @@ def calculate_bigvideo_scores(results, output_dir=None):
     except Exception as e:
         print(f"Error calculating COMET score: {e}")
     
-    # SubER scoring
-    if SUBER_AVAILABLE and srt_pairs:
-        try:
-            print("Calculating SubER scores...")
-            suber_scores = []
-            for hyp_file, ref_file in srt_pairs:
-                try:
-                    score = SubERscore(hyp_file, ref_file)
-                    suber_scores.append(score)
-                    print(f"SubER for {Path(hyp_file).name}: {score:.4f}")
-                except Exception as e:
-                    print(f"Error calculating SubER for {hyp_file}: {e}")
-            
-            if suber_scores:
-                scores["SubER"] = sum(suber_scores) / len(suber_scores)
-                print(f"Average SubER Score: {scores['SubER']:.4f}")
-        except Exception as e:
-            print(f"Error calculating SubER scores: {e}")
-    
-    # SubSONAR scoring
-    if SUBSONAR_AVAILABLE and srt_pairs:
-        try:
-            print("Calculating SubSONAR scores...")
-            subsonar_scores = []
-            for hyp_file, ref_file in srt_pairs:
-                try:
-                    score = SubSONARscore(hyp_file, ref_file)
-                    subsonar_scores.append(score)
-                    print(f"SubSONAR for {Path(hyp_file).name}: {score:.4f}")
-                except Exception as e:
-                    print(f"Error calculating SubSONAR for {hyp_file}: {e}")
-            
-            if subsonar_scores:
-                scores["SubSONAR"] = sum(subsonar_scores) / len(subsonar_scores)
-                print(f"Average SubSONAR Score: {scores['SubSONAR']:.4f}")
-        except Exception as e:
-            print(f"Error calculating SubSONAR scores: {e}")
+    # SubER and SubSONAR are NOT calculated for BigVideo dataset
+    print("⚠️ SubER and SubSONAR metrics are skipped for BigVideo dataset (as per requirements)")
     
     return scores
 
@@ -811,7 +772,8 @@ def calculate_dovebench_scores(results, output_dir=None):
     translations = []
     references = []
     sources = []
-    srt_pairs = []  # For SubER and SubSONAR
+    srt_triple = []  # For SubER and SubSONAR
+    # audio_files = results.get("audio_files", [])
     
     for video_id in results["processed_files"]:
         if video_id in results["translations"] and results["reference_texts"].get(video_id):
@@ -824,8 +786,9 @@ def calculate_dovebench_scores(results, output_dir=None):
                 domain, video_name = video_id.split('/')
                 translated_srt = output_dir / domain / f"{video_name}_translated.srt"
                 original_srt = output_dir / domain / f"{video_name}.srt"
+                audio_file_path = output_dir / domain / f"{video_name}.mp3"
                 if translated_srt.exists() and original_srt.exists():
-                    srt_pairs.append((str(translated_srt), str(original_srt)))
+                    srt_triple.append((str(translated_srt), str(original_srt), str(audio_file_path)))
     
     if not translations:
         print("No valid translations found for evaluation")
@@ -853,11 +816,11 @@ def calculate_dovebench_scores(results, output_dir=None):
         print(f"Error calculating COMET score: {e}")
     
     # SubER scoring
-    if SUBER_AVAILABLE and srt_pairs:
+    if SUBER_AVAILABLE and srt_triple:
         try:
             print("Calculating SubER scores...")
             suber_scores = []
-            for hyp_file, ref_file in srt_pairs:
+            for hyp_file, ref_file, audio_file in srt_triple:
                 try:
                     # Create a reference SRT from the reference text
                     # For now, we'll use the original transcription as reference
@@ -875,13 +838,13 @@ def calculate_dovebench_scores(results, output_dir=None):
             print(f"Error calculating SubER scores: {e}")
     
     # SubSONAR scoring
-    if SUBSONAR_AVAILABLE and srt_pairs:
+    if SUBSONAR_AVAILABLE and srt_triple:
         try:
             print("Calculating SubSONAR scores...")
             subsonar_scores = []
-            for hyp_file, ref_file in srt_pairs:
+            for hyp_file, ref_file, audio_file in srt_triple:
                 try:
-                    score = SubSONARscore(hyp_file, ref_file)
+                    score = SubSONARscore(hyp_file, audio_file=audio_file, audio_lang="en", text_lang="zho_Hans")
                     subsonar_scores.append(score)
                     print(f"SubSONAR for {Path(hyp_file).name}: {score:.4f}")
                 except Exception as e:
@@ -1292,7 +1255,10 @@ def resume_bigvideo_dataset(test_ids_file, video_dir, output_dir, use_local_whis
     test_ids_file = Path(test_ids_file)
     video_dir = Path(video_dir)
     output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    if not output_dir.exists():
+        print(f"Creating output directory: {output_dir}")
+        output_dir.mkdir(parents=True, exist_ok=True)
+    
     
     print("\n🔄 RESUMING BigVideo dataset processing...")
     
@@ -1483,7 +1449,8 @@ def resume_dovebench_dataset(dataset_dir, output_dir, use_local_whisper=False):
     """
     dataset_dir = Path(dataset_dir)
     output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    if not output_dir.exists():
+        output_dir.mkdir(parents=True, exist_ok=True)
     
     print("\n🔄 RESUMING DoveBench dataset processing...")
     
