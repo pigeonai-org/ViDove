@@ -37,17 +37,17 @@ class AudioConfig(BaseModel):
         default=True, 
         description="Whether to enable audio processing"
     )
-    audio_agent: str = Field(
+    audio_agent: Literal["GeminiAudioAgent"] = Field(
         default="GeminiAudioAgent",
-        description="Audio agent: clip or other vLLMs"
+        description="Audio agent: GeminiAudioAgent"
     )
     model_path: Optional[str] = Field(
         default=None,
         description="Model path, replace with your own model path"
     )
-    VAD_model: Union[str, Literal["API"]] = Field(
-        default="API",
-        description="Voice Activity Detection model: pyannote/speaker-diarization-3.1 or API"
+    VAD_model: Literal["pyannote/speaker-diarization-3.1", "silero", "API"] = Field(
+        default="pyannote/speaker-diarization-3.1",
+        description="Voice Activity Detection model: pyannote/speaker-diarization-3.1, silero, or API"
     )
     src_lang: str = Field(
         default="en",
@@ -65,9 +65,9 @@ class VisionConfig(BaseModel):
         default=True, 
         description="Whether to enable vision processing"
     )
-    vision_model: str = Field(
+    vision_model: Literal["CLIP", "gpt-4o"] = Field(
         default="gpt-4o",
-        description="Vision model: clip or other vLLMs"
+        description="Vision model: CLIP or gpt-4o"
     )
     model_path: str = Field(
         default="./ViDove/vision_model/clip-vit-base-patch16",
@@ -101,9 +101,9 @@ class PreProcessConfig(BaseModel):
 
 class TranslationConfig(BaseModel):
     """Translation module configuration"""
-    model: str = Field(
+    model: Literal["gpt-4", "gpt-4o-mini", "gpt-4o", "Assistant", "Multiagent", "RAG"] = Field(
         default="gpt-4o",
-        description="Translation model: gpt-3.5-turbo, gpt-4, gpt-4o, Assistant, Multiagent"
+        description="Translation model: gpt-4, gpt-4o-mini, gpt-4o, Assistant, Multiagent, RAG"
     )
     chunk_size: int = Field(
         default=2000,
@@ -116,6 +116,14 @@ class PostProcessConfig(BaseModel):
     enable_post_process: bool = Field(
         default=True,
         description="Whether to enable post-processing"
+    )
+    check_len_and_split: bool = Field(
+        default=True,
+        description="Whether to check length and split sentences"
+    )
+    remove_trans_punctuation: bool = Field(
+        default=True,
+        description="Whether to remove translation punctuation"
     )
 
 
@@ -149,6 +157,10 @@ class EditorConfig(BaseModel):
         default=True,
         description="Whether to enable editor"
     )
+    user_instruction: Literal["none", "formal", "casual", "technical"] = Field(
+        default="none",
+        description="User instruction style for the editor"
+    )
     editor_context_window: int = Field(
         default=10,
         description="Editor context window size, number of sentences to be provided as context"
@@ -161,9 +173,9 @@ class EditorConfig(BaseModel):
 
 class OutputTypeConfig(BaseModel):
     """Output type configuration"""
-    subtitle: str = Field(
+    subtitle: Literal["srt", "ass"] = Field(
         default="srt",
-        description="Subtitle format"
+        description="Subtitle format: srt or ass"
     )
     video: bool = Field(
         default=True,
@@ -178,15 +190,15 @@ class OutputTypeConfig(BaseModel):
 class TaskConfig(BaseModel):
     """Main task configuration class"""
     # Basic configuration
-    source_lang: str = Field(
+    source_lang: Literal["EN", "ZH", "ES", "FR", "DE", "RU", "JA", "AR", "KR"] = Field(
         default="EN",
         description="Source language"
     )
-    target_lang: str = Field(
+    target_lang: Literal["EN", "ZH", "ES", "FR", "DE", "RU", "JA", "AR", "KR"] = Field(
         default="ZH",
         description="Target language"
     )
-    domain: str = Field(
+    domain: Literal["General", "SC2", "CS:GO"] = Field(
         default="General",
         description="Domain"
     )
@@ -252,7 +264,7 @@ class TaskConfig(BaseModel):
     @validator('source_lang', 'target_lang')
     def validate_language_codes(cls, v):
         """Validate language code format"""
-        valid_codes = ['EN', 'ZH', 'JA', 'KO', 'FR', 'DE', 'ES', 'IT', 'PT', 'RU']
+        valid_codes = ['EN', 'ZH', 'ES', 'FR', 'DE', 'RU', 'JA', 'AR', 'KR', 'IT', 'PT']
         if v not in valid_codes:
             raise ValueError(f'Language code must be one of: {valid_codes}')
         return v
@@ -280,6 +292,56 @@ class TaskConfig(BaseModel):
         """Convert to YAML format string"""
         import yaml
         return yaml.dump(self.dict(), default_flow_style=False, allow_unicode=True)
+
+    def to_flat_dict(self) -> dict:
+        """Convert to flattened dictionary format for web interface"""
+        flat_dict = {}
+        config_dict = self.dict()
+        
+        # Top-level fields
+        flat_dict['source_lang'] = config_dict['source_lang']
+        flat_dict['target_lang'] = config_dict['target_lang'] 
+        flat_dict['domain'] = config_dict['domain']
+        
+        # Flatten nested configurations
+        for section_name, section_data in config_dict.items():
+            if isinstance(section_data, dict) and section_name not in ['source_lang', 'target_lang', 'domain', 'instructions', 'api_source', 'is_assistant']:
+                for field_name, field_value in section_data.items():
+                    flat_dict[f"{section_name}.{field_name}"] = field_value
+        
+        # Handle special cases
+        if config_dict.get('instructions'):
+            flat_dict['instructions'] = config_dict['instructions']
+        if config_dict.get('api_source'):
+            flat_dict['api_source'] = config_dict['api_source']
+        if config_dict.get('is_assistant') is not None:
+            flat_dict['is_assistant'] = config_dict['is_assistant']
+            
+        return flat_dict
+    
+    @classmethod
+    def from_flat_dict(cls, flat_dict: dict) -> 'TaskConfig':
+        """Create TaskConfig from flattened dictionary format"""
+        nested_dict = {}
+        
+        # Handle top-level fields
+        for key in ['source_lang', 'target_lang', 'domain', 'instructions', 'api_source', 'is_assistant']:
+            if key in flat_dict:
+                nested_dict[key] = flat_dict[key]
+        
+        # Group flattened fields back into sections
+        sections = {}
+        for key, value in flat_dict.items():
+            if '.' in key:
+                section, field = key.split('.', 1)
+                if section not in sections:
+                    sections[section] = {}
+                sections[section][field] = value
+        
+        # Add sections to nested dict
+        nested_dict.update(sections)
+        
+        return cls(**nested_dict)
 
 
 # Convenience functions

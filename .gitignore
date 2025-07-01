@@ -30,4 +30,7 @@ testdata/
 evaluation/test_data/
 eval
 evaluation_experiment
-
+webvenv/
+build/
+node_modules/
+.env
