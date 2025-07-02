@@ -1,9 +1,9 @@
 from abc import ABC, abstractmethod
-from pathlib import Path
-import logging
 import torch
 import stable_whisper
-from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, WhisperForConditionalGeneration, WhisperProcessor
+import whisper
+import traceback
+from transformers import WhisperForConditionalGeneration, WhisperProcessor
 import librosa
 from openai import OpenAI
 
@@ -51,6 +51,9 @@ class ASR(ABC):
         elif "stable" in method:
             whisper_model = method.split("-")[2]
             return StableWhisperASR(whisper_model=whisper_model, **kwargs)
+        elif "oai" in method:
+            model_id = method.split("-")[2] if "-" in method else "large-v3"
+            return OAIWhisperASR(model_id=model_id, **kwargs)
         else:
             return HuggingfaceWhisperASR(model_id=method, **kwargs)
 
@@ -113,6 +116,58 @@ class StableWhisperASR(ASR):
         return transcript
 
 
+class OAIWhisperASR(ASR):
+    """Implementation of ASR using OpenAI's Whisper model"""
+    
+    def __init__(self, model_id="large-v3", pre_load_model=None, **kwargs):
+        super().__init__(**kwargs)
+        try:
+            self.model = whisper.load_model(name=model_id, device= torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+            self.model_name = model_id
+            print(f"Loaded local Whisper model: {model_id}")
+        except ImportError:
+            raise ImportError("Please install whisper: pip install openai-whisper")
+        except Exception as e:
+            raise Exception(f"Failed to load Whisper model: {e}")
+        
+    def get_transcript(self, audio_file, source_lang="en"):
+        """
+        Get transcript with timestamps from audio file.
+        
+        Args:
+            audio_file (str): Path to audio file
+            source_lang (str): Source language code
+            
+        Returns:
+            list: List of segment dictionaries with 'start', 'end', 'text' keys
+        """
+        try:
+            # Transcribe with word-level timestamps
+            result = self.model.transcribe(
+                audio_file,
+                language=source_lang,
+                word_timestamps=True
+            )
+            
+            # Convert to our expected format
+            segments = []
+            for segment in result.get('segments', []):
+                segments.append({
+                    'start': segment.get('start', 0.0),
+                    'end': segment.get('end', 0.0),
+                    'text': segment.get('text', '').strip()
+                })
+            
+            return segments if segments else None
+            
+        except Exception as e:
+            print(f"Error in HuggingfaceWhisperASR transcription: {e}")
+            traceback.print_exc()
+            return None
+
+    
+    
+
 class HuggingfaceWhisperASR(ASR):
     """Implementation of ASR using Whisper models from Huggingface"""
     
@@ -128,48 +183,60 @@ class HuggingfaceWhisperASR(ASR):
             self.model = WhisperForConditionalGeneration.from_pretrained(self.model_id)
             self.model.to(self.device)
             
-        self.processor = WhisperProcessor.from_pretrained(self.model_id)
+        self.processor = WhisperProcessor.from_pretrained(self.model_id, sample_rate=16000)
 
     
     def get_transcript(self, audio_path, source_lang=None, init_prompt=None):
-        # Apply language and prompt if provided
-        self.log(f"Transcribing audio file: {audio_path}")
-        input_speech = self.load_audio(audio_path)
-        input_features = self.processor(input_speech, return_tensors="pt").input_features
-        input_features = input_features.to(self.device)
+        try:
+            # Apply language and prompt if provided
+            self.log(f"Transcribing audio file: {audio_path}")
+            input_speech = self.load_audio(audio_path)
+            input_features = self.processor(input_speech, return_tensors="pt", sample_rate=16000).input_features
+            input_features = input_features.to(self.device)
 
-        if init_prompt:
-            prompt_ids = self.processor.get_prompt_ids(init_prompt)
-            prompt_ids = torch.tensor(prompt_ids).to(self.device)
-        else:
-            prompt_ids = None
-        
-        output = self.model.generate(input_features, 
-                                    return_dict_in_generate=True,
-                                    return_timestamps=True,
-                                    prompt_ids=prompt_ids)
-        # print(len(output['segments']))
-        # print(len(output['segments'][0]))
-
-        # print(output['segments'].keys())
-        # # transcript_whisper = self.processor.decode(output[0], skip_special_tokens=False)
-
-        # # print(transcript_whisper)
-        # exit()
-        
-        # Convert format
-        transcript = []
-        for i in transcript_whisper['chunks']:
-            transcript.append({
-                'start': i['timestamp'][0], 
-                'end': i['timestamp'][1], 
-                'text': i['text']
-            })
+            # Set up generation parameters
+            generation_kwargs = {
+                "return_dict_in_generate": True,
+                "return_timestamps": True,
+            }
             
-        # Release GPU resources
-        torch.cuda.empty_cache()
+            if init_prompt:
+                try:
+                    prompt_ids = self.processor.get_prompt_ids(init_prompt)
+                    prompt_ids = torch.tensor(prompt_ids).to(self.device)
+                    generation_kwargs["prompt_ids"] = prompt_ids
+                except Exception as e:
+                    self.log(f"Warning: Could not set prompt: {e}")
             
-        return transcript
+            # Generate transcription
+            outputs = self.model.generate(input_features, **generation_kwargs)
+            
+            # Decode the output
+            if hasattr(outputs, 'sequences'):
+                transcript_text = self.processor.decode(outputs.sequences[0], skip_special_tokens=True)
+            else:
+                transcript_text = self.processor.decode(outputs[0], skip_special_tokens=True)
+            
+            # For now, return a simple segment format (this is a basic implementation)
+            # In a full implementation, you would parse timestamps from the model output
+            transcript = [{
+                'start': 0.0,
+                'end': 30.0,  # Placeholder duration
+                'text': transcript_text
+            }]
+            
+            # Release GPU resources
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                
+            return transcript
+            
+        except Exception as e:
+            self.log(f"Error in HuggingfaceWhisperASR transcription: {e}")
+            # Release GPU resources on error
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            return None
     
 if __name__ == "__main__":
     asr = HuggingfaceWhisperASR(model_id="openai/whisper-large-v3")
