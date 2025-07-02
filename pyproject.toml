@@ -3,6 +3,7 @@ name = "vidove"
 version = "0.1.1"
 requires-python = ">=3.10, <3.11"
 dependencies = [
+    "PyYAML==6.0.2",
     "whisper",
     "stable-ts>=2.9.0",
     "pydub",
@@ -66,7 +67,7 @@ dependencies = [
     "pyannote-audio==3.3.2",
     "httpx>=0.27.0, <0.28.0",
     "llama-index-embeddings-cohere==0.5.1",
-    "pyyaml",
+    
 ]
 
 [tool.uv]
