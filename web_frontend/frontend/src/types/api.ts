@@ -135,7 +135,7 @@ export interface ConfigResponse {
 
 export interface FileDownloadInfo {
   filename: string;
-  file_type: 'subtitle' | 'video' | 'unknown';
+  file_type: 'subtitle' | 'video' | 'log' | 'unknown';
   size_bytes: number;
   created_at: number;
 }

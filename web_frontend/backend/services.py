@@ -8,6 +8,8 @@ import traceback
 import subprocess
 import tempfile
 import yaml
+import shutil
+import time
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Literal, cast, List as ListType
 from uuid import uuid4
@@ -149,6 +151,7 @@ def create_task_config_file(session_config: Any, temp_dir: Path) -> Path:
         "source_lang": session_config.source_lang,
         "target_lang": session_config.target_lang,
         "domain": session_config.domain,
+        "instructions": getattr(session_config, 'instructions', None),
         "video_download": {
             "resolution": session_config.video_download_resolution
         },
@@ -196,7 +199,6 @@ def create_task_config_file(session_config: Any, temp_dir: Path) -> Path:
         },
         "editor": {
             "enable_editor": session_config.editor_enable_editor,
-            "user_instruction": None if getattr(session_config, 'editor_user_instruction', 'none') == "none" else session_config.editor_user_instruction,
             "editor_context_window": session_config.editor_editor_context_window,
             "history_length": session_config.editor_history_length
         },
@@ -236,6 +238,7 @@ def convert_web_config_to_task_config(session_config: SessionConfig) -> Dict[str
         "source_lang": session_config.source_lang,
         "target_lang": session_config.target_lang,
         "domain": session_config.domain,
+        "instructions": getattr(session_config, 'instructions', None),
         "video_download": {
             "resolution": session_config.video_download_resolution
         },
@@ -283,7 +286,6 @@ def convert_web_config_to_task_config(session_config: SessionConfig) -> Dict[str
         },
         "editor": {
             "enable_editor": session_config.editor_enable_editor,
-            "user_instruction": None if getattr(session_config, 'editor_user_instruction', 'none') == "none" else session_config.editor_user_instruction,
             "editor_context_window": session_config.editor_editor_context_window,
             "history_length": session_config.editor_history_length
         },
@@ -449,7 +451,6 @@ def run_vidove_task(
             print(f"STDERR: {process.stderr}")
         
         # Give ViDove a moment to finish writing files
-        import time
         time.sleep(2)
         
         # Find the result files in ViDove's output structure
@@ -519,6 +520,14 @@ def run_vidove_task(
                             result_files.extend(video_files)
                             print(f"Found {video_ext} files: {[f.name for f in video_files]}")
         
+        # Look for log files in task directories (one level up from results)
+        for task_dir in task_directories:
+            log_files = list(task_dir.glob("*.log"))
+            if log_files:
+                log_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+                result_files.extend(log_files)
+                print(f"Found log files in {task_dir.name}: {[f.name for f in log_files]}")
+        
         # If no SRT files found in results directories, check for other subtitle formats
         if not any(f.suffix.lower() == '.srt' for f in result_files):
             for results_dir in all_results_dirs:
@@ -538,9 +547,6 @@ def run_vidove_task(
         permanent_result_paths = []
         if result_files:
             try:
-                # Import shutil for file operations
-                import shutil
-                
                 # Create a permanent results directory in the web backend
                 permanent_results_dir = Path(__file__).parent / "results"
                 permanent_results_dir.mkdir(exist_ok=True)
@@ -663,7 +669,6 @@ def run_vidove_task(
             # 4. Clean up temporary directory
             if temp_dir and temp_dir.exists():
                 try:
-                    import shutil
                     shutil.rmtree(temp_dir)
                     print(f"Cleaned up temporary directory: {temp_dir}")
                 except Exception as cleanup_error:
@@ -717,7 +722,6 @@ def list_result_files(task_id: str) -> List[Path]:
 
 def cleanup_old_result_files(max_age_hours: int = 24) -> None:
     """Clean up result files older than specified hours"""
-    import time
     
     results_dir = Path(__file__).parent / "results"
     if not results_dir.exists():
@@ -753,7 +757,7 @@ def get_task_result_info(task_id: str) -> Dict[str, Any]:
             "path": str(file_path),
             "size_bytes": file_path.stat().st_size,
             "created_at": file_path.stat().st_mtime,
-            "file_type": "subtitle" if file_path.suffix.lower() == ".srt" else "video" if file_path.suffix.lower() in [".mp4", ".avi", ".mkv", ".mov"] else "unknown"
+            "file_type": "subtitle" if file_path.suffix.lower() == ".srt" else "video" if file_path.suffix.lower() in [".mp4", ".avi", ".mkv", ".mov"] else "log" if file_path.suffix.lower() == ".log" else "unknown"
         }
         result_info["files"].append(file_info)
     
