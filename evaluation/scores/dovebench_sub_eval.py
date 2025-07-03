@@ -10,10 +10,13 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 
 # Import from local module (same directory)
-
+# Assume all imports are successful as requested
 from scores.score import SubERscore, SubSONARscore
-# from evaluation.scores.score import SubERscore, SubSONARscore
-from evaluation.utils.dataset_parser.extract_ass_subtitles import AssSubtitleExtractor
+
+# Set availability flags to True as requested
+SUBER_AVAILABLE = True
+SUBSONAR_AVAILABLE = True
+ASS_EXTRACTOR_AVAILABLE = True
 
 
 def extract_text_from_eval_file(eval_file_path: str) -> str:
@@ -54,41 +57,6 @@ def extract_text_from_eval_file(eval_file_path: str) -> str:
     return '\n'.join(translations)
 
 
-def convert_ass_to_srt_temp(ass_file_path: str) -> str:
-    """Convert ASS file to temporary SRT file for evaluation.
-    
-    Args:
-        ass_file_path (str): Path to ASS subtitle file
-        
-    Returns:
-        str: Path to temporary SRT file
-    """
-    # Extract text from ASS file
-    extractor = AssSubtitleExtractor(input_file=ass_file_path)
-    extracted_lines = extractor.extract_from_file()
-    
-    if not extracted_lines:
-        raise ValueError(f"No text extracted from ASS file: {ass_file_path}")
-    
-    # Create temporary SRT file
-    temp_fd, temp_srt_path = tempfile.mkstemp(suffix='.srt', text=True)
-    
-    try:
-        with os.fdopen(temp_fd, 'w', encoding='utf-8') as f:
-            for i, line in enumerate(extracted_lines, 1):
-                # Create simple SRT format with dummy timestamps
-                start_time = f"00:00:{i:02d},000"
-                end_time = f"00:00:{i+1:02d},000"
-                f.write(f"{i}\n{start_time} --> {end_time}\n{line}\n\n")
-    except:
-        # Clean up on error
-        if os.path.exists(temp_srt_path):
-            os.unlink(temp_srt_path)
-        raise
-    
-    return temp_srt_path
-
-
 def create_temp_srt_from_text(text_content: str) -> str:
     """Create temporary SRT file from text content.
     
@@ -123,23 +91,23 @@ def create_temp_srt_from_text(text_content: str) -> str:
 
 
 def find_matching_ref_file(eval_filename: str, ref_folder: str) -> Optional[str]:
-    """Find matching reference ASS file for evaluation file.
+    """Find matching reference SRT file for evaluation file.
     
     Args:
         eval_filename (str): Name of evaluation file (without extension)
-        ref_folder (str): Path to reference folder
+        ref_folder (str): Path to reference folder containing SRT files
         
     Returns:
-        Optional[str]: Path to matching ASS file, or None if not found
+        Optional[str]: Path to matching SRT file, or None if not found
     """
     ref_folder_path = Path(ref_folder)
     
-    # Try different matching strategies
+    # Try different matching strategies for SRT files
     patterns_to_try = [
-        f"{eval_filename}*.ass",
-        f"*{eval_filename}*.ass",
-        f"*{eval_filename.replace('_', ' ')}*.ass",
-        f"*{eval_filename.split('_')[0]}*.ass" if '_' in eval_filename else f"{eval_filename}*.ass"
+        f"{eval_filename}*.srt",
+        f"*{eval_filename}*.srt",
+        f"*{eval_filename.replace('_', ' ')}*.srt",
+        f"*{eval_filename.split('_')[0]}*.srt" if '_' in eval_filename else f"{eval_filename}*.srt"
     ]
     
     for pattern in patterns_to_try:
@@ -151,22 +119,15 @@ def find_matching_ref_file(eval_filename: str, ref_folder: str) -> Optional[str]
 
 
 def batch_eval_suber(eval_folder: str, ref_folder: str) -> Dict[str, float]:
-    """Batch evaluate SubER scores for evaluation files against reference files.
+    """Batch evaluate SubER scores for evaluation files against reference SRT files.
     
     Args:
         eval_folder (str): Path to folder containing evaluation text files
-        ref_folder (str): Path to folder containing reference ASS files
+        ref_folder (str): Path to folder containing reference SRT files
         
     Returns:
         Dict[str, float]: Dictionary mapping filenames to SubER scores
     """
-    if not SUBER_AVAILABLE:
-        print("Warning: SubER scoring is not available due to missing dependencies.")
-        print("Please install required packages (torch, comet, etc.) for full functionality.")
-    
-    if not ASS_EXTRACTOR_AVAILABLE:
-        print("Warning: ASS extractor is not available.")
-        
     eval_folder_path = Path(eval_folder)
     ref_folder_path = Path(ref_folder)
     
@@ -190,11 +151,11 @@ def batch_eval_suber(eval_folder: str, ref_folder: str) -> Dict[str, float]:
             eval_filename = eval_file.stem  # filename without extension
             print(f"Processing: {eval_filename}")
             
-            # Find matching reference file
-            ref_file_path = find_matching_ref_file(eval_filename, str(ref_folder_path))
+            # Find matching reference SRT file
+            ref_srt_path = find_matching_ref_file(eval_filename, str(ref_folder_path))
             
-            if not ref_file_path:
-                print(f"  Warning: No matching reference file found for {eval_filename}")
+            if not ref_srt_path:
+                print(f"  Warning: No matching reference SRT file found for {eval_filename}")
                 continue
             
             try:
@@ -205,19 +166,16 @@ def batch_eval_suber(eval_folder: str, ref_folder: str) -> Dict[str, float]:
                     print(f"  Warning: No text extracted from {eval_filename}")
                     continue
                 
-                # Convert reference ASS to SRT
-                ref_srt_path = convert_ass_to_srt_temp(ref_file_path)
-                temp_files_to_cleanup.append(ref_srt_path)
-                
                 # Create SRT from evaluation text
                 eval_srt_path = create_temp_srt_from_text(eval_text)
                 temp_files_to_cleanup.append(eval_srt_path)
                 
-                # Calculate SubER score
+                # Calculate SubER score using existing SRT files directly
                 score = SubERscore(eval_srt_path, ref_srt_path)
                 results[eval_filename] = score
                 
                 print(f"  SubER score: {score:.4f}")
+                print(f"  Reference file: {Path(ref_srt_path).name}")
                 
             except Exception as e:
                 print(f"  Error processing {eval_filename}: {e}")
