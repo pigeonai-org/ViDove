@@ -12,8 +12,12 @@ import subprocess
 import argparse
 import re
 import shutil
-import traceback
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
+import queue
+from dataclasses import dataclass
+from typing import Optional, Dict, Any, List
 
 # Add the project root to the Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -87,7 +91,7 @@ except ImportError as e:
 BIGVIDEO_DATA_PATH = Path("./evaluation_experiment/BigVideo-test")
 DOVEBENCH_DATA_PATH = Path("./evaluation_experiment/DoveBench")
 
-def extract_audio(video_path, output_path, max_size_mb=25, use_local_whisper=False):
+def extract_audio(video_path, output_path, max_size_mb=25, use_local_whisper=False, skip_existing=True):
     """
     Extract audio from video file using ffmpeg with size optimization.
     
@@ -101,6 +105,11 @@ def extract_audio(video_path, output_path, max_size_mb=25, use_local_whisper=Fal
         Path: Path to the extracted audio file if successful, None otherwise.
     """
     try:
+        if skip_existing and output_path.exists():
+            file_size_mb = output_path.stat().st_size / (1024 * 1024)
+            print(f"✅ Audio already exists: {output_path} ({file_size_mb:.1f} MB) - skipping extraction")
+            return output_path
+        
         # Choose audio quality based on whether we're using local whisper
         if use_local_whisper:
             # Higher quality for local whisper (no API size limits)
@@ -448,7 +457,7 @@ def translate_srt_file(srt_path, src_lang="en", tgt_lang="zh", task_cfg=None):
         print(f"Error translating SRT file {srt_path}: {e}")
         return None
 
-def process_bigvideo_dataset(test_ids_file, video_dir, output_dir, use_local_whisper=False):
+def process_bigvideo_dataset(test_ids_file, video_dir, output_dir, use_local_whisper=False, max_workers=None, gpu_workers=None):
     """
     Process BigVideo dataset: extract audio, transcribe, translate, and evaluate.
     
@@ -457,6 +466,7 @@ def process_bigvideo_dataset(test_ids_file, video_dir, output_dir, use_local_whi
         video_dir (str or Path): Directory containing video files.
         output_dir (str or Path): Output directory for results.
         use_local_whisper (bool): If True, use local Whisper model instead of API.
+        max_workers (int): Maximum number of parallel workers. If None, uses min(32, CPU count + 4).
     
     Returns:
         dict: Evaluation results.
@@ -475,6 +485,15 @@ def process_bigvideo_dataset(test_ids_file, video_dir, output_dir, use_local_whi
         print("🏠 Using local Whisper model (no file size limits)")
     else:
         print("☁️ Using Whisper API (25MB file size limit)")
+    
+    # Set up parallel processing
+    if max_workers is None:
+        max_workers = min(32, (os.cpu_count() or 1) + 4)
+    
+    print(f"🔄 Using {max_workers} parallel workers for processing")
+    
+    # Initialize Whisper model pool for GPU parallelization
+    worker_pool = create_whisper_worker_pool(use_local_whisper, max_workers, gpu_workers)
     
     results = {
         "processed_files": [],
@@ -506,75 +525,45 @@ def process_bigvideo_dataset(test_ids_file, video_dir, output_dir, use_local_whi
         if i < len(ref_zh_lines):
             ref_zh_texts[test_id] = ref_zh_lines[i].strip()
     
-    for test_id in test_ids:
-        try:
-            print(f"\nProcessing {test_id}...")
-            
-            # Find video file
-            video_file = video_dir / f"{test_id}.mp4"
-            if not video_file.exists():
-                print(f"Video file not found: {video_file}")
+    # Process videos in parallel
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all tasks
+        future_to_test_id = {
+            executor.submit(
+                process_single_video_bigvideo, 
+                test_id, 
+                video_dir, 
+                output_dir, 
+                ref_en_texts, 
+                ref_zh_texts, 
+                use_local_whisper,
+                worker_pool
+            ): test_id for test_id in test_ids
+        }
+        
+        # Collect results as they complete
+        for future in as_completed(future_to_test_id):
+            test_id = future_to_test_id[future]
+            try:
+                success, returned_test_id, result = future.result()
+                
+                if success:
+                    results["translations"][returned_test_id] = result["translation"]
+                    results["original_texts"][returned_test_id] = result["original_text"]
+                    results["reference_texts"][returned_test_id] = result["reference_text"]
+                    results["processed_files"].append(returned_test_id)
+                    print(f"✅ Completed {returned_test_id}")
+                else:
+                    results["failed_files"].append(returned_test_id)
+                    print(f"❌ Failed {returned_test_id}: {result}")
+                    
+            except Exception as e:
                 results["failed_files"].append(test_id)
-                continue
-            
-            # Extract audio
-            audio_file = audio_extractor(video_file, use_local_whisper=use_local_whisper)
-            if not audio_file:
-                print(f"Audio extraction failed for {test_id}")
-                results["failed_files"].append(test_id)
-                continue
-            
-            # Handle case where audio_file might be a list (split files)
-            if isinstance(audio_file, list):
-                # Check if any of the chunks exist
-                if not any(f.exists() for f in audio_file):
-                    print(f"Audio extraction failed for {test_id}")
-                    results["failed_files"].append(test_id)
-                    continue
-            else:
-                if not audio_file.exists():
-                    print(f"Audio extraction failed for {test_id}")
-                    results["failed_files"].append(test_id)
-                    continue
-            
-            # Transcribe audio
-            transcription = whisper_transcription(audio_file, source_lang="en", use_local_whisper=use_local_whisper)
-            if not transcription:
-                print(f"Transcription failed for {test_id}")
-                results["failed_files"].append(test_id)
-                continue
-            
-            # Save transcription as SRT file
-            srt_file = output_dir / f"{test_id}.srt"
-            save_srt_transcription(transcription, srt_file)
-            
-            # Translate SRT file
-            translated_srt_path = translate_srt_file(srt_file, src_lang="en", tgt_lang="zh")
-            if not translated_srt_path:
-                print(f"Translation failed for {test_id}")
-                results["failed_files"].append(test_id)
-                continue
-            
-            # Convert to BigVideo format (single line)
-            original_text = to_big_video_format(srt_file)
-            
-            # For translated text, extract from the translated SRT file
-            translated_text = to_big_video_format(translated_srt_path)
-            
-            results["translations"][test_id] = translated_text
-            results["original_texts"][test_id] = original_text
-            results["reference_texts"][test_id] = ref_zh_texts.get(test_id, "")
-            results["processed_files"].append(test_id)
-            
-            print(f"Successfully processed {test_id}")
-            
-        except Exception as e:
-            print(f"Error processing {test_id}: {e}")
-            results["failed_files"].append(test_id)
+                print(f"❌ Exception for {test_id}: {e}")
     
     return results
 
-def process_dovebench_dataset(dataset_dir, output_dir, use_local_whisper=False):
+def process_dovebench_dataset(dataset_dir, output_dir, use_local_whisper=False, max_workers=None, gpu_workers=None):
     """
     Process DoveBench dataset: extract audio, transcribe, translate, and evaluate.
     
@@ -582,6 +571,8 @@ def process_dovebench_dataset(dataset_dir, output_dir, use_local_whisper=False):
         dataset_dir (str or Path): Directory containing DoveBench data.
         output_dir (str or Path): Output directory for results.
         use_local_whisper (bool): If True, use local Whisper model instead of API.
+        max_workers (int): Maximum number of parallel workers. If None, uses min(32, CPU count + 4).
+        gpu_workers (int): Number of Whisper model instances to load on GPU.
     
     Returns:
         dict: Evaluation results.
@@ -595,6 +586,15 @@ def process_dovebench_dataset(dataset_dir, output_dir, use_local_whisper=False):
     else:
         print("☁️ Using Whisper API for DoveBench processing")
     
+    # Set up parallel processing
+    if max_workers is None:
+        max_workers = min(32, (os.cpu_count() or 1) + 4)
+    
+    print(f"🔄 Using {max_workers} parallel workers for processing")
+    
+    # Initialize Whisper model pool for GPU parallelization
+    worker_pool = create_whisper_worker_pool(use_local_whisper, max_workers, gpu_workers)
+    
     results = {
         "processed_files": [],
         "failed_files": [],
@@ -604,104 +604,54 @@ def process_dovebench_dataset(dataset_dir, output_dir, use_local_whisper=False):
         "audio_files": []
     }
     
-    # Process each domain (CS, manga, sc2)
+    # Collect all video information for parallel processing
+    video_infos = []
     for domain_dir in dataset_dir.iterdir():
         if not domain_dir.is_dir() or domain_dir.name.startswith('.'):
             continue
         
-        print(f"\nProcessing domain: {domain_dir.name}")
-        domain_output = output_dir / domain_dir.name
-        domain_output.mkdir(parents=True, exist_ok=True)
-        
-        # Process each video in the domain
         for video_dir in domain_dir.iterdir():
             if not video_dir.is_dir():
                 continue
             
+            video_id = f"{domain_dir.name}/{video_dir.name}"
+            video_infos.append((domain_dir, video_dir, video_id))
+    
+    print(f"Found {len(video_infos)} videos to process across all domains")
+    
+    # Process videos in parallel
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all tasks
+        future_to_video_id = {
+            executor.submit(
+                process_single_video_dovebench, 
+                video_info, 
+                output_dir, 
+                use_local_whisper,
+                worker_pool
+            ): video_info[2] for video_info in video_infos
+        }
+        
+        # Collect results as they complete
+        for future in as_completed(future_to_video_id):
+            video_id = future_to_video_id[future]
             try:
-                print(f"Processing {video_dir.name}...")
+                success, returned_video_id, result = future.result()
                 
-                # Find video file
-                video_files = list(video_dir.glob("*.mp4"))
-                if not video_files:
-                    print(f"No video file found in {video_dir}")
-                    results["failed_files"].append(str(video_dir))
-                    continue
-                
-                video_file = video_files[0]
-                video_id = f"{domain_dir.name}/{video_dir.name}"
-                
-                # Extract audio
-                audio_file = audio_extractor(video_file, use_local_whisper=use_local_whisper)
-                if not audio_file:
-                    print(f"Audio extraction failed for {video_id}")
-                    results["failed_files"].append(video_id)
-                    continue
-                
-                # Handle case where audio_file might be a list (split files)
-                if isinstance(audio_file, list):
-                    # Check if any of the chunks exist
-                    if not any(f.exists() for f in audio_file):
-                        print(f"Audio extraction failed for {video_id}")
-                        results["failed_files"].append(video_id)
-                        continue
+                if success:
+                    results["translations"][returned_video_id] = result["translation"]
+                    results["original_texts"][returned_video_id] = result["original_text"]
+                    results["reference_texts"][returned_video_id] = result["reference_text"]
+                    results["audio_files"].append(result["audio_file"])
+                    results["processed_files"].append(returned_video_id)
+                    print(f"✅ Completed {returned_video_id}")
                 else:
-                    if not audio_file.exists():
-                        print(f"Audio extraction failed for {video_id}")
-                        results["failed_files"].append(video_id)
-                        continue
-                
-                # Transcribe audio
-                transcription = whisper_transcription(audio_file, source_lang="en", use_local_whisper=use_local_whisper)
-                if not transcription:
-                    print(f"Transcription failed for {video_id}")
-                    results["failed_files"].append(video_id)
-                    continue
-                
-                # Save transcription as SRT file
-                srt_file = domain_output / f"{video_dir.name}.srt"
-                save_srt_transcription(transcription, srt_file)
-                
-                # Translate SRT file
-                translated_srt_path = translate_srt_file(srt_file, src_lang="en", tgt_lang="zh")
-                if not translated_srt_path:
-                    print(f"Translation failed for {video_id}")
-                    results["failed_files"].append(video_id)
-                    continue
-                
-                # Copy translated SRT to the original data folder
-                translated_srt_file = video_dir / f"{video_dir.name}_translated.srt"
-                shutil.copy2(translated_srt_path, translated_srt_file)
-                
-                # Load reference translation if exists
-                ref_files = list(video_dir.glob("*_ZH.ass"))
-                ref_text = ""
-                if ref_files:
-                    # Parse reference ASS file - simplified parsing
-                    try:
-                        with open(ref_files[0], 'r', encoding='utf-8') as f:
-                            ass_content = f.read()
-                            # Extract dialogue lines (this is a simplified approach)
-                            dialogue_lines = re.findall(r'Dialogue:.*?,(.*)', ass_content)
-                            ref_text = ' '.join(dialogue_lines).strip()
-                    except Exception as e:
-                        print(f"Error reading reference file {ref_files[0]}: {e}")
-                
-                # Convert to text format
-                original_text = to_big_video_format(srt_file)  # Original transcription
-                translated_text = to_big_video_format(translated_srt_path)  # Translated text
-                
-                results["translations"][video_id] = translated_text
-                results["original_texts"][video_id] = original_text
-                results["reference_texts"][video_id] = ref_text
-                results["processed_files"].append(video_id)
-                results["audio_files"].append(audio_file)
-                
-                print(f"Successfully processed {video_id}")
-                
+                    results["failed_files"].append(returned_video_id)
+                    print(f"❌ Failed {returned_video_id}: {result}")
+                    
             except Exception as e:
-                print(f"Error processing {video_dir}: {e}")
-                results["failed_files"].append(str(video_dir))
+                results["failed_files"].append(video_id)
+                print(f"❌ Exception for {video_id}: {e}")
     
     return results
 
@@ -1085,12 +1035,194 @@ def convert_segments_to_srt(segments, time_offset=0.0):
     
     return '\n'.join(srt_content)
 
-def main(use_local_whisper=False):
+@dataclass
+class WhisperWorker:
+    """A worker that holds a Whisper model instance."""
+    worker_id: int
+    asr_instance: Any
+    is_busy: bool = False
+    
+class WhisperModelPool:
+    """
+    Pool of Whisper model instances for GPU-parallel processing.
+    This allows multiple model instances to run on the same GPU efficiently.
+    """
+    
+    def __init__(self, num_workers: int, use_local_whisper: bool = True):
+        self.num_workers = num_workers
+        self.use_local_whisper = use_local_whisper
+        self.workers: List[WhisperWorker] = []
+        self.available_workers = queue.Queue()
+        self.lock = threading.Lock()
+        self._initialized = False
+    
+    def initialize_pool(self):
+        """Initialize the pool of Whisper model instances."""
+        if self._initialized:
+            return
+        
+        print(f"🔧 Initializing {self.num_workers} Whisper model instances for GPU parallel processing...")
+        
+        try:
+            for i in range(self.num_workers):
+                if self.use_local_whisper:
+                    # Import here to avoid issues if not available
+                    from src.audio.ASR import StableWhisperASR
+                    asr_instance = StableWhisperASR()
+                    print(f"✅ Initialized local Whisper worker {i+1}/{self.num_workers}")
+                else:
+                    from src.audio.ASR import WhisperAPIASR
+                    asr_instance = WhisperAPIASR()
+                    print(f"✅ Initialized API Whisper worker {i+1}/{self.num_workers}")
+                
+                worker = WhisperWorker(worker_id=i, asr_instance=asr_instance)
+                self.workers.append(worker)
+                self.available_workers.put(worker)
+            
+            self._initialized = True
+            print(f"🚀 Whisper model pool initialized with {self.num_workers} workers")
+            
+        except Exception as e:
+            print(f"❌ Error initializing Whisper model pool: {e}")
+            raise
+    
+    def get_worker(self, timeout: float = 30.0) -> Optional[WhisperWorker]:
+        """Get an available worker from the pool."""
+        if not self._initialized:
+            self.initialize_pool()
+        
+        try:
+            worker = self.available_workers.get(timeout=timeout)
+            with self.lock:
+                worker.is_busy = True
+            return worker
+        except queue.Empty:
+            print(f"⚠️ No available Whisper workers after {timeout}s timeout")
+            return None
+    
+    def return_worker(self, worker: WhisperWorker):
+        """Return a worker to the pool."""
+        with self.lock:
+            worker.is_busy = False
+        self.available_workers.put(worker)
+    
+    def get_pool_status(self) -> Dict[str, int]:
+        """Get the current status of the pool."""
+        with self.lock:
+            busy_count = sum(1 for w in self.workers if w.is_busy)
+            return {
+                "total_workers": len(self.workers),
+                "busy_workers": busy_count,
+                "available_workers": len(self.workers) - busy_count
+            }
+
+def whisper_transcription_with_pool(audio_paths, source_lang="en", worker_pool: WhisperModelPool = None, worker_timeout: float = 30.0):
+    """
+    Transcribe audio using a worker from the Whisper model pool.
+    
+    Args:
+        audio_paths (str, Path, or List): Path(s) to the audio file(s).
+        source_lang (str): Source language code.
+        worker_pool (WhisperModelPool): Pool of Whisper model instances.
+        worker_timeout (float): Timeout for getting a worker from the pool.
+    
+    Returns:
+        str: Transcription result in SRT format.
+    """
+    if worker_pool is None:
+        # Fallback to original function if no pool provided
+        return whisper_transcription(audio_paths, source_lang, use_local_whisper=True)
+    
+    # Get a worker from the pool
+    worker = worker_pool.get_worker(timeout=worker_timeout)
+    if worker is None:
+        print("❌ Failed to get Whisper worker for transcription")
+        return None
+    
+    try:
+        print(f"🎤 Using Whisper worker {worker.worker_id} for transcription")
+        
+        # Handle single file or list of files
+        if isinstance(audio_paths, (str, Path)):
+            audio_paths = [audio_paths]
+        
+        all_transcriptions = []
+        cumulative_time_offset = 0.0
+        
+        for i, audio_path in enumerate(audio_paths):
+            print(f"Transcribing chunk {i+1}/{len(audio_paths)}: {audio_path} (Worker {worker.worker_id})")
+            
+            # Get chunk duration for time offset calculation
+            if len(audio_paths) > 1:
+                try:
+                    result = subprocess.run(
+                        [
+                            "ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+                            "-of", "csv=p=0", str(audio_path)
+                        ],
+                        capture_output=True,
+                        text=True,
+                        check=True
+                    )
+                    chunk_duration = float(result.stdout.strip())
+                except Exception:
+                    chunk_duration = 300.0  # Default to 5 minutes if can't get duration
+            else:
+                chunk_duration = 0.0
+            
+            # Check file size for local whisper
+            audio_file_size = Path(audio_path).stat().st_size / (1024 * 1024)  # Size in MB
+            if not worker_pool.use_local_whisper and audio_file_size > 25:
+                print(f"⚠️ Warning: Audio file is {audio_file_size:.1f}MB (>25MB limit for API)")
+            
+            # Use the worker's ASR instance
+            transcription = worker.asr_instance.get_transcript(str(audio_path), source_lang=source_lang)
+            
+            if transcription:
+                # Convert different formats to SRT format
+                if worker_pool.use_local_whisper:
+                    # StableWhisperASR returns segments format, convert to SRT
+                    try:
+                        transcription = convert_segments_to_srt(transcription, cumulative_time_offset)
+                    except Exception as convert_error:
+                        print(f"Error converting segments to SRT (Worker {worker.worker_id}): {convert_error}")
+                        print(f"Transcription format: {type(transcription)}")
+                        if isinstance(transcription, list) and len(transcription) > 0:
+                            print(f"First segment example: {transcription[0]}")
+                        return None
+                else:
+                    # WhisperAPIASR returns SRT format, adjust timestamps if needed
+                    if cumulative_time_offset > 0:
+                        transcription = adjust_srt_timestamps(transcription, cumulative_time_offset)
+                
+                all_transcriptions.append(transcription)
+                cumulative_time_offset += chunk_duration
+                print(f"Transcription successful for chunk {i+1} (Worker {worker.worker_id})")
+            else:
+                print(f"Failed to transcribe chunk {i+1}: {audio_path} (Worker {worker.worker_id})")
+                return None
+        
+        # Combine all transcriptions
+        if len(all_transcriptions) == 1:
+            return all_transcriptions[0]
+        else:
+            return combine_srt_transcriptions(all_transcriptions)
+        
+    except Exception as e:
+        print(f"Error during transcription with Worker {worker.worker_id}: {e}")
+        return None
+    finally:
+        # Always return the worker to the pool
+        worker_pool.return_worker(worker)
+
+def main(use_local_whisper=False, max_workers=None, gpu_workers=None):
     """
     Main evaluation function for DocMTAgent on DoveBench and BigVideo datasets.
     
     Args:
         use_local_whisper (bool): If True, use StableWhisperASR instead of OpenAI API.
+        max_workers (int): Maximum number of parallel workers for processing videos.
+        gpu_workers (int): Number of Whisper model instances to load on GPU.
     """
     print("Starting DocMTAgent evaluation...")
     if use_local_whisper:
@@ -1112,7 +1244,9 @@ def main(use_local_whisper=False):
         test_ids_file=BIGVIDEO_DATA_PATH / "text_data_test.id",
         video_dir=BIGVIDEO_DATA_PATH / "test",
         output_dir=bigvideo_output,
-        use_local_whisper=use_local_whisper
+        use_local_whisper=use_local_whisper,
+        max_workers=max_workers,
+        gpu_workers=gpu_workers
     )
     
     bigvideo_scores = calculate_bigvideo_scores(bigvideo_results, bigvideo_output)
@@ -1126,7 +1260,9 @@ def main(use_local_whisper=False):
     dovebench_results = process_dovebench_dataset(
         dataset_dir=DOVEBENCH_DATA_PATH,
         output_dir=dovebench_output,
-        use_local_whisper=use_local_whisper
+        use_local_whisper=use_local_whisper,
+        max_workers=max_workers,
+        gpu_workers=gpu_workers
     )
     
     dovebench_scores = calculate_dovebench_scores(dovebench_results, dovebench_output)
@@ -1239,7 +1375,7 @@ def find_missing_files_dovebench(dataset_dir, output_dir):
     
     return all_video_ids, missing_ids, existing_ids
 
-def resume_bigvideo_dataset(test_ids_file, video_dir, output_dir, use_local_whisper=False):
+def resume_bigvideo_dataset(test_ids_file, video_dir, output_dir, use_local_whisper=False, max_workers=None, gpu_workers=None):
     """
     Resume BigVideo dataset processing: only process missing translation files.
     
@@ -1319,6 +1455,16 @@ def resume_bigvideo_dataset(test_ids_file, video_dir, output_dir, use_local_whis
     else:
         print("☁️ Using Whisper API for missing files")
     
+    # Set up parallel processing
+    if max_workers is None:
+        max_workers = min(32, (os.cpu_count() or 1) + 4)
+    
+    if missing_ids:
+        print(f"🔄 Using {max_workers} parallel workers for {len(missing_ids)} missing files")
+    
+    # Initialize Whisper model pool for GPU parallelization
+    worker_pool = create_whisper_worker_pool(use_local_whisper, max_workers, gpu_workers)
+    
     # Process only missing files
     results = {
         "processed_files": list(existing_ids),  # Start with existing files
@@ -1363,69 +1509,42 @@ def resume_bigvideo_dataset(test_ids_file, video_dir, output_dir, use_local_whis
             results["original_texts"][test_id] = original_text
             results["reference_texts"][test_id] = ref_zh_texts.get(test_id, "")
     
-    # Process missing files
-    for test_id in missing_ids:
-        try:
-            print(f"\n📝 Processing missing file: {test_id}...")
+    # Process missing files in parallel
+    if missing_ids:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all missing files for processing
+            future_to_test_id = {
+                executor.submit(
+                    process_single_video_bigvideo, 
+                    test_id, 
+                    video_dir, 
+                    output_dir, 
+                    ref_en_texts, 
+                    ref_zh_texts, 
+                    use_local_whisper,
+                    worker_pool
+                ): test_id for test_id in missing_ids
+            }
             
-            # Find video file
-            video_file = video_dir / f"{test_id}.mp4"
-            if not video_file.exists():
-                print(f"❌ Video file not found: {video_file}")
-                results["failed_files"].append(test_id)
-                continue
-            
-            # Extract audio
-            audio_file = audio_extractor(video_file, use_local_whisper=use_local_whisper)
-            if not audio_file:
-                print(f"❌ Audio extraction failed for {test_id}")
-                results["failed_files"].append(test_id)
-                continue
-            
-            # Handle case where audio_file might be a list (split files)
-            if isinstance(audio_file, list):
-                if not any(f.exists() for f in audio_file):
-                    print(f"❌ Audio extraction failed for {test_id}")
+            # Collect results as they complete
+            for future in as_completed(future_to_test_id):
+                test_id = future_to_test_id[future]
+                try:
+                    success, returned_test_id, result = future.result()
+                    
+                    if success:
+                        results["translations"][returned_test_id] = result["translation"]
+                        results["original_texts"][returned_test_id] = result["original_text"]
+                        results["reference_texts"][returned_test_id] = result["reference_text"]
+                        results["processed_files"].append(returned_test_id)
+                        print(f"✅ Completed missing file: {returned_test_id}")
+                    else:
+                        results["failed_files"].append(returned_test_id)
+                        print(f"❌ Failed missing file {returned_test_id}: {result}")
+                        
+                except Exception as e:
                     results["failed_files"].append(test_id)
-                    continue
-            else:
-                if not audio_file.exists():
-                    print(f"❌ Audio extraction failed for {test_id}")
-                    results["failed_files"].append(test_id)
-                    continue
-            
-            # Transcribe audio
-            transcription = whisper_transcription(audio_file, source_lang="en", use_local_whisper=use_local_whisper)
-            if not transcription:
-                print(f"❌ Transcription failed for {test_id}")
-                results["failed_files"].append(test_id)
-                continue
-            
-            # Save transcription as SRT file
-            srt_file = output_dir / f"{test_id}.srt"
-            save_srt_transcription(transcription, srt_file)
-            
-            # Translate SRT file
-            translated_srt_path = translate_srt_file(srt_file, src_lang="en", tgt_lang="zh")
-            if not translated_srt_path:
-                print(f"❌ Translation failed for {test_id}")
-                results["failed_files"].append(test_id)
-                continue
-            
-            # Convert to BigVideo format
-            original_text = to_big_video_format(srt_file)
-            translated_text = to_big_video_format(translated_srt_path)
-            
-            results["translations"][test_id] = translated_text
-            results["original_texts"][test_id] = original_text
-            results["reference_texts"][test_id] = ref_zh_texts.get(test_id, "")
-            results["processed_files"].append(test_id)
-            
-            print(f"✅ Successfully processed {test_id}")
-            
-        except Exception as e:
-            print(f"❌ Error processing {test_id}: {e}")
-            results["failed_files"].append(test_id)
+                    print(f"❌ Exception for missing file {test_id}: {e}")
     
     print("\n📊 Resume completed!")
     print(f"  Total files: {len(all_test_ids)}")
@@ -1435,7 +1554,7 @@ def resume_bigvideo_dataset(test_ids_file, video_dir, output_dir, use_local_whis
     
     return results
 
-def resume_dovebench_dataset(dataset_dir, output_dir, use_local_whisper=False):
+def resume_dovebench_dataset(dataset_dir, output_dir, use_local_whisper=False, max_workers=None, gpu_workers=None):
     """
     Resume DoveBench dataset processing: only process missing translation files.
     
@@ -1510,6 +1629,16 @@ def resume_dovebench_dataset(dataset_dir, output_dir, use_local_whisper=False):
     else:
         print("☁️ Using Whisper API for missing files")
     
+    # Set up parallel processing
+    if max_workers is None:
+        max_workers = min(32, (os.cpu_count() or 1) + 4)
+    
+    if missing_ids:
+        print(f"🔄 Using {max_workers} parallel workers for {len(missing_ids)} missing files")
+    
+    # Initialize Whisper model pool for GPU parallelization
+    worker_pool = create_whisper_worker_pool(use_local_whisper, max_workers, gpu_workers)
+    
     # Process missing files
     results = {
         "processed_files": list(existing_ids),  # Start with existing files
@@ -1553,99 +1682,47 @@ def resume_dovebench_dataset(dataset_dir, output_dir, use_local_whisper=False):
             
             results["reference_texts"][video_id] = ref_text
     
-    # Process missing files
-    for video_id in missing_ids:
-        try:
+    # Process missing files in parallel
+    if missing_ids:
+        # Collect video infos for missing files
+        missing_video_infos = []
+        for video_id in missing_ids:
             domain, video_name = video_id.split('/')
-            print(f"\n📝 Processing missing file: {video_id}...")
+            domain_dir = dataset_dir / domain
+            video_dir = domain_dir / video_name
+            missing_video_infos.append((domain_dir, video_dir, video_id))
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all missing files for processing
+            future_to_video_id = {
+                executor.submit(
+                    process_single_video_dovebench, 
+                    video_info, 
+                    output_dir, 
+                    use_local_whisper,
+                    worker_pool
+                ): video_info[2] for video_info in missing_video_infos
+            }
             
-            # Create domain output directory
-            domain_output = output_dir / domain
-            domain_output.mkdir(parents=True, exist_ok=True)
-            
-            # Find video file
-            video_dir = dataset_dir / domain / video_name
-            video_files = list(video_dir.glob("*.mp4"))
-            if not video_files:
-                print(f"❌ No video file found in {video_dir}")
-                results["failed_files"].append(video_id)
-                continue
-            
-            video_file = video_files[0]
-            
-            # Extract audio
-            audio_file = audio_extractor(video_file, use_local_whisper=use_local_whisper)
-            if not audio_file:
-                print(f"❌ Audio extraction failed for {video_id}")
-                results["failed_files"].append(video_id)
-                continue
-            
-            # Handle case where audio_file might be a list (split files)
-            if isinstance(audio_file, list):
-                if not any(f.exists() for f in audio_file):
-                    print(f"❌ Audio extraction failed for {video_id}")
-                    results["failed_files"].append(video_id)
-                    continue
-            else:
-                if not audio_file.exists():
-                    print(f"❌ Audio extraction failed for {video_id}")
-                    results["failed_files"].append(video_id)
-                    continue
-            
-            # Transcribe audio
-            transcription = whisper_transcription(audio_file, source_lang="en", use_local_whisper=use_local_whisper)
-            if not transcription:
-                print(f"❌ Transcription failed for {video_id}")
-                results["failed_files"].append(video_id)
-                continue
-            
-            # Save transcription as SRT file
-            srt_file = domain_output / f"{video_name}.srt"
-            save_srt_transcription(transcription, srt_file)
-            
-            # Translate SRT file
-            translated_srt_path = translate_srt_file(srt_file, src_lang="en", tgt_lang="zh")
-            if not translated_srt_path:
-                print(f"❌ Translation failed for {video_id}")
-                results["failed_files"].append(video_id)
-                continue
-            
-            # Copy translated SRT to the original data folder
-            translated_srt_file = video_dir / f"{video_name}_translated.srt"
-            shutil.copy2(translated_srt_path, translated_srt_file)
-            
-            # Load reference translation if exists
-            ref_files = list(video_dir.glob("*_ZH.ass"))
-            ref_text = ""
-            if ref_files:
+            # Collect results as they complete
+            for future in as_completed(future_to_video_id):
+                video_id = future_to_video_id[future]
                 try:
-                    with open(ref_files[0], 'r', encoding='utf-8') as f:
-                        ref_content = f.read()
-                        # Simple ASS parsing - extract dialogue lines
-                        dialogue_lines = []
-                        for line in ref_content.split('\n'):
-                            if line.startswith('Dialogue:'):
-                                parts = line.split(',', 9)
-                                if len(parts) >= 10:
-                                    dialogue_lines.append(parts[9].strip())
-                        ref_text = ' '.join(dialogue_lines)
+                    success, returned_video_id, result = future.result()
+                    
+                    if success:
+                        results["translations"][returned_video_id] = result["translation"]
+                        results["original_texts"][returned_video_id] = result["original_text"]
+                        results["reference_texts"][returned_video_id] = result["reference_text"]
+                        results["processed_files"].append(returned_video_id)
+                        print(f"✅ Completed missing file: {returned_video_id}")
+                    else:
+                        results["failed_files"].append(returned_video_id)
+                        print(f"❌ Failed missing file {returned_video_id}: {result}")
+                        
                 except Exception as e:
-                    print(f"Error reading reference file {ref_files[0]}: {e}")
-            
-            # Convert to text format
-            original_text = to_big_video_format(srt_file)  # Original transcription
-            translated_text = to_big_video_format(translated_srt_path)  # Translated text
-            
-            results["translations"][video_id] = translated_text
-            results["original_texts"][video_id] = original_text
-            results["reference_texts"][video_id] = ref_text
-            results["processed_files"].append(video_id)
-            
-            print(f"✅ Successfully processed {video_id}")
-            
-        except Exception as e:
-            print(f"❌ Error processing {video_id}: {e}")
-            results["failed_files"].append(video_id)
+                    results["failed_files"].append(video_id)
+                    print(f"❌ Exception for missing file {video_id}: {e}")
     
     print("\n📊 Resume completed!")
     print(f"  Total files: {len(all_video_ids)}")
@@ -1654,6 +1731,264 @@ def resume_dovebench_dataset(dataset_dir, output_dir, use_local_whisper=False):
     print(f"  Failed: {len(results['failed_files'])}")
     
     return results
+
+def process_single_video_bigvideo(test_id, video_dir, output_dir, ref_en_texts, ref_zh_texts, use_local_whisper=False, worker_pool=None):
+    """
+    Process a single video file for BigVideo dataset.
+    
+    Args:
+        test_id (str): Test ID for the video.
+        video_dir (Path): Directory containing video files.
+        output_dir (Path): Output directory for results.
+        ref_en_texts (dict): Reference English texts.
+        ref_zh_texts (dict): Reference Chinese texts.
+        use_local_whisper (bool): If True, use local Whisper model instead of API.
+        worker_pool (WhisperModelPool): Pool of Whisper model instances for GPU parallelization.
+    
+    Returns:
+        tuple: (success, test_id, result_dict or error_message)
+    """
+    try:
+        print(f"\nProcessing {test_id}...")
+        
+        # Find video file
+        video_file = video_dir / f"{test_id}.mp4"
+        if not video_file.exists():
+            print(f"Video file not found: {video_file}")
+            return False, test_id, "Video file not found"
+        
+        # Extract audio
+        audio_file = audio_extractor(video_file, use_local_whisper=use_local_whisper)
+        if not audio_file:
+            print(f"Audio extraction failed for {test_id}")
+            return False, test_id, "Audio extraction failed"
+        
+        # Handle case where audio_file might be a list (split files)
+        if isinstance(audio_file, list):
+            # Check if any of the chunks exist
+            if not any(f.exists() for f in audio_file):
+                print(f"Audio extraction failed for {test_id}")
+                return False, test_id, "Audio extraction failed - no chunks exist"
+        else:
+            if not audio_file.exists():
+                print(f"Audio extraction failed for {test_id}")
+                return False, test_id, "Audio extraction failed - file does not exist"
+        
+        # Transcribe audio using worker pool
+        if worker_pool is not None:
+            transcription = whisper_transcription_with_pool(audio_file, source_lang="en", worker_pool=worker_pool)
+        else:
+            transcription = whisper_transcription(audio_file, source_lang="en", use_local_whisper=use_local_whisper)
+        if not transcription:
+            print(f"Transcription failed for {test_id}")
+            return False, test_id, "Transcription failed"
+        
+        # Save transcription as SRT file
+        srt_file = output_dir / f"{test_id}.srt"
+        save_srt_transcription(transcription, srt_file)
+        
+        # Translate SRT file
+        translated_srt_path = translate_srt_file(srt_file, src_lang="en", tgt_lang="zh")
+        if not translated_srt_path:
+            print(f"Translation failed for {test_id}")
+            return False, test_id, "Translation failed"
+        
+        # Convert to BigVideo format (single line)
+        original_text = to_big_video_format(srt_file)
+        
+        # For translated text, extract from the translated SRT file
+        translated_text = to_big_video_format(translated_srt_path)
+        
+        result = {
+            "translation": translated_text,
+            "original_text": original_text,
+            "reference_text": ref_zh_texts.get(test_id, "")
+        }
+        
+        print(f"Successfully processed {test_id}")
+        return True, test_id, result
+        
+    except Exception as e:
+        print(f"Error processing {test_id}: {e}")
+        return False, test_id, str(e)
+
+def process_single_video_dovebench(video_info, output_dir, use_local_whisper=False, worker_pool=None):
+    """
+    Process a single video file for DoveBench dataset.
+    
+    Args:
+        video_info (tuple): (domain_dir, video_dir, video_id)
+        output_dir (Path): Output directory for results.
+        use_local_whisper (bool): If True, use local Whisper model instead of API.
+        worker_pool (WhisperModelPool): Pool of Whisper model instances for GPU parallelization.
+    
+    Returns:
+        tuple: (success, video_id, result_dict or error_message)
+    """
+    try:
+        domain_dir, video_dir, video_id = video_info
+        print(f"Processing {video_id}...")
+        
+        # Find video file
+        video_files = list(video_dir.glob("*.mp4"))
+        if not video_files:
+            print(f"No video file found in {video_dir}")
+            return False, video_id, "No video file found"
+        
+        video_file = video_files[0]
+        
+        # Extract audio
+        audio_file = audio_extractor(video_file, use_local_whisper=use_local_whisper)
+        if not audio_file:
+            print(f"Audio extraction failed for {video_id}")
+            return False, video_id, "Audio extraction failed"
+        
+        # Handle case where audio_file might be a list (split files)
+        if isinstance(audio_file, list):
+            # Check if any of the chunks exist
+            if not any(f.exists() for f in audio_file):
+                print(f"Audio extraction failed for {video_id}")
+                return False, video_id, "Audio extraction failed - no chunks exist"
+        else:
+            if not audio_file.exists():
+                print(f"Audio extraction failed for {video_id}")
+                return False, video_id, "Audio extraction failed - file does not exist"
+        
+        # Transcribe audio using worker pool
+        if worker_pool is not None:
+            transcription = whisper_transcription_with_pool(audio_file, source_lang="en", worker_pool=worker_pool)
+        else:
+            transcription = whisper_transcription(audio_file, source_lang="en", use_local_whisper=use_local_whisper)
+        if not transcription:
+            print(f"Transcription failed for {video_id}")
+            return False, video_id, "Transcription failed"
+        
+        # Save transcription as SRT file
+        domain_output = output_dir / domain_dir.name
+        domain_output.mkdir(parents=True, exist_ok=True)
+        srt_file = domain_output / f"{video_dir.name}.srt"
+        save_srt_transcription(transcription, srt_file)
+        
+        # Translate SRT file
+        translated_srt_path = translate_srt_file(srt_file, src_lang="en", tgt_lang="zh")
+        if not translated_srt_path:
+            print(f"Translation failed for {video_id}")
+            return False, video_id, "Translation failed"
+        
+        # Copy translated SRT to the original data folder
+        translated_srt_file = video_dir / f"{video_dir.name}_translated.srt"
+        shutil.copy2(translated_srt_path, translated_srt_file)
+        
+        # Load reference translation if exists
+        ref_files = list(video_dir.glob("*_ZH.ass"))
+        ref_text = ""
+        if ref_files:
+            # Parse reference ASS file - simplified parsing
+            try:
+                with open(ref_files[0], 'r', encoding='utf-8') as f:
+                    ass_content = f.read()
+                    # Extract dialogue lines (this is a simplified approach)
+                    dialogue_lines = re.findall(r'Dialogue:.*?,(.*)', ass_content)
+                    ref_text = ' '.join(dialogue_lines).strip()
+            except Exception as e:
+                print(f"Error reading reference file {ref_files[0]}: {e}")
+        
+        # Convert to text format
+        original_text = to_big_video_format(srt_file)  # Original transcription
+        translated_text = to_big_video_format(translated_srt_path)  # Translated text
+        
+        result = {
+            "translation": translated_text,
+            "original_text": original_text,
+            "reference_text": ref_text,
+            "audio_file": audio_file
+        }
+        
+        print(f"Successfully processed {video_id}")
+        return True, video_id, result
+        
+    except Exception as e:
+        print(f"Error processing {video_id}: {e}")
+        return False, video_id, str(e)
+
+def process_videos_in_parallel(video_ids, video_dir, output_dir, ref_en_texts, ref_zh_texts, use_local_whisper=False):
+    """
+    Process multiple video files in parallel for BigVideo dataset.
+    
+    Args:
+        video_ids (list): List of test IDs for the videos.
+        video_dir (Path): Directory containing video files.
+        output_dir (Path): Output directory for results.
+        ref_en_texts (dict): Reference English texts.
+        ref_zh_texts (dict): Reference Chinese texts.
+        use_local_whisper (bool): If True, use local Whisper model instead of API.
+    
+    Returns:
+        dict: Results dictionary with test IDs as keys and processing results as values.
+    """
+    results = {}
+    
+    # Process each video ID
+    for test_id in video_ids:
+        success, video_id, result = process_single_video_bigvideo(test_id, video_dir, output_dir, ref_en_texts, ref_zh_texts, use_local_whisper=use_local_whisper)
+        results[video_id] = result
+    
+    return results
+
+def process_videos_in_parallel_dovebench(video_info_list, output_dir, use_local_whisper=False):
+    """
+    Process multiple video files in parallel for DoveBench dataset.
+    
+    Args:
+        video_info_list (list): List of tuples (domain_dir, video_dir, video_id).
+        output_dir (Path): Output directory for results.
+        use_local_whisper (bool): If True, use local Whisper model instead of API.
+    
+    Returns:
+        dict: Results dictionary with video IDs as keys and processing results as values.
+    """
+    results = {}
+    
+    # Process each video info
+    for video_info in video_info_list:
+        success, video_id, result = process_single_video_dovebench(video_info, output_dir, use_local_whisper=use_local_whisper)
+        results[video_id] = result
+    
+    return results
+
+def create_whisper_worker_pool(use_local_whisper: bool, max_workers: int, gpu_workers: Optional[int] = None) -> Optional[WhisperModelPool]:
+    """
+    Create a Whisper model pool for GPU parallel processing.
+    
+    Args:
+        use_local_whisper (bool): Whether to use local Whisper models.
+        max_workers (int): Maximum number of parallel workers.
+        gpu_workers (int): Number of GPU workers (model instances).
+    
+    Returns:
+        WhisperModelPool or None: The worker pool if successful, None otherwise.
+    """
+    if not use_local_whisper:
+        return None
+    
+    try:
+        if gpu_workers is None:
+            # Auto-detect optimal number of model instances based on available resources
+            gpu_workers = min(max_workers, 4)  # Conservative default
+        
+        if gpu_workers <= 0:
+            print("⚠️ GPU workers set to 0, using single model instance")
+            return None
+        
+        print(f"🔧 Initializing Whisper model pool with {gpu_workers} GPU workers...")
+        worker_pool = WhisperModelPool(num_workers=gpu_workers, use_local_whisper=True)
+        print(f"🚀 GPU parallel processing enabled: {gpu_workers} Whisper model instances")
+        return worker_pool
+        
+    except Exception as e:
+        print(f"⚠️ Failed to initialize Whisper model pool: {e}")
+        print("📝 Falling back to single model instance")
+        return None
 
 if __name__ == "__main__":
     import argparse
@@ -1669,11 +2004,17 @@ if __name__ == "__main__":
     parser.add_argument("--use-local-whisper", action="store_true", 
                         help="Use local Whisper model (StableWhisperASR) instead of OpenAI API. "
                              "Avoids 25MB file size limit but requires local model installation.")
+    parser.add_argument("--max-workers", type=int, default=None,
+                        help="Maximum number of parallel workers for processing videos. "
+                             "If not specified, uses min(32, CPU count + 4).")
+    parser.add_argument("--gpu-workers", type=int, default=None,
+                        help="Number of Whisper model instances to load on GPU for parallel processing. "
+                             "Only applies when using --use-local-whisper. If not specified, uses min(max_workers, 4).")
     
     args = parser.parse_args()
     
     if args.mode == "full":
-        main(use_local_whisper=args.use_local_whisper)
+        main(use_local_whisper=args.use_local_whisper, max_workers=args.max_workers, gpu_workers=args.gpu_workers)
     elif args.mode == "bigvideo":
         print("Processing BigVideo dataset only...")
         output_dir = Path(args.output_dir)
@@ -1683,7 +2024,9 @@ if __name__ == "__main__":
             test_ids_file=BIGVIDEO_DATA_PATH / "text_data_test.id",
             video_dir=BIGVIDEO_DATA_PATH / "test",
             output_dir=bigvideo_output,
-            use_local_whisper=args.use_local_whisper
+            use_local_whisper=args.use_local_whisper,
+            max_workers=args.max_workers,
+            gpu_workers=args.gpu_workers
         )
         
         bigvideo_scores = calculate_bigvideo_scores(bigvideo_results, bigvideo_output)
@@ -1704,7 +2047,9 @@ if __name__ == "__main__":
         dovebench_results = process_dovebench_dataset(
             dataset_dir=DOVEBENCH_DATA_PATH,
             output_dir=dovebench_output,
-            use_local_whisper=args.use_local_whisper
+            use_local_whisper=args.use_local_whisper,
+            max_workers=args.max_workers,
+            gpu_workers=args.gpu_workers
         )
         
         dovebench_scores = calculate_dovebench_scores(dovebench_results, dovebench_output)
@@ -1732,7 +2077,9 @@ if __name__ == "__main__":
             test_ids_file=BIGVIDEO_DATA_PATH / "text_data_test.id",
             video_dir=BIGVIDEO_DATA_PATH / "test",
             output_dir=bigvideo_output,
-            use_local_whisper=args.use_local_whisper
+            use_local_whisper=args.use_local_whisper,
+            max_workers=args.max_workers,
+            gpu_workers=args.gpu_workers
         )
         
         bigvideo_scores = calculate_bigvideo_scores(bigvideo_results, bigvideo_output)
@@ -1746,7 +2093,9 @@ if __name__ == "__main__":
         dovebench_results = resume_dovebench_dataset(
             dataset_dir=DOVEBENCH_DATA_PATH,
             output_dir=dovebench_output,
-            use_local_whisper=args.use_local_whisper
+            use_local_whisper=args.use_local_whisper,
+            max_workers=args.max_workers,
+            gpu_workers=args.gpu_workers
         )
         
         dovebench_scores = calculate_dovebench_scores(dovebench_results, dovebench_output)
@@ -1782,7 +2131,9 @@ if __name__ == "__main__":
             test_ids_file=BIGVIDEO_DATA_PATH / "text_data_test.id",
             video_dir=BIGVIDEO_DATA_PATH / "test",
             output_dir=bigvideo_output,
-            use_local_whisper=args.use_local_whisper
+            use_local_whisper=args.use_local_whisper,
+            max_workers=args.max_workers,
+            gpu_workers=args.gpu_workers
         )
         
         bigvideo_scores = calculate_bigvideo_scores(bigvideo_results, bigvideo_output)
@@ -1803,7 +2154,9 @@ if __name__ == "__main__":
         dovebench_results = resume_dovebench_dataset(
             dataset_dir=DOVEBENCH_DATA_PATH,
             output_dir=dovebench_output,
-            use_local_whisper=args.use_local_whisper
+            use_local_whisper=args.use_local_whisper,
+            max_workers=args.max_workers,
+            gpu_workers=args.gpu_workers
         )
         
         dovebench_scores = calculate_dovebench_scores(dovebench_results, dovebench_output)

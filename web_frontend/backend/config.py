@@ -20,7 +20,7 @@ CONFIGURATION_SCHEMA = {
     ),
     "domain": ConfigurationValue(
         type="select",
-        options=["General", "SC2"],
+        options=["General", "SC2", "CS:GO"],
         default="General",
         description="Domain/field of the content for specialized translation"
     ),

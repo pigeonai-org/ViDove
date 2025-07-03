@@ -29,20 +29,14 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 
 # Install pipeline dependencies using uv in separate venv
-RUN uv venv venv
-RUN uv sync --no-dev --python venv/bin/python
-
-# Debug: Verify pyyaml installation in the venv
-RUN echo "=== Checking venv Python and packages ===" && \
-    venv/bin/python --version && \
-    venv/bin/pip list | grep -i yaml && \
-    venv/bin/python -c "import yaml; print('SUCCESS: yaml module imported')" || \
-    echo "FAILED: Could not import yaml module"
+RUN uv venv /app/venv
+ENV UV_PROJECT_ENVIRONMENT=/app/venv
+RUN uv sync --no-dev --python /app/venv/bin/python
 
 # Install web backend dependencies in separate venv
 COPY web_frontend/backend/requirements.txt ./backend_requirements.txt
-RUN uv venv backend-venv
-RUN uv pip install --python backend-venv/bin/python --no-cache-dir -r backend_requirements.txt
+RUN uv venv /app/backend-venv
+RUN uv pip install --python /app/backend-venv/bin/python --no-cache-dir -r backend_requirements.txt
 
 # Install fonts (handle missing files gracefully)
 RUN mkdir -p /usr/local/share/fonts/truetype
@@ -75,7 +69,7 @@ BACKEND_PID=$!\n\
 \n\
 # Start React frontend in background\n\
 cd /app/web_frontend/frontend\n\
-REACT_APP_API_URL=http://localhost:8000 npm start &\n\
+npm start &\n\
 FRONTEND_PID=$!\n\
 \n\
 # Function to cleanup on exit\n\
@@ -100,7 +94,6 @@ RUN mkdir -p /app/local_dump /app/web_frontend/backend/uploads /app/web_frontend
 ENV PYTHONPATH=/app
 ENV PIPELINE_VENV=/app/venv
 ENV BACKEND_VENV=/app/backend-venv
-ENV REACT_APP_API_URL=http://localhost:8000
 
 # Expose ports for both frontend and backend
 EXPOSE 3000 8000

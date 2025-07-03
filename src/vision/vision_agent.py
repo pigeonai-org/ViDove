@@ -106,13 +106,13 @@ class GptVisionAgent(VisionAgent):
                 }
             ],
         )
-        #print(response.choices[0].message.content)
+        self.logger.info(f"Frame analysis response: {response.choices[0].message.content}")
         return response.choices[0].message.content
     
     def summarize_cue(self):
         prompt = f"Reorganize the following visual description: {' '.join(self.visual_cues)}"
         response = openai.chat.completions.create(
-            model="gpt-4.5-preview-2025-02-27",
+            model="gpt-4o",
             messages=[
                 {"role": "system", "content": f"You are an summarizer that organize visual description from a video.\
                 You will be given a list of visual cues and you need to reorganize them into a coherent description.\

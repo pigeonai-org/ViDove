@@ -165,7 +165,7 @@ class ErrorResponse(BaseModel):
 
 class FileDownloadInfo(BaseModel):
     filename: str
-    file_type: Literal["subtitle", "video", "unknown"]
+    file_type: Literal["subtitle", "video", "log", "unknown"]
     size_bytes: int
     created_at: float
 

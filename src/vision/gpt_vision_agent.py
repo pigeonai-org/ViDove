@@ -77,7 +77,7 @@ class GptVisionAgent(VisionAgent):
         
         prompt = f"Summarize the following visual description: {' '.join(self.visual_cues)}"
         response = openai.chat.completions.create(
-            model="gpt-4.5-preview-2025-02-27",
+            model="gpt-4o",
             messages=[
                 {"role": "system", "content": "You are an AI model that summarizes visual description from a video."},
                 {

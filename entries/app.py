@@ -199,7 +199,7 @@ def main():
         with col2:
             opt_tgt = st.selectbox("Select Target Language", ["ZH", "EN", "KR"], index=0)
         with col3:
-            opt_domain = st.selectbox("Select Dictionary", ["General", "SC2"], index=0)
+            opt_domain = st.selectbox("Select Dictionary", ["General", "SC2", "CS:GO"], index=0)
             
         if opt_src == opt_tgt:
             st.error("Source and Target Language should be different")
