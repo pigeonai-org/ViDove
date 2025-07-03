@@ -11,13 +11,23 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 # Import from local module (same directory)
 # Assume all imports are successful as requested
-from scores.score import SubERscore
+# from scores.score import SubERscore, SubSONARscore
+
+from scores.SubER_main.suber.file_readers import read_input_file
+from scores.SubER_main.suber.metrics.suber import calculate_SubER
 
 # Set availability flags to True as requested
 SUBER_AVAILABLE = True
 SUBSONAR_AVAILABLE = True
 ASS_EXTRACTOR_AVAILABLE = True
 
+def SubERscore(hypothesis_file: str, reference_file: str) -> float:
+    hypo_segments = read_input_file(hypothesis_file, file_format="SRT")
+    ref_segments = read_input_file(reference_file, file_format="SRT")
+
+    score = calculate_SubER(hypo_segments, ref_segments)
+
+    return score
 
 def extract_text_from_eval_file(eval_file_path: str) -> str:
     """Extract translation text from evaluation text file.
