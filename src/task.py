@@ -304,27 +304,28 @@ class Task:
             if segment.audio_path is not None:
                 self.task_logger.info(f"Transcribing audio file: {segment.audio_path}")
                 temp_segment = self.audio_agent.transcribe(segment.audio_path, segment.visual_cues)
+
                 if temp_segment is None:
                     self.task_logger.warning(f"No transcription found for segment {idx}, skipping.")
                     continue
-
-                for idx, seg in enumerate(temp_segment):
+                
+                for idx_, seg in enumerate(temp_segment):
                     # Ensure the segment starts before it ends, if violation occurs, adjust the start time to end time of a former segment, if no former segment, set to 0
                     if segment.timestr_to_seconds(seg['start']) >= segment.timestr_to_seconds(seg['end']):
-                        if idx > 0:
-                            self.task_logger.warning(f"Segment {idx} start time is greater than or equal to end time, adjusting.")
-                            seg['start'] = temp_segment[idx - 1]['end']
+                        if idx_ > 0:
+                            self.task_logger.warning(f"Segment {idx_} start time is greater than or equal to end time, adjusting.")
+                            seg['start'] = temp_segment[idx_ - 1]['end']
                         else:
-                            self.task_logger.warning(f"Segment {idx} start time is greater than or equal to end time, setting start time to 0.")
+                            self.task_logger.warning(f"Segment {idx_} start time is greater than or equal to end time, setting start time to 0.")
                             seg['start'] = segment.format_time(0)
 
                     # Sort and adjust the start and end times of the segments, ensure the former ends before the latter starts
-                    if idx < len(temp_segment) - 1:
-                        if segment.timestr_to_seconds(seg['end']) > segment.timestr_to_seconds(temp_segment[idx + 1]['start']):
-                            self.task_logger.warning(f"Segment {idx} end time is greater than next segment start time, adjusting.")
-                            seg['end'] = temp_segment[idx + 1]['start']
+                    if idx_ < len(temp_segment) - 1:
+                        if segment.timestr_to_seconds(seg['end']) > segment.timestr_to_seconds(temp_segment[idx_ + 1]['start']):
+                            self.task_logger.warning(f"Segment {idx_} end time is greater than next segment start time, adjusting.")
+                            seg['end'] = temp_segment[idx_ + 1]['start']
                             
-                for seg in temp_segment:
+                for idx_, seg in enumerate(temp_segment):
                     seg['start'] = segment.timestr_to_seconds(seg['start']) + segment.start_time
                     seg['end'] = segment.timestr_to_seconds(seg['end']) + segment.start_time
 
@@ -340,7 +341,7 @@ class Task:
             else:
                 self.task_logger.info("No audio file found for this segment.")
 
-        self.SRT_Script.replace_seg(self.temp_segments_info)  
+        self.SRT_Script.replace_seg(self.temp_segments_info)
 
 
 
