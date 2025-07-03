@@ -68,7 +68,13 @@ def extract_text_from_eval_file(eval_file_path: str) -> str:
 
 
 def create_temp_srt_from_text(text_content: str) -> str:
-    """Create temporary SRT file from text content.
+    """Create temporary SRT file from text content with 10-second intervals.
+    
+    Each line of text will be assigned a 10-second time slot:
+    - Line 1: 00:00:00,000 --> 00:00:10,000
+    - Line 2: 00:00:10,000 --> 00:00:20,000
+    - Line 3: 00:00:20,000 --> 00:00:30,000
+    - etc.
     
     Args:
         text_content (str): Text content, one sentence per line
@@ -87,9 +93,22 @@ def create_temp_srt_from_text(text_content: str) -> str:
     try:
         with os.fdopen(temp_fd, 'w', encoding='utf-8') as f:
             for i, line in enumerate(lines, 1):
-                # Create simple SRT format with dummy timestamps
-                start_time = f"00:00:{i:02d},000"
-                end_time = f"00:00:{i+1:02d},000"
+                # Create SRT format with 10-second intervals
+                start_seconds = (i - 1) * 10
+                end_seconds = i * 10
+                
+                # Convert seconds to HH:MM:SS format
+                start_hours = start_seconds // 3600
+                start_minutes = (start_seconds % 3600) // 60
+                start_secs = start_seconds % 60
+                
+                end_hours = end_seconds // 3600
+                end_minutes = (end_seconds % 3600) // 60
+                end_secs = end_seconds % 60
+                
+                start_time = f"{start_hours:02d}:{start_minutes:02d}:{start_secs:02d},000"
+                end_time = f"{end_hours:02d}:{end_minutes:02d}:{end_secs:02d},000"
+                
                 f.write(f"{i}\n{start_time} --> {end_time}\n{line}\n\n")
     except:
         # Clean up on error
