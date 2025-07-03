@@ -11,7 +11,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 # Import from local module (same directory)
 # Assume all imports are successful as requested
-# from scores.score import SubERscore, SubSONARscore
+from scores.score import SubSONARscore
 
 from scores.SubER_main.suber.file_readers import read_input_file
 from scores.SubER_main.suber.metrics.suber import calculate_SubER
@@ -20,6 +20,10 @@ from scores.SubER_main.suber.metrics.suber import calculate_SubER
 SUBER_AVAILABLE = True
 SUBSONAR_AVAILABLE = True
 ASS_EXTRACTOR_AVAILABLE = True
+
+# Language codes for SubSONAR
+# Audio language codes: "eng" (English), "cmn" (Mandarin Chinese), etc.
+# Text language codes in Flores 200 format: "eng_Latn" (English), "zho_Hans" (Simplified Chinese), etc.
 
 def SubERscore(hypothesis_file: str, reference_file: str) -> float:
     hypo_segments = read_input_file(hypothesis_file, file_format="SRT")
@@ -147,6 +151,40 @@ def find_matching_ref_file(eval_filename: str, ref_folder: str) -> Optional[str]
     return None
 
 
+def find_matching_audio_file(srt_file_path: str) -> Optional[str]:
+    """Find matching audio file for a given SRT file.
+    
+    Looks for audio files with the same base name as the SRT file.
+    
+    Args:
+        srt_file_path (str): Path to SRT file
+        
+    Returns:
+        Optional[str]: Path to matching audio file, or None if not found
+    """
+    srt_path = Path(srt_file_path)
+    srt_folder = srt_path.parent
+    srt_stem = srt_path.stem  # filename without extension
+    
+    # Common audio file extensions
+    audio_extensions = ['.mp3', '.mp4', '.wav', '.m4a', '.flac', '.aac']
+    
+    # Try to find audio file with same base name
+    for ext in audio_extensions:
+        audio_path = srt_folder / f"{srt_stem}{ext}"
+        if audio_path.exists():
+            return str(audio_path)
+    
+    # If exact match not found, try fuzzy matching
+    for ext in audio_extensions:
+        pattern = f"*{srt_stem}*{ext}"
+        matches = list(srt_folder.glob(pattern))
+        if matches:
+            return str(matches[0])  # Return first match
+    
+    return None
+
+
 def batch_eval_suber(eval_folder: str, ref_folder: str) -> Dict[str, float]:
     """Batch evaluate SubER scores for evaluation files against reference SRT files.
     
@@ -222,30 +260,101 @@ def batch_eval_suber(eval_folder: str, ref_folder: str) -> Dict[str, float]:
     return results
 
 
-def batch_eval_subsonar(eval_folder: str, ref_folder: str) -> Dict[str, float]:
-    """Batch evaluate SubSONAR scores for evaluation files against reference files.
+def batch_eval_subsonar(eval_folder: str, ref_folder: str, audio_lang: str = "eng", text_lang: str = "zho_Hans") -> Dict[str, float]:
+    """Batch evaluate SubSONAR scores for evaluation files against reference files with audio.
     
-    Note: SubSONAR requires audio files, which may not be available.
-    This function is a placeholder and may need audio file handling.
+    SubSONAR requires audio files to be present in the same directory as SRT files.
     
     Args:
         eval_folder (str): Path to folder containing evaluation text files
-        ref_folder (str): Path to folder containing reference files and audio
+        ref_folder (str): Path to folder containing reference SRT files and audio files
+        audio_lang (str): Language of the speech in audio files (default: "eng" for English)
+        text_lang (str): Language of the text in Flores 200 format (default: "zho_Hans" for Chinese)
         
     Returns:
         Dict[str, float]: Dictionary mapping filenames to SubSONAR scores
     """
-    print("SubSONAR evaluation requires audio files.")
-    print("This function is not yet implemented as audio files may not be available.")
-    print("Please implement SubSONAR evaluation based on your specific audio file setup.")
+    eval_folder_path = Path(eval_folder)
+    ref_folder_path = Path(ref_folder)
     
-    # TODO: Implement SubSONAR evaluation when audio files are available
-    # You would need to:
-    # 1. Find matching audio files (mp3/mp4) for each evaluation file
-    # 2. Convert evaluation text to SRT format
-    # 3. Call SubSONARscore with the SRT file, audio file, and language codes
+    if not eval_folder_path.exists():
+        raise FileNotFoundError(f"Evaluation folder not found: {eval_folder}")
+    if not ref_folder_path.exists():
+        raise FileNotFoundError(f"Reference folder not found: {ref_folder}")
     
-    return {}
+    # Get all text files from eval folder
+    eval_files = list(eval_folder_path.glob("*.txt"))
+    
+    if not eval_files:
+        print(f"No .txt files found in {eval_folder}")
+        return {}
+    
+    results = {}
+    temp_files_to_cleanup = []
+    
+    try:
+        for eval_file in eval_files:
+            eval_filename = eval_file.stem  # filename without extension
+            print(f"Processing SubSONAR for: {eval_filename}")
+            
+            # Find matching reference SRT file
+            ref_srt_path = find_matching_ref_file(eval_filename, str(ref_folder_path))
+            
+            if not ref_srt_path:
+                print(f"  Warning: No matching reference SRT file found for {eval_filename}")
+                continue
+            
+            # Find matching audio file
+            audio_file_path = find_matching_audio_file(ref_srt_path)
+            
+            if not audio_file_path:
+                print(f"  Warning: No matching audio file found for {Path(ref_srt_path).name}")
+                continue
+            
+            try:
+                # Extract text from evaluation file
+                eval_text = extract_text_from_eval_file(str(eval_file))
+                
+                if not eval_text.strip():
+                    print(f"  Warning: No text extracted from {eval_filename}")
+                    continue
+                
+                # Create SRT from evaluation text
+                eval_srt_path = create_temp_srt_from_text(eval_text)
+                temp_files_to_cleanup.append(eval_srt_path)
+                
+                # Calculate SubSONAR score
+                print(f"  Using audio file: {Path(audio_file_path).name}")
+                print(f"  Audio language: {audio_lang}, Text language: {text_lang}")
+                
+                score = SubSONARscore(
+                    hypothesis_file=eval_srt_path,
+                    audio_file=audio_file_path,
+                    audio_lang=audio_lang,
+                    text_lang=text_lang
+                )
+                
+                results[eval_filename] = score
+                
+                print(f"  SubSONAR score: {score:.4f}")
+                print(f"  Reference file: {Path(ref_srt_path).name}")
+                
+            except Exception as e:
+                print(f"  Error processing {eval_filename}: {e}")
+                import traceback
+                traceback.print_exc()
+                continue
+    
+    finally:
+        # Clean up temporary files
+        for temp_file in temp_files_to_cleanup:
+            try:
+                if os.path.exists(temp_file):
+                    os.unlink(temp_file)
+            except Exception as e:
+                print(f"Warning: Could not delete temp file {temp_file}: {e}")
+    
+    return results
 
 
 def calculate_average_scores(scores: Dict[str, float]) -> Tuple[float, Dict[str, any]]:
@@ -326,21 +435,50 @@ if __name__ == "__main__":
     
     try:
         # Run SubER evaluation
-        results = batch_eval(eval_folder=eval_folder_path, ref_folder=ref_folder_path, eval_type="suber")
+        print("="*60)
+        print("RUNNING SUBER EVALUATION")
+        print("="*60)
+        suber_results = batch_eval(eval_folder=eval_folder_path, ref_folder=ref_folder_path, eval_type="suber")
         
         print("\n" + "="*50)
-        print("EVALUATION RESULTS")
+        print("SUBER EVALUATION RESULTS")
         print("="*50)
-        print(results["summary"])
+        print(suber_results["summary"])
         print(f"\nStatistics:")
-        print(f"  Files processed: {results['statistics']['count']}")
-        print(f"  Average score: {results['statistics']['avg']:.4f}")
-        print(f"  Min score: {results['statistics']['min']:.4f}")
-        print(f"  Max score: {results['statistics']['max']:.4f}")
+        print(f"  Files processed: {suber_results['statistics']['count']}")
+        print(f"  Average score: {suber_results['statistics']['avg']:.4f}")
+        print(f"  Min score: {suber_results['statistics']['min']:.4f}")
+        print(f"  Max score: {suber_results['statistics']['max']:.4f}")
         
         print(f"\nIndividual scores:")
-        for filename, score in results["individual_scores"].items():
+        for filename, score in suber_results["individual_scores"].items():
             print(f"  {filename}: {score:.4f}")
+        
+        # Optionally run SubSONAR evaluation (comment out if SubSONAR is not available)
+        print("\n" + "="*60)
+        print("RUNNING SUBSONAR EVALUATION")
+        print("="*60)
+        
+        try:
+            subsonar_results = batch_eval(eval_folder=eval_folder_path, ref_folder=ref_folder_path, eval_type="subsonar")
+            
+            print("\n" + "="*50)
+            print("SUBSONAR EVALUATION RESULTS")
+            print("="*50)
+            print(subsonar_results["summary"])
+            print(f"\nStatistics:")
+            print(f"  Files processed: {subsonar_results['statistics']['count']}")
+            print(f"  Average score: {subsonar_results['statistics']['avg']:.4f}")
+            print(f"  Min score: {subsonar_results['statistics']['min']:.4f}")
+            print(f"  Max score: {subsonar_results['statistics']['max']:.4f}")
+            
+            print(f"\nIndividual scores:")
+            for filename, score in subsonar_results["individual_scores"].items():
+                print(f"  {filename}: {score:.4f}")
+                
+        except Exception as subsonar_error:
+            print(f"SubSONAR evaluation failed: {subsonar_error}")
+            print("This is expected if SubSONAR dependencies are not installed.")
             
     except Exception as e:
         print(f"Error during evaluation: {e}")
