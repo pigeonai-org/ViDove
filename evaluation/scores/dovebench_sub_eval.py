@@ -11,7 +11,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 # Import from local module (same directory)
 # Assume all imports are successful as requested
-from scores.score import SubERscore, SubSONARscore
+from scores.score import SubERscore
 
 # Set availability flags to True as requested
 SUBER_AVAILABLE = True
