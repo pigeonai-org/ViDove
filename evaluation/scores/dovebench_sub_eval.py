@@ -13,8 +13,20 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 # Assume all imports are successful as requested
 from scores.score import SubSONARscore
 
-from scores.SubER_main.suber.file_readers import read_input_file
-from scores.SubER_main.suber.metrics.suber import calculate_SubER
+# from scores.SubER_main.suber.file_readers import read_input_file
+# from scores.SubER_main.suber.metrics.suber import calculate_SubER
+
+# try:
+# # from scores.subsonar.src.subsonar.sonar_metric import SonarAudioTextMetric
+#     from subsonar import SonarAudioTextMetric
+#     # from scores.subsonar.src.subsonar.srt_reader import SrtReader
+#     from subsonar import SrtReader
+#     print("t1")
+# except:
+#     from subsonar.sonar_metric import SonarAudioTextMetric
+#     from subsonar.srt_reader import SrtReader
+#     print("t2")
+    
 
 # Set availability flags to True as requested
 SUBER_AVAILABLE = True
@@ -26,101 +38,25 @@ ASS_EXTRACTOR_AVAILABLE = True
 # Text language codes in Flores 200 format: "eng_Latn" (English), "zho_Hans" (Simplified Chinese), etc.
 
 def SubERscore(hypothesis_file: str, reference_file: str) -> float:
+    """
+    计算SubER分数
+    
+    Args:
+        hypothesis_file: 假设SRT文件路径
+        reference_file: 参考SRT文件路径
+        
+    Returns:
+        float: SubER分数
+    """
+    from scores.SubER_main.suber.file_readers import read_input_file
+    from scores.SubER_main.suber.metrics.suber import calculate_SubER
+    
     hypo_segments = read_input_file(hypothesis_file, file_format="SRT")
     ref_segments = read_input_file(reference_file, file_format="SRT")
 
     score = calculate_SubER(hypo_segments, ref_segments)
 
     return score
-
-def extract_text_from_eval_file(eval_file_path: str) -> str:
-    """Extract translation text from evaluation text file.
-    
-    The evaluation files contain AI model outputs in a specific format.
-    We need to extract only the assistant responses that contain translations.
-    
-    Args:
-        eval_file_path (str): Path to evaluation text file
-        
-    Returns:
-        str: Extracted translation text, one sentence per line
-    """
-    translations = []
-    
-    with open(eval_file_path, 'r', encoding='utf-8') as f:
-        content = f.read()
-    
-    # Split by "assistant" markers to get AI responses
-    assistant_responses = content.split('assistant\n')[1:]  # Skip first empty part
-    
-    for response in assistant_responses:
-        # Get text before next "system" or "user" marker
-        if 'system\n' in response:
-            text = response.split('system\n')[0].strip()
-        elif 'user\n' in response:
-            text = response.split('user\n')[0].strip()
-        else:
-            text = response.strip()
-        
-        if text and len(text) > 5:  # Filter out very short responses
-            # Clean up the text
-            text = text.replace('\n', ' ').strip()
-            if text:
-                translations.append(text)
-    
-    return '\n'.join(translations)
-
-
-def create_temp_srt_from_text(text_content: str) -> str:
-    """Create temporary SRT file from text content with 10-second intervals.
-    
-    Each line of text will be assigned a 10-second time slot:
-    - Line 1: 00:00:00,000 --> 00:00:10,000
-    - Line 2: 00:00:10,000 --> 00:00:20,000
-    - Line 3: 00:00:20,000 --> 00:00:30,000
-    - etc.
-    
-    Args:
-        text_content (str): Text content, one sentence per line
-        
-    Returns:
-        str: Path to temporary SRT file
-    """
-    lines = [line.strip() for line in text_content.split('\n') if line.strip()]
-    
-    if not lines:
-        raise ValueError("No content to create SRT file")
-    
-    # Create temporary SRT file
-    temp_fd, temp_srt_path = tempfile.mkstemp(suffix='.srt', text=True)
-    
-    try:
-        with os.fdopen(temp_fd, 'w', encoding='utf-8') as f:
-            for i, line in enumerate(lines, 1):
-                # Create SRT format with 10-second intervals
-                start_seconds = (i - 1) * 10
-                end_seconds = i * 10
-                
-                # Convert seconds to HH:MM:SS format
-                start_hours = start_seconds // 3600
-                start_minutes = (start_seconds % 3600) // 60
-                start_secs = start_seconds % 60
-                
-                end_hours = end_seconds // 3600
-                end_minutes = (end_seconds % 3600) // 60
-                end_secs = end_seconds % 60
-                
-                start_time = f"{start_hours:02d}:{start_minutes:02d}:{start_secs:02d},000"
-                end_time = f"{end_hours:02d}:{end_minutes:02d}:{end_secs:02d},000"
-                
-                f.write(f"{i}\n{start_time} --> {end_time}\n{line}\n\n")
-    except:
-        # Clean up on error
-        if os.path.exists(temp_srt_path):
-            os.unlink(temp_srt_path)
-        raise
-    
-    return temp_srt_path
 
 
 def find_matching_ref_file(eval_filename: str, ref_folder: str) -> Optional[str]:
@@ -186,10 +122,10 @@ def find_matching_audio_file(srt_file_path: str) -> Optional[str]:
 
 
 def batch_eval_suber(eval_folder: str, ref_folder: str) -> Dict[str, float]:
-    """Batch evaluate SubER scores for evaluation files against reference SRT files.
+    """Batch evaluate SubER scores for SRT files against reference SRT files.
     
     Args:
-        eval_folder (str): Path to folder containing evaluation text files
+        eval_folder (str): Path to folder containing evaluation SRT files
         ref_folder (str): Path to folder containing reference SRT files
         
     Returns:
@@ -203,70 +139,48 @@ def batch_eval_suber(eval_folder: str, ref_folder: str) -> Dict[str, float]:
     if not ref_folder_path.exists():
         raise FileNotFoundError(f"Reference folder not found: {ref_folder}")
     
-    # Get all text files from eval folder
-    eval_files = list(eval_folder_path.glob("*.txt"))
+    # Get all SRT files from eval folder
+    eval_files = list(eval_folder_path.glob("*.srt"))
     
     if not eval_files:
-        print(f"No .txt files found in {eval_folder}")
+        print(f"No .srt files found in {eval_folder}")
         return {}
     
     results = {}
-    temp_files_to_cleanup = []
     
-    try:
-        for eval_file in eval_files:
-            eval_filename = eval_file.stem  # filename without extension
-            print(f"Processing: {eval_filename}")
+    for eval_file in eval_files:
+        eval_filename = eval_file.stem  # filename without extension
+        print(f"Processing SubER for: {eval_filename}")
+        
+        # Find matching reference SRT file
+        ref_srt_path = find_matching_ref_file(eval_filename, str(ref_folder_path))
+        
+        if not ref_srt_path:
+            print(f"  Warning: No matching reference SRT file found for {eval_filename}")
+            continue
+        
+        try:
+            # Calculate SubER score using SRT files directly
+            score = SubERscore(str(eval_file), ref_srt_path)
+            results[eval_filename] = score
             
-            # Find matching reference SRT file
-            ref_srt_path = find_matching_ref_file(eval_filename, str(ref_folder_path))
+            print(f"  SubER score: {score:.4f}")
+            print(f"  Reference file: {Path(ref_srt_path).name}")
             
-            if not ref_srt_path:
-                print(f"  Warning: No matching reference SRT file found for {eval_filename}")
-                continue
-            
-            try:
-                # Extract text from evaluation file
-                eval_text = extract_text_from_eval_file(str(eval_file))
-                
-                if not eval_text.strip():
-                    print(f"  Warning: No text extracted from {eval_filename}")
-                    continue
-                
-                # Create SRT from evaluation text
-                eval_srt_path = create_temp_srt_from_text(eval_text)
-                temp_files_to_cleanup.append(eval_srt_path)
-                
-                # Calculate SubER score using existing SRT files directly
-                score = SubERscore(eval_srt_path, ref_srt_path)
-                results[eval_filename] = score
-                
-                print(f"  SubER score: {score:.4f}")
-                print(f"  Reference file: {Path(ref_srt_path).name}")
-                
-            except Exception as e:
-                print(f"  Error processing {eval_filename}: {e}")
-                continue
-    
-    finally:
-        # Clean up temporary files
-        for temp_file in temp_files_to_cleanup:
-            try:
-                if os.path.exists(temp_file):
-                    os.unlink(temp_file)
-            except Exception as e:
-                print(f"Warning: Could not delete temp file {temp_file}: {e}")
+        except Exception as e:
+            print(f"  Error processing {eval_filename}: {e}")
+            continue
     
     return results
 
 
 def batch_eval_subsonar(eval_folder: str, ref_folder: str, audio_lang: str = "eng", text_lang: str = "zho_Hans") -> Dict[str, float]:
-    """Batch evaluate SubSONAR scores for evaluation files against reference files with audio.
+    """Batch evaluate SubSONAR scores for SRT files against reference files with audio.
     
     SubSONAR requires audio files to be present in the same directory as SRT files.
     
     Args:
-        eval_folder (str): Path to folder containing evaluation text files
+        eval_folder (str): Path to folder containing evaluation SRT files
         ref_folder (str): Path to folder containing reference SRT files and audio files
         audio_lang (str): Language of the speech in audio files (default: "eng" for English)
         text_lang (str): Language of the text in Flores 200 format (default: "zho_Hans" for Chinese)
@@ -282,77 +196,55 @@ def batch_eval_subsonar(eval_folder: str, ref_folder: str, audio_lang: str = "en
     if not ref_folder_path.exists():
         raise FileNotFoundError(f"Reference folder not found: {ref_folder}")
     
-    # Get all text files from eval folder
-    eval_files = list(eval_folder_path.glob("*.txt"))
+    # Get all SRT files from eval folder
+    eval_files = list(eval_folder_path.glob("*.srt"))
     
     if not eval_files:
-        print(f"No .txt files found in {eval_folder}")
+        print(f"No .srt files found in {eval_folder}")
         return {}
     
     results = {}
-    temp_files_to_cleanup = []
     
-    try:
-        for eval_file in eval_files:
-            eval_filename = eval_file.stem  # filename without extension
-            print(f"Processing SubSONAR for: {eval_filename}")
+    for eval_file in eval_files:
+        eval_filename = eval_file.stem  # filename without extension
+        print(f"Processing SubSONAR for: {eval_filename}")
+        
+        # Find matching reference SRT file
+        ref_srt_path = find_matching_ref_file(eval_filename, str(ref_folder_path))
+        
+        if not ref_srt_path:
+            print(f"  Warning: No matching reference SRT file found for {eval_filename}")
+            continue
+        
+        # Find matching audio file
+        audio_file_path = find_matching_audio_file(ref_srt_path)
+        
+        if not audio_file_path:
+            print(f"  Warning: No matching audio file found for {Path(ref_srt_path).name}")
+            continue
+        
+        try:
+            # Calculate SubSONAR score using SRT files directly
+            print(f"  Using audio file: {Path(audio_file_path).name}")
+            print(f"  Audio language: {audio_lang}, Text language: {text_lang}")
             
-            # Find matching reference SRT file
-            ref_srt_path = find_matching_ref_file(eval_filename, str(ref_folder_path))
+            score = SubSONARscore(
+                hypothesis_file=str(eval_file),
+                audio_file=audio_file_path,
+                audio_lang=audio_lang,
+                text_lang=text_lang
+            )
             
-            if not ref_srt_path:
-                print(f"  Warning: No matching reference SRT file found for {eval_filename}")
-                continue
+            results[eval_filename] = score
             
-            # Find matching audio file
-            audio_file_path = find_matching_audio_file(ref_srt_path)
+            print(f"  SubSONAR score: {score:.4f}")
+            print(f"  Reference file: {Path(ref_srt_path).name}")
             
-            if not audio_file_path:
-                print(f"  Warning: No matching audio file found for {Path(ref_srt_path).name}")
-                continue
-            
-            try:
-                # Extract text from evaluation file
-                eval_text = extract_text_from_eval_file(str(eval_file))
-                
-                if not eval_text.strip():
-                    print(f"  Warning: No text extracted from {eval_filename}")
-                    continue
-                
-                # Create SRT from evaluation text
-                eval_srt_path = create_temp_srt_from_text(eval_text)
-                temp_files_to_cleanup.append(eval_srt_path)
-                
-                # Calculate SubSONAR score
-                print(f"  Using audio file: {Path(audio_file_path).name}")
-                print(f"  Audio language: {audio_lang}, Text language: {text_lang}")
-                
-                score = SubSONARscore(
-                    hypothesis_file=eval_srt_path,
-                    audio_file=audio_file_path,
-                    audio_lang=audio_lang,
-                    text_lang=text_lang
-                )
-                
-                results[eval_filename] = score
-                
-                print(f"  SubSONAR score: {score:.4f}")
-                print(f"  Reference file: {Path(ref_srt_path).name}")
-                
-            except Exception as e:
-                print(f"  Error processing {eval_filename}: {e}")
-                import traceback
-                traceback.print_exc()
-                continue
-    
-    finally:
-        # Clean up temporary files
-        for temp_file in temp_files_to_cleanup:
-            try:
-                if os.path.exists(temp_file):
-                    os.unlink(temp_file)
-            except Exception as e:
-                print(f"Warning: Could not delete temp file {temp_file}: {e}")
+        except Exception as e:
+            print(f"  Error processing {eval_filename}: {e}")
+            import traceback
+            traceback.print_exc()
+            continue
     
     return results
 
@@ -385,7 +277,7 @@ def batch_eval(eval_folder: str, ref_folder: str, eval_type: str = "suber") -> D
     """Main batch evaluation function.
     
     Args:
-        eval_folder (str): Path to folder containing evaluation files
+        eval_folder (str): Path to folder containing evaluation SRT files
         ref_folder (str): Path to folder containing reference files
         eval_type (str): Type of evaluation ("suber" or "subsonar")
         
