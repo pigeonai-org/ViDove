@@ -1,15 +1,3 @@
-#!/usr/bin/env python3
-"""
-SRT文件创建工具 - 持久化版本
-
-基于dovebench_sub_eval.py中的SRT创建方法，创建能持久化保存的SRT文件。
-支持从文本文件、字符串列表或手动输入创建SRT文件。
-支持批量处理文件夹中的所有文本文件。
-
-Author: ViDove Team
-Date: 2024
-"""
-
 import os
 import sys
 import argparse
@@ -17,6 +5,7 @@ from pathlib import Path
 from typing import List, Optional, Union, Dict, Tuple
 from datetime import datetime
 import glob
+import re
 
 
 def format_timestamp(seconds: float) -> str:
@@ -61,7 +50,6 @@ def create_srt_from_text_lines(
         ValueError: 当文本行为空时
         OSError: 当无法写入文件时
     """
-    # 过滤空行
     lines = [line.strip() for line in text_lines if line.strip()]
     
     if not lines:
@@ -97,23 +85,65 @@ def create_srt_from_text_lines(
         raise OSError(f"无法写入SRT文件 {output_path}: {e}")
 
 
+def extract_qwen_assistant_responses(content: str) -> List[str]:
+    """
+    从Qwen对话内容中提取assistant响应（专门针对Qwen格式优化）
+    
+    Args:
+        content: Qwen对话内容
+        
+    Returns:
+        提取的assistant响应列表
+    """
+    responses = []
+    
+    # 按assistant标记分割，更精确的处理
+    sections = re.split(r'\nassistant\s*\n', content)
+    
+    # 跳过第一个部分（assistant之前的内容）
+    for section in sections[1:]:
+        # 找到下一个system或user标记之前的文本
+        # 使用更严格的匹配模式
+        next_section_match = re.search(r'\n(system|user)\s*\n', section)
+        
+        if next_section_match:
+            # 提取assistant响应到下一个section之前的内容
+            assistant_text = section[:next_section_match.start()].strip()
+        else:
+            # 如果没有找到下一个section，使用整个剩余部分
+            assistant_text = section.strip()
+        
+        # 清理和验证文本
+        if assistant_text:
+            # 移除多余的空白字符，但保留必要的换行
+            cleaned_text = re.sub(r'\n+', '\n', assistant_text).strip()
+            # 替换换行为空格，创建单行字幕
+            single_line_text = cleaned_text.replace('\n', ' ')
+            
+            # 过滤掉过短或无意义的响应
+            if len(single_line_text) > 3:  # 至少3个字符
+                responses.append(single_line_text)
+    
+    return responses
+
+
 def create_srt_from_text_file(
     input_file: str, 
     output_file: Optional[str] = None,
     interval_seconds: float = 10.0,
     start_time: float = 0.0,
-    extract_ai_responses: bool = False,
+    extract_qwen_responses: bool = True,  # 默认开启Qwen提取
     verbose: bool = True
 ) -> str:
     """
-    从文本文件创建SRT文件
+    从文本文件创建SRT文件（专门针对Qwen对话文件优化）
     
     Args:
         input_file: 输入文本文件路径
         output_file: 输出SRT文件路径（可选，默认基于输入文件名）
         interval_seconds: 每个字幕条目的时间间隔（秒）
         start_time: 起始时间（秒）
-        extract_ai_responses: 是否提取AI对话中的assistant响应
+        extract_qwen_responses: 是否提取Qwen对话中的assistant响应
         verbose: 是否显示详细信息
         
     Returns:
@@ -132,9 +162,11 @@ def create_srt_from_text_file(
     with open(input_path, 'r', encoding='utf-8') as f:
         content = f.read()
     
-    if extract_ai_responses:
-        # 提取AI对话中的assistant响应（类似dovebench_sub_eval.py中的方法）
-        text_lines = extract_ai_assistant_responses(content)
+    if extract_qwen_responses:
+        # 提取Qwen对话中的assistant响应
+        text_lines = extract_qwen_assistant_responses(content)
+        if verbose and text_lines:
+            print(f"🤖 从Qwen对话中提取到 {len(text_lines)} 个assistant响应")
     else:
         # 按行分割
         text_lines = content.split('\n')
@@ -153,19 +185,19 @@ def batch_create_srt_from_folder(
     output_folder: Optional[str] = None,
     interval_seconds: float = 10.0,
     start_time: float = 0.0,
-    extract_ai_responses: bool = False,
+    extract_qwen_responses: bool = True,  # 默认开启Qwen提取
     file_pattern: str = "*.txt",
     overwrite: bool = False
 ) -> Dict[str, Union[str, Exception]]:
     """
-    批量从文件夹中的文本文件创建SRT文件
+    批量从文件夹中的Qwen对话文件创建SRT文件
     
     Args:
         input_folder: 输入文件夹路径
         output_folder: 输出文件夹路径（可选，默认为输入文件夹）
         interval_seconds: 每个字幕条目的时间间隔（秒）
         start_time: 起始时间（秒）
-        extract_ai_responses: 是否提取AI对话中的assistant响应
+        extract_qwen_responses: 是否提取Qwen对话中的assistant响应
         file_pattern: 文件匹配模式（默认: "*.txt"）
         overwrite: 是否覆盖已存在的SRT文件
         
@@ -199,8 +231,8 @@ def batch_create_srt_from_folder(
     print(f"📁 输出文件夹: {output_path}")
     print(f"⏱️ 时间间隔: {interval_seconds} 秒")
     print(f"🎬 起始时间: {start_time} 秒")
-    if extract_ai_responses:
-        print("🤖 将提取AI对话中的assistant响应")
+    if extract_qwen_responses:
+        print("🤖 将提取Qwen对话中的assistant响应")
     print("-" * 60)
     
     results = {}
@@ -227,7 +259,7 @@ def batch_create_srt_from_folder(
                 str(output_file),
                 interval_seconds,
                 start_time,
-                extract_ai_responses,
+                extract_qwen_responses,
                 verbose=False  # 批量模式下关闭详细输出
             )
             
@@ -257,37 +289,10 @@ def batch_create_srt_from_folder(
     return results
 
 
+# 保留旧的函数名以兼容性
 def extract_ai_assistant_responses(content: str) -> List[str]:
-    """
-    从AI对话内容中提取assistant响应
-    
-    Args:
-        content: 对话内容
-        
-    Returns:
-        提取的assistant响应列表
-    """
-    responses = []
-    
-    # 按assistant标记分割
-    assistant_responses = content.split('assistant\n')[1:]  # 跳过第一个空部分
-    
-    for response in assistant_responses:
-        # 获取下一个system或user标记之前的文本
-        if 'system\n' in response:
-            text = response.split('system\n')[0].strip()
-        elif 'user\n' in response:
-            text = response.split('user\n')[0].strip()
-        else:
-            text = response.strip()
-        
-        if text and len(text) > 5:  # 过滤太短的响应
-            # 清理文本
-            text = text.replace('\n', ' ').strip()
-            if text:
-                responses.append(text)
-    
-    return responses
+    """兼容性函数，调用新的Qwen专用函数"""
+    return extract_qwen_assistant_responses(content)
 
 
 def create_srt_with_custom_timing(
@@ -389,37 +394,34 @@ def interactive_srt_creator() -> str:
 def main():
     """主函数 - 命令行接口"""
     parser = argparse.ArgumentParser(
-        description="SRT文件创建工具 - 从文本创建持久化的SRT字幕文件",
+        description="Qwen对话SRT文件创建工具 - 从Qwen对话文件创建SRT字幕文件",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 使用示例:
-  # 单文件：从文本文件创建SRT
-  python create_persistent_srt.py -i input.txt -o output.srt
+  # 单文件：从Qwen对话文件创建SRT
+  python qwen_srt_extractor.py -i qwen_dialogue.txt -o output.srt
   
-  # 批量处理：处理文件夹中的所有txt文件
-  python create_persistent_srt.py --batch-folder /path/to/input/folder
+  # 批量处理：处理文件夹中的所有Qwen对话文件
+  python qwen_srt_extractor.py --batch-folder /path/to/qwen/dialogues
   
   # 批量处理到指定输出文件夹
-  python create_persistent_srt.py --batch-folder input_folder --output-folder output_folder
-  
-  # 批量处理特定文件类型
-  python create_persistent_srt.py --batch-folder folder --pattern "*.md"
+  python qwen_srt_extractor.py --batch-folder input_folder --output-folder output_folder
   
   # 设置自定义时间间隔
-  python create_persistent_srt.py -i input.txt --interval 5
+  python qwen_srt_extractor.py -i qwen_dialogue.txt --interval 5
   
-  # 提取AI对话中的assistant响应
-  python create_persistent_srt.py -i dialogue.txt --extract-ai
+  # 禁用Qwen响应提取（按行处理）
+  python qwen_srt_extractor.py -i input.txt --no-extract-qwen
   
   # 交互式创建
-  python create_persistent_srt.py --interactive
+  python qwen_srt_extractor.py --interactive
         """
     )
     
     # 输入选项
     input_group = parser.add_mutually_exclusive_group(required=True)
     input_group.add_argument('-i', '--input', 
-                       help='输入文本文件路径（单文件模式）')
+                       help='输入Qwen对话文件路径（单文件模式）')
     input_group.add_argument('--batch-folder', 
                        help='输入文件夹路径（批量处理模式）')
     input_group.add_argument('--interactive', action='store_true',
@@ -432,12 +434,12 @@ def main():
                        help='输出文件夹路径（批量模式，可选）')
     
     # 处理选项
-    parser.add_argument('--interval', type=float, default=10.0,
+    parser.add_argument('--interval', type=float, default=8.0,
                        help='每个字幕条目的时间间隔（秒，默认10）')
     parser.add_argument('--start-time', type=float, default=0.0,
                        help='起始时间（秒，默认0）')
-    parser.add_argument('--extract-ai', action='store_true',
-                       help='从AI对话文件中提取assistant响应')
+    parser.add_argument('--no-extract-qwen', action='store_true',
+                       help='禁用Qwen响应提取，按行处理文本')
     
     # 批量处理选项
     parser.add_argument('--pattern', default='*.txt',
@@ -446,6 +448,9 @@ def main():
                        help='覆盖已存在的SRT文件（批量模式）')
     
     args = parser.parse_args()
+    
+    # 确定是否提取Qwen响应
+    extract_qwen = not args.no_extract_qwen
     
     try:
         if args.interactive:
@@ -461,7 +466,7 @@ def main():
                 output_folder=args.output_folder,
                 interval_seconds=args.interval,
                 start_time=args.start_time,
-                extract_ai_responses=args.extract_ai,
+                extract_qwen_responses=extract_qwen,
                 file_pattern=args.pattern,
                 overwrite=args.overwrite
             )
@@ -477,7 +482,7 @@ def main():
                 args.output,
                 args.interval,
                 args.start_time,
-                args.extract_ai
+                extract_qwen
             )
             print(f"\n🎉 SRT文件创建完成: {result}")
         

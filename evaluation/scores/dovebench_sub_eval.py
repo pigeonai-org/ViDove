@@ -11,7 +11,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 # Import from local module (same directory)
 # Assume all imports are successful as requested
-from scores.score import SubSONARscore
+# from scores.score import SubSONARscore
 
 # from scores.SubER_main.suber.file_readers import read_input_file
 # from scores.SubER_main.suber.metrics.suber import calculate_SubER
@@ -30,8 +30,8 @@ from scores.score import SubSONARscore
 
 # Set availability flags to True as requested
 SUBER_AVAILABLE = True
-SUBSONAR_AVAILABLE = True
-ASS_EXTRACTOR_AVAILABLE = True
+SUBSONAR_AVAILABLE = False
+ASS_EXTRACTOR_AVAILABLE = False
 
 # Language codes for SubSONAR
 # Audio language codes: "eng" (English), "cmn" (Mandarin Chinese), etc.
