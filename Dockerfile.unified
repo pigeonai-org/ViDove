@@ -51,9 +51,11 @@ RUN if [ -d "/tmp/fonts" ]; then \
 # Copy the entire project
 COPY . .
 
-# Install frontend dependencies
+# Install frontend dependencies and build for production
 WORKDIR /app/web_frontend/frontend
 RUN npm ci
+RUN npm install -g serve
+RUN npm run build
 
 # Return to app directory
 WORKDIR /app
@@ -69,7 +71,7 @@ BACKEND_PID=$!\n\
 \n\
 # Start React frontend in background\n\
 cd /app/web_frontend/frontend\n\
-npm start &\n\
+npx serve -s build -l 3000 &\n\
 FRONTEND_PID=$!\n\
 \n\
 # Function to cleanup on exit\n\
