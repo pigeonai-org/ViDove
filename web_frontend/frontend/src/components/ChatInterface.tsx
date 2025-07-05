@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
 import { ChatMessage } from '../types/api';
 
 interface ChatInterfaceProps {
@@ -90,7 +91,9 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
         {messages.map((message, index) => (
           <div key={index} className={`message ${message.role}`}>
             <div className="message-content">
-              <div className="message-text">{message.content}</div>
+              <div className="message-text">
+                <ReactMarkdown>{message.content}</ReactMarkdown>
+              </div>
               <div className="message-timestamp">
                 {new Date(message.timestamp).toLocaleTimeString()}
               </div>

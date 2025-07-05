@@ -196,7 +196,7 @@ CONFIGURATION_SCHEMA = {
 WELCOME_MESSAGE = """Hello! I'm your ViDove translation assistant. I'll help you configure your video translation task through a friendly conversation.
 
 To get started, you can:
-📁 **Upload a file**: Drag and drop a video, audio, or SRT file into the chat, or use the upload button
+📁 **Upload a file**: Drag and drop a video, audio, or SRT file into the chat, or use the upload button. Here's a [demo video](https://drive.google.com/file/d/1gyaAg2jMRfo8L5zg6FpvBzOHIJIV_r7U/view?usp=sharing) you can try out.
 🎬 **Share a YouTube URL**: Just paste any YouTube link directly in the chat
 💬 **Tell me your preferences**: What languages do you want to translate between?
 

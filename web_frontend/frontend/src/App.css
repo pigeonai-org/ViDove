@@ -213,7 +213,41 @@ body {
 .message-text {
   margin-bottom: 0.5rem;
   line-height: 1.5;
-  white-space: pre-wrap;
+  white-space: pre-line;
+}
+
+/* Markdown content styles */
+.message-text ul,
+.message-text ol {
+  margin: 0.5rem 0;
+  padding-left: 1.5rem;
+  white-space: normal;
+}
+
+.message-text li {
+  margin: 0.25rem 0;
+  white-space: normal;
+}
+
+.message-text p {
+  margin: 0.5rem 0;
+}
+
+.message-text p:first-child {
+  margin-top: 0;
+}
+
+.message-text p:last-child {
+  margin-bottom: 0;
+}
+
+.message-text a {
+  color: #3b82f6;
+  text-decoration: none;
+}
+
+.message-text a:hover {
+  text-decoration: underline;
 }
 
 .message-timestamp {
