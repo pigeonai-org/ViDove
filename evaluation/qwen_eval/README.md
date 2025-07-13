@@ -1,5 +1,3 @@
-original repo: https://github.com/pigeonai-org/ViDove
-
 ## Get Started
 
 ``` bash
@@ -12,6 +10,13 @@ pip install -r requirements.txt
 
 ## Run
 
-``` python
-python evaluation/main.py --input_folder "C:\videos" --output_path "C:\translations"
+__batch processing recursive__
+Evaluate all the videos in a folder(including subfolders)
+```bash
+python evaluation/recursive_parallel_translate.py --input_folder "path/to/your/videos/folder" --output_path "path/to/your/target/output/folder" --use_audio --parallel_workers 10 --shared_model
+```
+
+Evaluate a single video file
+``` bash
+python evaluation/single_eval.py --video_path "path/to/your/video" --output_path "path/to/your/output/folder"
 ```
