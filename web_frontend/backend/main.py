@@ -157,7 +157,17 @@ async def submit_youtube_url(session_id: str, request: YouTubeUrlRequest) -> You
 if __name__ == "__main__":
     import uvicorn
     try:
-        uvicorn.run(app, host="0.0.0.0", port=8000)
+        # Configure uvicorn to allow larger file uploads (e.g., 1GB limit)
+        uvicorn.run(
+            app, 
+            host="0.0.0.0", 
+            port=8000,
+            limit_max_requests=1000,
+            limit_concurrency=1000,
+            # Set request body size limit to 1GB (1024 * 1024 * 1024 bytes)
+            # This allows large video files to be uploaded
+            h11_max_incomplete_event_size= 2* 1024 * 1024 * 1024
+        )
     except KeyboardInterrupt:
         print("\nReceived interrupt signal, shutting down...")
     except Exception as e:

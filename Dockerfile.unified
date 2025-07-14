@@ -64,9 +64,12 @@ WORKDIR /app
 RUN echo '#!/bin/bash\n\
 set -e\n\
 \n\
-# Start FastAPI backend with its own venv\n\
+# Start FastAPI backend with its own venv and increased request body size limit\n\
 cd /app/web_frontend/backend\n\
-/app/backend-venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000 &\n\
+/app/backend-venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000 \\\n\
+  --limit-max-requests 1000 \\\n\
+  --limit-concurrency 1000 \\\n\
+  --h11-max-incomplete-event-size 1073741824 &\n\
 BACKEND_PID=$!\n\
 \n\
 # Start React frontend in background\n\

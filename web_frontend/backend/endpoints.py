@@ -405,10 +405,39 @@ async def upload_file(session_id: str, file: UploadFile = File(...)) -> UploadFi
     # Determine input type based on file extension
     input_type = determine_file_type(file_extension)
     
-    # Save file
-    content = await file.read()
-    with open(file_path, "wb") as f:
-        f.write(content)
+    # Save file using streaming to handle large files efficiently
+    total_size = 0
+    chunk_size = 8192  # 8KB chunks
+    
+    try:
+        with open(file_path, "wb") as f:
+            while True:
+                chunk = await file.read(chunk_size)
+                if not chunk:
+                    break
+                f.write(chunk)
+                total_size += len(chunk)
+                
+                # Optional: Add a reasonable file size limit (e.g., 5GB)
+                # You can adjust this based on your needs
+                if total_size > 5 * 1024 * 1024 * 1024:  # 5GB limit
+                    # Clean up partial file
+                    f.close()
+                    file_path.unlink(missing_ok=True)
+                    raise HTTPException(
+                        status_code=413, 
+                        detail="File too large. Maximum file size is 5GB."
+                    )
+                    
+    except Exception as e:
+        # Clean up partial file on error
+        file_path.unlink(missing_ok=True)
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error uploading file: {str(e)}"
+        )
     
     # Update session configuration with uploaded file info
     session = sessions[session_id]
@@ -420,7 +449,7 @@ async def upload_file(session_id: str, file: UploadFile = File(...)) -> UploadFi
     return UploadFileResponse(
         filename=file.filename or unique_filename,
         file_path=str(file_path),
-        size=len(content)
+        size=total_size
     )
 
 
