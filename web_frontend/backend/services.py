@@ -147,72 +147,10 @@ Remember: NO markdown, NO code blocks, ONLY the JSON object."""
 
 def create_task_config_file(session_config: Any, temp_dir: Path) -> Path:
     """Create a temporary task configuration file for ViDove"""
-    task_config = {
-        "source_lang": session_config.source_lang,
-        "target_lang": session_config.target_lang,
-        "domain": session_config.domain,
-        "instructions": getattr(session_config, 'instructions', None),
-        "video_download": {
-            "resolution": session_config.video_download_resolution
-        },
-        "translation": {
-            "model": session_config.translation_model,
-            "chunk_size": session_config.translation_chunk_size
-        },
-        "audio": {
-            "enable_audio": True,
-            "audio_agent": session_config.audio_audio_agent,
-            "model_path": None,
-            "VAD_model": session_config.audio_VAD_model,
-            "src_lang": session_config.audio_src_lang,
-            "tgt_lang": session_config.audio_tgt_lang
-        },
-        "vision": {
-            "enable_vision": True,
-            "vision_model": session_config.vision_vision_model,
-            "model_path": None,
-            "frame_cache_dir": ".cache/frames",
-            "frame_per_seg": session_config.vision_frame_per_seg
-        },
-        "MEMEORY": {
-            "enable_local_knowledge": session_config.MEMEORY_enable_local_knowledge,
-            "enable_web_search": session_config.MEMEORY_enable_web_search,
-            "enable_vision_knowledge": session_config.MEMEORY_enable_vision_knowledge,
-            "local_knowledge_path": "./domain_dict"
-        },
-        "pre_process": {
-            "sentence_form": session_config.pre_process_sentence_form,
-            "spell_check": session_config.pre_process_spell_check,
-            "term_correct": session_config.pre_process_term_correct
-        },
-        "post_process": {
-            "enable_post_process": session_config.post_process_enable_post_process,
-            "check_len_and_split": session_config.post_process_check_len_and_split,
-            "remove_trans_punctuation": session_config.post_process_remove_trans_punctuation
-        },
-        "proofreader": {
-            "enable_proofreading": session_config.proofreader_enable_proofreading,
-            "window_size": session_config.proofreader_window_size,
-            "short_term_memory_len": session_config.proofreader_short_term_memory_len,
-            "enable_short_term_memory": session_config.proofreader_enable_short_term_memory,
-            "verbose": session_config.proofreader_verbose
-        },
-        "editor": {
-            "enable_editor": session_config.editor_enable_editor,
-            "editor_context_window": session_config.editor_editor_context_window,
-            "history_length": session_config.editor_history_length
-        },
-        "output_type": {
-            "subtitle": session_config.output_type_subtitle,
-            "video": session_config.output_type_video,
-            "bilingual": session_config.output_type_bilingual
-        },
-        "api_source": "openai"
-    }
     
     config_file = temp_dir / "task_config.yaml"
     with open(config_file, 'w', encoding='utf-8') as f:
-        yaml.dump(task_config, f, default_flow_style=False, allow_unicode=True)
+        yaml.dump(session_config, f, default_flow_style=False, allow_unicode=True)
     
     return config_file
 
@@ -328,10 +266,6 @@ def run_vidove_task(
         local_dump_dir.mkdir(parents=True, exist_ok=True)
         
         # Create task-specific directory (ViDove will create its own with internal task_id)
-        task_dir = local_dump_dir / f"task_{task_id}"
-        task_dir.mkdir(parents=True, exist_ok=True)
-        results_dir = task_dir / "results"
-        results_dir.mkdir(parents=True, exist_ok=True)
         
         # Check if ViDove environment exists
         if not VIDOVE_PYTHON.exists():
@@ -339,56 +273,9 @@ def run_vidove_task(
         
         if not VIDOVE_ENTRY.exists():
             raise RuntimeError(f"ViDove entry script not found at {VIDOVE_ENTRY}. Please ensure ViDove is properly installed.")
+       
         
-        # Convert task_config to SessionConfig-like object for file generation
-        # This is a bit hacky but necessary for the config file generation
-        class TempSessionConfig:
-            def __init__(self, config_dict):
-                self.__dict__.update(config_dict)
-                # Set defaults for any missing values
-                self.source_lang = config_dict.get("source_lang", "EN")
-                self.target_lang = config_dict.get("target_lang", "ZH")
-                self.domain = config_dict.get("domain", "General")
-                self.instructions = config_dict.get("instructions", None)
-                self.video_download_resolution = config_dict.get("video_download", {}).get("resolution", 480)
-                self.translation_model = config_dict.get("translation", {}).get("model", "gpt-4o")
-                self.translation_chunk_size = config_dict.get("translation", {}).get("chunk_size", 2000)
-                self.audio_audio_agent = config_dict.get("audio", {}).get("audio_agent", "GeminiAudioAgent")
-                self.audio_model_path = config_dict.get("audio", {}).get("model_path", None)
-                self.audio_VAD_model = config_dict.get("audio", {}).get("VAD_model", "pyannote/speaker-diarization-3.1")
-                self.audio_src_lang = config_dict.get("audio", {}).get("src_lang", "en")
-                self.audio_tgt_lang = config_dict.get("audio", {}).get("tgt_lang", "zh")
-                self.vision_vision_model = config_dict.get("vision", {}).get("vision_model", "gpt-4o")
-                self.vision_model_path = config_dict.get("vision", {}).get("model_path", "./ViDove/vision_model/clip-vit-base-patch16")
-                self.vision_frame_cache_dir = config_dict.get("vision", {}).get("frame_cache_dir", "./cache")
-                self.vision_frame_per_seg = config_dict.get("vision", {}).get("frame_per_seg", 4)
-                self.pre_process_sentence_form = config_dict.get("pre_process", {}).get("sentence_form", True)
-                self.pre_process_spell_check = config_dict.get("pre_process", {}).get("spell_check", False)
-                self.pre_process_term_correct = config_dict.get("pre_process", {}).get("term_correct", True)
-                self.post_process_enable_post_process = config_dict.get("post_process", {}).get("enable_post_process", True)
-                self.post_process_check_len_and_split = config_dict.get("post_process", {}).get("check_len_and_split", True)
-                self.post_process_remove_trans_punctuation = config_dict.get("post_process", {}).get("remove_trans_punctuation", False)
-                self.proofreader_enable_proofreading = config_dict.get("proofreader", {}).get("enable_proofreading", True)
-                self.proofreader_window_size = config_dict.get("proofreader", {}).get("window_size", 5)
-                self.proofreader_short_term_memory_len = config_dict.get("proofreader", {}).get("short_term_memory_len", 5)
-                self.proofreader_enable_short_term_memory = config_dict.get("proofreader", {}).get("enable_short_term_memory", False)
-                self.proofreader_verbose = config_dict.get("proofreader", {}).get("verbose", True)
-                self.editor_enable_editor = config_dict.get("editor", {}).get("enable_editor", True)
-                self.editor_user_instruction = config_dict.get("editor", {}).get("user_instruction", "none")
-                self.editor_editor_context_window = config_dict.get("editor", {}).get("editor_context_window", 10)
-                self.editor_history_length = config_dict.get("editor", {}).get("history_length", 5)
-                self.MEMEORY_enable_local_knowledge = config_dict.get("MEMEORY", {}).get("enable_local_knowledge", False)
-                self.MEMEORY_local_knowledge_path = config_dict.get("MEMEORY", {}).get("local_knowledge_path", "/home/macrodove/ViDove/domain_dict")
-                self.MEMEORY_enable_web_search = config_dict.get("MEMEORY", {}).get("enable_web_search", False)
-                self.MEMEORY_enable_vision_knowledge = config_dict.get("MEMEORY", {}).get("enable_vision_knowledge", True)
-                self.output_type_video = config_dict.get("output_type", {}).get("video", True)
-                self.output_type_bilingual = config_dict.get("output_type", {}).get("bilingual", True)
-                self.output_type_subtitle = config_dict.get("output_type", {}).get("subtitle", "srt")
-        
-        temp_session_config = TempSessionConfig(task_config)
-        
-        # Create configuration files
-        task_config_file = create_task_config_file(temp_session_config, temp_dir)
+        task_config_file = create_task_config_file(task_config, temp_dir)
         launch_config_file = create_launch_config_file(temp_dir, task_id)
         
         # Build command arguments based on input type
@@ -436,171 +323,82 @@ def run_vidove_task(
         # Run the ViDove command
         print(f"Running ViDove command: {' '.join(cmd_args)}")
         print(f"Working directory for execution: {os.getcwd()}")
-        process = subprocess.run(
+        
+        # Use Popen for better process control during timeout
+        process = subprocess.Popen(
             cmd_args,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=3600,  # 1 hour timeout
-            check=True,
             env=os.environ.copy()  # Inherit current environment variables
         )
         
+        try:
+            stdout, stderr = process.communicate(timeout=7200)  # 1 hour timeout
+            
+            # Check if process succeeded
+            if process.returncode != 0:
+                raise subprocess.CalledProcessError(
+                    process.returncode, cmd_args, stdout, stderr
+                )
+            
+            print(f"ViDove task {task_id} completed successfully")
+            print(f"STDOUT: {stdout}")
+            if stderr:
+                print(f"STDERR: {stderr}")
+                
+        except subprocess.TimeoutExpired:
+            # Properly terminate the timed-out process
+            print(f"Task {task_id} timed out, terminating process...")
+            process.terminate()
+            
+            # Give the process a chance to terminate gracefully
+            try:
+                process.wait(timeout=10)  # Wait up to 10 seconds for graceful termination
+            except subprocess.TimeoutExpired:
+                # Force kill if it doesn't terminate gracefully
+                print(f"Process didn't terminate gracefully, force killing...")
+                process.kill()
+                process.wait()  # Wait for the process to be fully cleaned up
+            
+            # Re-raise the timeout exception to be handled by the outer try-except
+            raise
+        
         print(f"ViDove task {task_id} completed successfully")
-        print(f"STDOUT: {process.stdout}")
-        if process.stderr:
-            print(f"STDERR: {process.stderr}")
-        
-        # Give ViDove a moment to finish writing files
-        time.sleep(2)
-        
-        # Find the result files in ViDove's output structure
-        target_lang = task_config.get("target_lang", "EN")
-        source_lang = task_config.get("source_lang", "EN")
-        print(f"Searching for result files. Source: {source_lang}, Target: {target_lang}")
-        print(f"Local dump directory: {local_dump_dir}")
-        
-        # ViDove creates its own internal task_id and creates a directory like task_{internal_id}
-        # We need to find all task directories and search for result files in them
-        task_directories = []
-        for item in local_dump_dir.glob("task_*"):
-            if item.is_dir():
-                task_directories.append(item)
-        
-        print(f"Found task directories: {[d.name for d in task_directories]}")
+        print(f"STDOUT: {stdout}")
+        if stderr:
+            print(f"STDERR: {stderr}")
         
         # Search for result files in all task directories
         result_files = []
-        all_results_dirs = []
-        
-        for task_dir in task_directories:
-            results_dir = task_dir / "results"
-            if results_dir.exists():
-                all_results_dirs.append(results_dir)
-                print(f"Checking results directory: {results_dir}")
-                
-                # List all files in the results directory
-                print(f"Files in {results_dir.name}:")
-                for file in results_dir.glob("*"):
-                    print(f"  {file.name} ({'file' if file.is_file() else 'dir'})")
-                
-                # Look for all .srt files in this results directory
-                srt_files = list(results_dir.glob("*.srt"))
-                print(f"Found SRT files in {results_dir.name}: {[f.name for f in srt_files]}")
-                
-                if srt_files:
-                    # Sort by modification time, newest first
-                    srt_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
-                    
-                    # Find the main translation file (should match pattern *_{target_lang}.srt)
-                    for srt_file in srt_files:
-                        filename = srt_file.name
-                        print(f"Examining file: {filename}")
-                        
-                        # Check if it's the main translation file
-                        if filename.endswith(f"_{target_lang}.srt"):
-                            result_files.append(srt_file)
-                            print(f"Found main translation file: {filename}")
-                        
-                        # Check if it's a bilingual file
-                        elif filename.endswith(f"_{source_lang}_{target_lang}.srt"):
-                            result_files.append(srt_file)
-                            print(f"Found bilingual file: {filename}")
-                    
-                    # If no specific pattern match, add all SRT files
-                    if not result_files:
-                        result_files.extend(srt_files)
-                        print(f"No pattern match, added all SRT files: {[f.name for f in srt_files]}")
-                
-                # Also look for video files if video output is enabled
-                if task_config.get("output_type", {}).get("video", False):
-                    print("Video output enabled, searching for video files...")
-                    for video_ext in ['.mp4', '.avi', '.mkv', '.mov']:
-                        video_files = list(results_dir.glob(f"*{video_ext}"))
-                        if video_files:
-                            result_files.extend(video_files)
-                            print(f"Found {video_ext} files: {[f.name for f in video_files]}")
-        
-        # Look for log files in task directories (one level up from results)
-        for task_dir in task_directories:
-            log_files = list(task_dir.glob("*.log"))
-            if log_files:
-                log_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
-                result_files.extend(log_files)
-                print(f"Found log files in {task_dir.name}: {[f.name for f in log_files]}")
-        
-        # If no SRT files found in results directories, check for other subtitle formats
-        if not any(f.suffix.lower() == '.srt' for f in result_files):
-            for results_dir in all_results_dirs:
-                other_files = list(results_dir.glob("*.ass")) + list(results_dir.glob("*.vtt"))
-                if other_files:
-                    other_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
-                    result_files.extend(other_files)
-                    print(f"Added other subtitle files: {[f.name for f in other_files]}")
-        
-        # Set result_path to the first (main) result file for backward compatibility
-        result_path = str(result_files[0]) if result_files else None
-        
-        print(f"Final result path: {result_path}")
-        print(f"All result files to copy: {[str(f) for f in result_files]}")
-        
-        # Copy result files to permanent location before cleanup
-        permanent_result_paths = []
-        if result_files:
-            try:
-                # Create a permanent results directory in the web backend
-                permanent_results_dir = Path(__file__).parent / "results"
-                permanent_results_dir.mkdir(exist_ok=True)
-                print(f"Created permanent results directory: {permanent_results_dir}")
-                
-                # Copy all result files
-                for result_file in result_files:
-                    if result_file.exists():
-                        # Generate filename for the permanent copy
-                        original_filename = result_file.name
-                        # Ensure task_id is in the filename for uniqueness
-                        if task_id not in original_filename:
-                            name_parts = original_filename.rsplit('.', 1)
-                            if len(name_parts) == 2:
-                                permanent_filename = f"{task_id}_{name_parts[0]}.{name_parts[1]}"
-                            else:
-                                permanent_filename = f"{task_id}_{original_filename}"
-                        else:
-                            permanent_filename = original_filename
-                        
-                        permanent_result_path = permanent_results_dir / permanent_filename
-                        
-                        # Copy the result file to permanent location
-                        shutil.copy2(result_file, permanent_result_path)
-                        permanent_result_paths.append(permanent_result_path)
-                        print(f"Copied result file from {result_file} to {permanent_result_path}")
-                
-                # Video files should already be included in result_files if video output was enabled
-                # No need for separate video file copying logic here
-                
-            except Exception as copy_error:
-                print(f"Warning: Failed to copy result files to permanent location: {copy_error}")
-                print(f"Copy error traceback: {traceback.format_exc()}")
-        else:
-            print(f"No result files found to copy.")
-            # Let's also check if there are ANY files in the task directories
-            for task_dir in task_directories:
-                results_dir = task_dir / "results"
-                if results_dir.exists():
-                    all_files_results = list(results_dir.glob("*"))
-                    print(f"All files in {task_dir.name}/results: {[str(f) for f in all_files_results]}")
-                all_files_task = list(task_dir.glob("*"))
-                print(f"All files in {task_dir.name}: {[str(f) for f in all_files_task]}")
-        
-        # Update task status to completed
+        # get the only child directory in local_dump
+        local_dump_subdirs = [d for d in local_dump_dir.iterdir() if d.is_dir()]
+        if not local_dump_subdirs:
+            raise FileNotFoundError(f"No task directories found in {local_dump_dir}. ViDove may not have created any output.")
+
+        task_dir = local_dump_subdirs[0]
+        for subdir in task_dir.iterdir():
+            if subdir.is_dir() and subdir.name == "results":
+                # append all files in the results directory
+                result_files.extend(subdir.glob("*"))
+            if subdir.is_file() and subdir.name.endswith(".log"):
+                result_files.append(subdir)
+
+        permanent_result_path = Path(__file__).parent / "results" / task_id
+        if not permanent_result_path.exists():
+            permanent_result_path.mkdir(parents=True)
+        for result_file in result_files:
+            if result_file.is_file():
+                destination = permanent_result_path / result_file.name
+                shutil.copy(result_file, destination)
+                print(f"Copied result file {result_file} to {destination}")
+
         if task_id in tasks:
             tasks[task_id].status = "COMPLETED"
-            if permanent_result_paths:
+            if permanent_result_path:
                 # Use the first (main) result file as the primary result path
-                tasks[task_id].result_path = str(permanent_result_paths[0])
-                print(f"Task completed with permanent result: {permanent_result_paths[0]}")
-            elif result_path:
-                tasks[task_id].result_path = result_path
-                print(f"Task completed with original result: {result_path}")
+                tasks[task_id].result_path = str(permanent_result_path)
+                print(f"Task completed with permanent result: {permanent_result_path}")
             else:
                 tasks[task_id].result_path = "No result file found"
                 print("Task completed but no result file found")
@@ -628,12 +426,12 @@ def run_vidove_task(
         error_msg = f"ViDove process failed with return code {e.returncode}"
         if task_id in tasks:
             tasks[task_id].status = "FAILED"
-            tasks[task_id].error = f"{error_msg}\nSTDOUT: {e.stdout}\nSTDERR: {e.stderr}"
+            tasks[task_id].error = f"{error_msg}\nSTDOUT: {e.stdout or 'No stdout'}\nSTDERR: {e.stderr or 'No stderr'}"
             tasks[task_id].working_directory = None  # Clear working directory reference
         
         print(f"Task {task_id} failed: {error_msg}")
-        print(f"STDOUT: {e.stdout}")
-        print(f"STDERR: {e.stderr}")
+        print(f"STDOUT: {e.stdout or 'No stdout'}")
+        print(f"STDERR: {e.stderr or 'No stderr'}")
         
     except Exception as e:
         # Update task status to failed with detailed error information
@@ -662,9 +460,18 @@ def run_vidove_task(
             if task_id in running_tasks:
                 del running_tasks[task_id]
             
-            # 3. Process cleanup is handled automatically by subprocess.run()
-            # since we're using subprocess.run() with check=True, the process
-            # is already completed when we reach this point
+            # 3. Ensure subprocess is terminated if still running
+            if process and process.poll() is None:
+                print(f"Terminating remaining subprocess for task {task_id}")
+                try:
+                    process.terminate()
+                    process.wait(timeout=5)
+                except (subprocess.TimeoutExpired, ProcessLookupError):
+                    try:
+                        process.kill()
+                        process.wait()
+                    except ProcessLookupError:
+                        pass  # Process already terminated
             
             # 4. Clean up temporary directory
             if temp_dir and temp_dir.exists():
@@ -708,12 +515,12 @@ def get_result_file_path(task_id: str) -> Optional[Path]:
 
 def list_result_files(task_id: str) -> List[Path]:
     """List all result files for a given task ID"""
-    results_dir = Path(__file__).parent / "results"
+    results_dir = Path(__file__).parent / "results" / task_id
     result_files = []
     
     if results_dir.exists():
         # Look for all files with the task_id in the filename
-        for file_path in results_dir.glob(f"{task_id}_*"):
+        for file_path in results_dir.glob(f"*"):
             if file_path.is_file():
                 result_files.append(file_path)
     
@@ -766,4 +573,4 @@ def get_task_result_info(task_id: str) -> Dict[str, Any]:
 
 def validate_task_access(task_id: str, tasks: Dict[str, TaskStatus]) -> bool:
     """Validate that a task exists and is accessible"""
-    return task_id in tasks and tasks[task_id].status == "COMPLETED"
+    return task_id in tasks 
