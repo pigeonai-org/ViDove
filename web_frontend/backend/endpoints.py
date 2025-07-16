@@ -275,6 +275,7 @@ async def create_task(task_request: TaskRequest, background_tasks: BackgroundTas
         target=run_vidove_task,
         args=(task_id, task_config, input_type, input_data, tasks, running_tasks)
     )
+    thread.daemon = True  # Make thread a daemon so it doesn't prevent process shutdown
     thread.start()
     running_tasks[task_id] = thread
     
@@ -335,6 +336,7 @@ async def launch_task_from_session(session_id: str) -> CreateTaskResponse:
         target=run_vidove_task,
         args=(task_id, task_config, input_type, input_data, tasks, running_tasks)
     )
+    thread.daemon = True  # Make thread a daemon so it doesn't prevent process shutdown
     thread.start()
     running_tasks[task_id] = thread
     

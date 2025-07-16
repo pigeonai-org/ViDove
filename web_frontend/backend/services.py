@@ -10,6 +10,7 @@ import tempfile
 import yaml
 import shutil
 import time
+import signal
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Literal, cast, List as ListType
 from uuid import uuid4
@@ -330,7 +331,9 @@ def run_vidove_task(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            env=os.environ.copy()  # Inherit current environment variables
+            env=os.environ.copy(),  # Inherit current environment variables
+            preexec_fn=os.setsid if hasattr(os, 'setsid') else None,  # Create new process group to prevent signal propagation
+            start_new_session=True  # Additional isolation
         )
         
         try:
@@ -350,24 +353,31 @@ def run_vidove_task(
         except subprocess.TimeoutExpired:
             # Properly terminate the timed-out process
             print(f"Task {task_id} timed out, terminating process...")
-            process.terminate()
+            
+            # Kill the entire process group to ensure all child processes are terminated
+            try:
+                os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+                print(f"Sent SIGTERM to process group {os.getpgid(process.pid)}")
+            except (ProcessLookupError, OSError):
+                # Process or group may already be dead
+                pass
             
             # Give the process a chance to terminate gracefully
             try:
                 process.wait(timeout=10)  # Wait up to 10 seconds for graceful termination
             except subprocess.TimeoutExpired:
-                # Force kill if it doesn't terminate gracefully
-                print(f"Process didn't terminate gracefully, force killing...")
-                process.kill()
+                # Force kill the entire process group if it doesn't terminate gracefully
+                print(f"Process group didn't terminate gracefully, force killing...")
+                try:
+                    os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                    print(f"Sent SIGKILL to process group {os.getpgid(process.pid)}")
+                except (ProcessLookupError, OSError):
+                    # Process or group may already be dead
+                    pass
                 process.wait()  # Wait for the process to be fully cleaned up
             
             # Re-raise the timeout exception to be handled by the outer try-except
             raise
-        
-        print(f"ViDove task {task_id} completed successfully")
-        print(f"STDOUT: {stdout}")
-        if stderr:
-            print(f"STDERR: {stderr}")
         
         # Search for result files in all task directories
         result_files = []
@@ -464,14 +474,16 @@ def run_vidove_task(
             if process and process.poll() is None:
                 print(f"Terminating remaining subprocess for task {task_id}")
                 try:
-                    process.terminate()
+                    # Kill the entire process group
+                    os.killpg(os.getpgid(process.pid), signal.SIGTERM)
                     process.wait(timeout=5)
-                except (subprocess.TimeoutExpired, ProcessLookupError):
+                except (subprocess.TimeoutExpired, ProcessLookupError, OSError):
                     try:
-                        process.kill()
+                        # Force kill the entire process group
+                        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
                         process.wait()
-                    except ProcessLookupError:
-                        pass  # Process already terminated
+                    except (ProcessLookupError, OSError):
+                        pass  # Process group already terminated
             
             # 4. Clean up temporary directory
             if temp_dir and temp_dir.exists():
