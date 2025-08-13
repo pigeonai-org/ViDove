@@ -37,9 +37,9 @@ class AudioConfig(BaseModel):
         default=True, 
         description="Whether to enable audio processing"
     )
-    audio_agent: Literal["GeminiAudioAgent"] = Field(
+    audio_agent: Literal["GeminiAudioAgent", "WhisperAPIAudioAgent"] = Field(
         default="GeminiAudioAgent",
-        description="Audio agent: GeminiAudioAgent"
+        description="Audio agent: GeminiAudioAgent or WhisperAPIAudioAgent"
     )
     model_path: Optional[str] = Field(
         default=None,

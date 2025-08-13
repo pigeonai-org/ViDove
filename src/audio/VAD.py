@@ -17,12 +17,19 @@ class VAD:
         self.src_lang = src_lang
         self.tgt_lang = tgt_lang
         self.srt = None
-        
+
+        self.backend_endpoint = os.getenv("VAD_ENDPOINT_URL")  # e.g., http://localhost:8000/vad/segment
         if model_name_or_path == "API":
+            # API mode: either call our backend endpoint if configured, or call pyannote API directly
             self.model = None
-            self.api_key = os.getenv("PYANNOTE_API_KEY")
-            if not self.api_key:
-                raise ValueError("PYANNOTE_API_KEY environment variable is required when using API mode")
+            if not self.backend_endpoint:
+                self.api_key = os.getenv("PYANNOTE_API_KEY")
+                if not self.api_key:
+                    raise ValueError(
+                        "PYANNOTE_API_KEY is required when using API mode without VAD_ENDPOINT_URL"
+                    )
+            else:
+                self.api_key = None
         else:
             self.model = Pipeline.from_pretrained(
                 model_name_or_path,
@@ -39,47 +46,29 @@ class VAD:
     def get_speaker_segments_api(self, audio_path: str, webhook_url: str = None):
         print(f"Processing audio file via API: {audio_path}")
         srt = SrtScript(src_lang=self.src_lang, tgt_lang=self.tgt_lang)
-        
-        # Upload the audio file to get a URL (you'll need to implement this part)
-        # For now, we'll assume audio_path is already a URL
-        file_url = audio_path
-        
-        url = "https://api.pyannote.ai/v1/diarize"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}"
-        }
-        data = {
-            'url': file_url
-        }
-        if webhook_url:
-            data['webhook'] = webhook_url
-            
-        response = requests.post(url, headers=headers, json=data)
-        
-        if response.status_code != 200:
-            raise Exception(f"API request failed with status code {response.status_code}: {response.text}")
-            
-        job_data = response.json()
-        job_id = job_data['jobId']
-        
-        # Poll for results
-        while True:
-            status_response = requests.get(f"{url}/{job_id}", headers=headers)
-            if status_response.status_code != 200:
-                raise Exception(f"Failed to get job status: {status_response.text}")
-                
-            status_data = status_response.json()
-            if status_data['status'] == 'completed':
-                # Process the results
-                for segment in status_data['segments']:
-                    start_time = segment['start']
-                    end_time = segment['end']
-                    speaker = segment['speaker']
-                    
-                    if end_time - start_time < 1:
-                        continue
-                        
-                    srt.segments.append(SrtSegment(
+
+        # Prefer calling our backend VAD endpoint if configured
+        if self.backend_endpoint:
+            with open(audio_path, "rb") as f:
+                files = {"file": (os.path.basename(audio_path), f, "audio/wav")}
+                params = {"src_lang": self.src_lang, "tgt_lang": self.tgt_lang}
+                resp = requests.post(self.backend_endpoint, files=files, data=params)
+            if resp.status_code != 200:
+                raise Exception(
+                    f"Backend VAD endpoint failed ({resp.status_code}): {resp.text}"
+                )
+            data = resp.json() or {}
+            segments = data.get("segments", [])
+            for seg in segments:
+                start_time = seg.get("start")
+                end_time = seg.get("end")
+                speaker = seg.get("speaker")
+                if start_time is None or end_time is None:
+                    continue
+                if end_time - start_time < 1:
+                    continue
+                srt.segments.append(
+                    SrtSegment(
                         src_lang=self.src_lang,
                         tgt_lang=self.tgt_lang,
                         src_text="",
@@ -87,14 +76,61 @@ class VAD:
                         speaker=speaker,
                         start_time=start_time,
                         end_time=end_time,
-                        idx=len(srt.segments)
-                    ))
+                        idx=len(srt.segments),
+                    )
+                )
+            self.srt = srt
+            return srt
+
+        # Fallback: call pyannote API directly (requires audio_path to be a URL)
+        file_url = audio_path
+        url = "https://api.pyannote.ai/v1/diarize"
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        data = {"url": file_url}
+        if webhook_url:
+            data["webhook"] = webhook_url
+
+        response = requests.post(url, headers=headers, json=data)
+        if response.status_code != 200:
+            raise Exception(
+                f"API request failed with status code {response.status_code}: {response.text}"
+            )
+
+        job_data = response.json()
+        job_id = job_data["jobId"]
+        while True:
+            status_response = requests.get(f"{url}/{job_id}", headers=headers)
+            if status_response.status_code != 200:
+                raise Exception(
+                    f"Failed to get job status: {status_response.text}"
+                )
+            status_data = status_response.json()
+            if status_data["status"] == "completed":
+                for segment in status_data["segments"]:
+                    start_time = segment["start"]
+                    end_time = segment["end"]
+                    speaker = segment["speaker"]
+                    if end_time - start_time < 1:
+                        continue
+                    srt.segments.append(
+                        SrtSegment(
+                            src_lang=self.src_lang,
+                            tgt_lang=self.tgt_lang,
+                            src_text="",
+                            translation="",
+                            speaker=speaker,
+                            start_time=start_time,
+                            end_time=end_time,
+                            idx=len(srt.segments),
+                        )
+                    )
                 break
-            elif status_data['status'] == 'failed':
-                raise Exception(f"Job failed: {status_data.get('error', 'Unknown error')}")
-                
-            time.sleep(5)  # Wait 5 seconds before polling again
-            
+            elif status_data["status"] == "failed":
+                raise Exception(
+                    f"Job failed: {status_data.get('error', 'Unknown error')}"
+                )
+            time.sleep(5)
+
         self.srt = srt
         return srt
 

@@ -142,28 +142,29 @@ if __name__ == "__main__":
         try:
             print(f"🎬 Creating task from YouTube link: {args.link}")
             task = Task.fromYoutubeLink(args.link, task_id, task_dir, task_cfg)
-        except:
+        except Exception:
             shutil.rmtree(task_dir)
             raise RuntimeError("Failed to create task from YouTube link")
     elif args.video_file is not None:
         try:
             print(f"🎬 Creating task from video file: {args.video_file}")
             task = Task.fromVideoFile(args.video_file, task_id, task_dir, task_cfg)
-        except:
+        except Exception:
             shutil.rmtree(task_dir)
             raise RuntimeError("Failed to create task from video file")
     elif args.audio_file is not None:
         try:
             print(f"🎵 Creating task from audio file: {args.audio_file}")
-            task = Task.fromVideoFile(args.audio_file, task_id, task_dir, task_cfg)
-        except:
+            # Use AudioTask for audio inputs
+            task = Task.fromAudioFile(args.audio_file, task_id, task_dir, task_cfg)
+        except Exception:
             shutil.rmtree(task_dir)
             raise RuntimeError("Failed to create task from audio file")
     elif args.srt_file is not None:
         try:
             print(f"📝 Creating task from SRT file: {args.srt_file}")
             task = Task.fromSRTFile(args.srt_file, task_id, task_dir, task_cfg)
-        except:
+        except Exception:
             shutil.rmtree(task_dir)
             raise RuntimeError("Failed to create task from SRT file")
     else:

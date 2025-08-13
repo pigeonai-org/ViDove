@@ -3363,7 +3363,7 @@ requires-dist = [
     { name = "pyenchant", specifier = "==3.2.2" },
     { name = "python-dateutil", specifier = "==2.8.2" },
     { name = "pytz", specifier = "==2022.7.1" },
-    { name = "pyyaml" },
+    { name = "pyyaml", specifier = "==6.0.2" },
     { name = "regex", specifier = "==2022.10.31" },
     { name = "requests", specifier = ">=2.28.2" },
     { name = "sacrebleu", specifier = "==2.3.1" },

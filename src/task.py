@@ -19,7 +19,7 @@ from src.SRT.srt2ass import srt2ass
 from src.memory.basic_rag import BasicRAG
 from src.memory.direct_search_RAG import TavilySearchRAG
 from src.translators.translator import Translator
-from src.vision.gpt_vision_agent import GptVisionAgent, CLIPVisionAgent, assistant_vision_api
+from src.vision.gpt_vision_agent import GptVisionAgent, CLIPVisionAgent
 from src.audio.audio_agent import GeminiAudioAgent, ClassicAudioAgent
 #from src.VAD.VAD import VAD
 #from src.ASR.ASR import ASR
@@ -210,14 +210,18 @@ class Task:
         
         self.audio_agent = None   
         if self.audio_setting["enable_audio"]:
-            if self.audio_setting["audio_agent"] == "GeminiAudioAgent":
+            agent_choice = self.audio_setting.get("audio_agent")
+            if agent_choice == "GeminiAudioAgent":
                 # Add task_id to audio_config for logger
                 audio_config = self.audio_setting.copy()
                 audio_config["task_id"] = self.task_id
                 self.audio_agent = GeminiAudioAgent(audio_config=audio_config)
                 self.audio_agent.set_agent_history_logger(self.agent_history_logger)
+            elif agent_choice == "WhisperAPIAudioAgent":
+                # Classic audio agent that delegates to Whisper API ASR
+                self.audio_agent = ClassicAudioAgent(model_name="whisper-api")
             else:
-                raise ValueError(f"Unsupported audio model: {self.audio_setting['audio_agent']}")
+                raise ValueError(f"Unsupported audio model: {agent_choice}")
             
         self.proofreader = None
         if self.proofreader_setting["enable_proofreading"]:
