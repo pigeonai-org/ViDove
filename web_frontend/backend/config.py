@@ -175,7 +175,7 @@ CONFIGURATION_SCHEMA = {
     ),
     "output_type.video": ConfigurationValue(
         type="boolean",
-        default=True,
+        default=False,
         description="Generate video with embedded subtitles"
     ),
     "output_type.bilingual": ConfigurationValue(

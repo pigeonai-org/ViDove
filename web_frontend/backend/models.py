@@ -69,7 +69,7 @@ class SessionConfig(BaseModel):
     MEMEORY_enable_web_search: bool = Field(default=False, alias="MEMEORY.enable_web_search")
     MEMEORY_enable_vision_knowledge: bool = Field(default=True, alias="MEMEORY.enable_vision_knowledge")
     MEMEORY_local_knowledge_path: str = Field(default="/home/macrodove/ViDove/domain_dict", alias="MEMEORY.local_knowledge_path")
-    output_type_video: bool = Field(default=True, alias="output_type.video")
+    output_type_video: bool = Field(default=False, alias="output_type.video")
     output_type_bilingual: bool = Field(default=True, alias="output_type.bilingual")
     output_type_subtitle: Literal["srt", "ass"] = Field(default="srt", alias="output_type.subtitle")
     # Custom user instructions for translation habits/jargon

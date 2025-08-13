@@ -216,10 +216,12 @@ class Task:
                 audio_config = self.audio_setting.copy()
                 audio_config["task_id"] = self.task_id
                 self.audio_agent = GeminiAudioAgent(audio_config=audio_config)
+                self.task_logger.info(f"Using GeminiAudioAgent with model: {self.audio_setting['audio_agent']}")
                 self.audio_agent.set_agent_history_logger(self.agent_history_logger)
             elif agent_choice == "WhisperAPIAudioAgent":
                 # Classic audio agent that delegates to Whisper API ASR
                 self.audio_agent = ClassicAudioAgent(model_name="whisper-api")
+                self.task_logger.info(f"Using ClassicAudioAgent with model: {self.audio_setting['audio_agent']}")
             else:
                 raise ValueError(f"Unsupported audio model: {agent_choice}")
             
