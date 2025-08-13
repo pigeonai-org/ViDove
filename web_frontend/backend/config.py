@@ -50,7 +50,7 @@ CONFIGURATION_SCHEMA = {
     ),
     "audio.VAD_model": ConfigurationValue(
         type="select",
-        options=["pyannote/speaker-diarization-3.1", "silero"],
+        options=["pyannote/speaker-diarization-3.1", "API"],
         default="pyannote/speaker-diarization-3.1",
         description="Voice Activity Detection model"
     ),

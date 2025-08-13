@@ -9,6 +9,7 @@ from google.genai.types import Part, HttpOptions
 from src.audio.audio_prompt import AUDIO_TRANSCRIBE_PROMPT, AUDIO_ANALYZE_PROMPT, AUDIO_TRANSCRIBE_PROMPT_WITH_VISUAL_CUES
 import json
 from src.audio.ASR import ASR
+from src.SRT.srt import SrtScript, SrtSegment
 from src.audio.VAD import VAD
 import librosa
 import logging
@@ -16,12 +17,21 @@ import logging
 class AudioAgent(ABC):
     def __init__(self, model_name, audio_config: dict=None):
         self.model_name = model_name
-        self.audio_config = audio_config
+        self.audio_config = audio_config or {}
         self.device = None
         self.load_model()
-        self.VAD_model = VAD(model_name_or_path=self.audio_config["VAD_model"], src_lang=self.audio_config["src_lang"], tgt_lang=self.audio_config["tgt_lang"])
+        # Initialize VAD only if configured
+        self.VAD_model = None
+        if all(k in self.audio_config for k in ("VAD_model", "src_lang", "tgt_lang")):
+            self.VAD_model = VAD(
+                model_name_or_path=self.audio_config["VAD_model"],
+                src_lang=self.audio_config["src_lang"],
+                tgt_lang=self.audio_config["tgt_lang"],
+            )
     
     def segment_audio(self, audio_path, cache_dir):
+        if not self.VAD_model:
+            raise ValueError("VAD is not initialized for this audio agent")
         self.segments = self.VAD_model.get_speaker_segments(audio_path)
         VAD.clip_audio_and_save(self.segments, audio_path, cache_dir)
         return self.segments
@@ -42,14 +52,76 @@ class AudioAgent(ABC):
         pass
 
 class ClassicAudioAgent(AudioAgent):
-    def __init__(self, model_name="whisper-api"):
-        super().__init__(model_name)
+    def __init__(self, model_name="whisper-api", audio_config: dict | None = None):
+        # For whisper-api, do not initialize VAD (pass empty config);
+        # Classic agent is primarily used with whisper-api here.
+        if model_name == "whisper-api":
+            super().__init__(model_name, audio_config={})
+        else:
+            super().__init__(model_name, audio_config=audio_config)
 
     def load_model(self):
         self.ASR_model = ASR.create(self.model_name)
         
-    def transcribe(self, audio_path):
-        return self.ASR_model.get_transcript(audio_path)
+    def segment_audio(self, audio_path, cache_dir):
+        # Whisper API path: do not perform VAD; create a single placeholder segment
+        srt = SrtScript(src_lang=self.audio_config.get("src_lang", "en") if self.audio_config else "en",
+                        tgt_lang=self.audio_config.get("tgt_lang", "zh") if self.audio_config else "zh")
+        # single segment covering whole file; exact end not needed since ASR returns timestamped segments
+        placeholder = SrtSegment(src_lang=srt.src_lang, tgt_lang=srt.tgt_lang,
+                                    src_text="", translation="", speaker="",
+                                    start_time=0.0, end_time=0.0, idx=0)
+        placeholder.audio_path = audio_path
+        srt.segments.append(placeholder)
+        self.segments = srt
+        return srt
+        # Fallback to base behavior (use VAD)
+
+    def analyze_audio(self, audio_path):
+        pass  # No specific analysis for classic agent, just return empty result
+
+    def _parse_srt_to_segments(self, srt_text: str):
+        # Convert SRT string to list of dicts with 'start','end','text' (time strings HH:MM:SS,mmm)
+        segments = []
+        if not srt_text:
+            return segments
+        lines = [ln.strip("\ufeff").strip() for ln in srt_text.splitlines()]
+        i = 0
+        while i < len(lines):
+            # skip index line if numeric
+            if lines[i].isdigit():
+                i += 1
+            if i >= len(lines):
+                break
+            # time line
+            if "-->" in lines[i]:
+                time_line = lines[i]
+                i += 1
+                text_lines = []
+                while i < len(lines) and lines[i] != "":
+                    text_lines.append(lines[i])
+                    i += 1
+                # skip blank
+                while i < len(lines) and lines[i] == "":
+                    i += 1
+                try:
+                    start_str, end_str = [t.strip() for t in time_line.split("-->")]
+                    text = " ".join(text_lines).strip()
+                    if text:
+                        segments.append({"start": start_str, "end": end_str, "text": text})
+                except Exception:
+                    # ignore malformed entries
+                    pass
+            else:
+                i += 1
+        return segments
+
+    def transcribe(self, audio_path, visual_cues=None):
+        result = self.ASR_model.get_transcript(audio_path)
+        # If Whisper API returns SRT text, parse into segments list
+        if isinstance(result, str):
+            return self._parse_srt_to_segments(result)
+        return result
 
 
 class QwenAudioAgent(AudioAgent):

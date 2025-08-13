@@ -45,9 +45,9 @@ class AudioConfig(BaseModel):
         default=None,
         description="Model path, replace with your own model path"
     )
-    VAD_model: Literal["pyannote/speaker-diarization-3.1", "silero", "API"] = Field(
+    VAD_model: Literal["pyannote/speaker-diarization-3.1", "API"] = Field(
         default="pyannote/speaker-diarization-3.1",
-        description="Voice Activity Detection model: pyannote/speaker-diarization-3.1, silero, or API"
+        description="Voice Activity Detection model: pyannote/speaker-diarization-3.1 or pyannote API"
     )
     src_lang: str = Field(
         default="en",
