@@ -1,10 +1,15 @@
 from abc import ABC, abstractmethod
+import math
+import os
+import re
+import tempfile
 import torch
 import stable_whisper
 import whisper
 import traceback
 from transformers import WhisperForConditionalGeneration, WhisperProcessor
 import librosa
+from pydub import AudioSegment
 from openai import OpenAI
 
 
@@ -69,15 +74,139 @@ class WhisperAPIASR(ASR):
             self.client = OpenAI()
         
     def get_transcript(self, audio_path, source_lang=None, init_prompt=None):
-        with open(audio_path, 'rb') as audio_file:
-            transcript = self.client.audio.transcriptions.create(
-                model="whisper-1", 
-                file=audio_file, 
-                response_format="srt", 
-                language=source_lang.lower() if source_lang else None, 
-                prompt=init_prompt or ""
+        """Transcribe audio, splitting into chunks when over the API size limit.
+
+        Returns a single SRT string stitched from chunk results.
+        """
+        try:
+            max_bytes = 24 * 1024 * 1024  # keep a 1MB+ safety margin under 25MB
+            file_size = os.path.getsize(audio_path)
+
+            if file_size <= max_bytes:
+                return self._transcribe_file(audio_path, source_lang, init_prompt)
+
+            # Oversized: split into chunks and stitch
+            self.log(f"Audio size {file_size} bytes exceeds limit; splitting into chunks…")
+            return self._transcribe_in_chunks(audio_path, source_lang, init_prompt, max_bytes=max_bytes)
+
+        except Exception as e:
+            self.log(f"WhisperAPIASR error: {e}")
+            traceback.print_exc()
+            return None
+
+    # --- helpers for chunked transcription ---
+    def _transcribe_file(self, file_path, source_lang=None, init_prompt=None):
+        with open(file_path, 'rb') as audio_file:
+            result = self.client.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file,
+                response_format="srt",
+                language=source_lang.lower() if source_lang else None,
+                prompt=init_prompt or "",
             )
-        return transcript
+        # The SDK returns a string when response_format="srt"
+        return result if isinstance(result, str) else str(result)
+
+    def _transcribe_in_chunks(self, audio_path, source_lang, init_prompt, max_bytes):
+        # Decide number of chunks by size, then slice by duration
+        total_size = os.path.getsize(audio_path)
+        num_chunks = max(2, math.ceil(total_size / max_bytes))
+
+        audio = AudioSegment.from_file(audio_path)
+        # Use consistent encoding settings to keep chunk sizes small
+        # We'll export chunks as 128kbps mp3 to stay well under limits
+        total_ms = len(audio)
+        chunk_ms = math.ceil(total_ms / num_chunks)
+
+        all_entries = []
+        offset_seconds = 0.0
+
+        with tempfile.TemporaryDirectory(prefix="vidove_asr_") as tmpdir:
+            for i, start in enumerate(range(0, total_ms, chunk_ms)):
+                end = min(start + chunk_ms, total_ms)
+                seg = audio[start:end]
+                seg_path = os.path.join(tmpdir, f"chunk_{i:03d}.mp3")
+
+                # Normalize to mono 16kHz for Whisper-friendly input and predictable duration
+                seg = seg.set_channels(1).set_frame_rate(16000)
+                seg.export(seg_path, format="mp3", bitrate="128k")
+
+                # Transcribe this chunk
+                srt_part = self._transcribe_file(seg_path, source_lang, init_prompt)
+                if not srt_part:
+                    continue
+                # Parse and offset timestamps
+                entries = self._parse_srt(srt_part)
+                for e in entries:
+                    e["start"] += offset_seconds
+                    e["end"] += offset_seconds
+                all_entries.extend(entries)
+
+                # Advance offset by actual chunk duration
+                offset_seconds += (len(seg) / 1000.0)
+
+        # Reformat as one SRT
+        return self._format_srt(all_entries)
+
+    # --- SRT utilities ---
+    def _srt_time_to_seconds(self, s: str) -> float:
+        # HH:MM:SS,mmm
+        hh, mm, rest = s.split(":")
+        ss, ms = rest.split(",")
+        return int(hh) * 3600 + int(mm) * 60 + int(ss) + int(ms) / 1000.0
+
+    def _seconds_to_srt_time(self, secs: float) -> str:
+        if secs < 0:
+            secs = 0.0
+        total_ms = int(round(secs * 1000))
+        ms = total_ms % 1000
+        total_s = total_ms // 1000
+        s = total_s % 60
+        total_m = total_s // 60
+        m = total_m % 60
+        h = total_m // 60
+        return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+    def _parse_srt(self, srt_str: str):
+        entries = []
+        if not srt_str:
+            return entries
+        blocks = re.split(r"\n\s*\n", srt_str.strip(), flags=re.MULTILINE)
+        idx = 1
+        time_re = re.compile(r"(\d{2}:\d{2}:\d{2},\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2},\d{3})")
+        for blk in blocks:
+            lines = [ln for ln in blk.splitlines() if ln.strip()]
+            if not lines:
+                continue
+            # Allow optional numeric index line
+            if "-->" in lines[0]:
+                time_line = lines[0]
+                text_lines = lines[1:]
+            elif len(lines) >= 2 and "-->" in lines[1]:
+                time_line = lines[1]
+                text_lines = lines[2:]
+            else:
+                continue
+            m = time_re.search(time_line)
+            if not m:
+                continue
+            start = self._srt_time_to_seconds(m.group(1))
+            end = self._srt_time_to_seconds(m.group(2))
+            text = "\n".join(text_lines).strip()
+            entries.append({"index": idx, "start": start, "end": end, "text": text})
+            idx += 1
+        return entries
+
+    def _format_srt(self, entries):
+        lines = []
+        for i, e in enumerate(entries, start=1):
+            start_tc = self._seconds_to_srt_time(e["start"]) if isinstance(e["start"], (int, float)) else e["start"]
+            end_tc = self._seconds_to_srt_time(e["end"]) if isinstance(e["end"], (int, float)) else e["end"]
+            lines.append(str(i))
+            lines.append(f"{start_tc} --> {end_tc}")
+            lines.append(e.get("text", ""))
+            lines.append("")
+        return "\n".join(lines).strip() + "\n"
 
 
 class StableWhisperASR(ASR):
