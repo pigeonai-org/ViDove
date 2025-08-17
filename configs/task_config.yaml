@@ -21,14 +21,14 @@ MEMEORY:
 
 audio:
   enable_audio: True
-  audio_agent: GeminiAudioAgent # clip or other vLLMs
+  audio_agent: GPT4oAudioAgent # clip or other vLLMs
   model_path:  # replace it with your own model path
-  VAD_model: pyannote/speaker-diarization-3.1 # pyannote/speaker-diarization-3.1
+  VAD_model: API # pyannote/speaker-diarization-3.1
   src_lang: en
   tgt_lang: zh
 
 vision:
-  enable_vision: True
+  enable_vision: False
   vision_model: gpt-4o # clip or other vLLMs
   model_path: ./ViDove/vision_model/clip-vit-base-patch16 # replace it with your own model path
   frame_cache_dir: ./cache #should be cleared after task finished
@@ -64,7 +64,7 @@ editor:
 # output type that user receive
 output_type: 
   subtitle: srt
-  video: True
+  video: False
   bilingual: True
 
 

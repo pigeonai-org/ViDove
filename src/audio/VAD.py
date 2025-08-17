@@ -14,22 +14,20 @@ from src.SRT.srt import SrtScript, SrtSegment
 import datetime
 
 class VAD:
-    def __init__(self, model_name_or_path: str, src_lang: str, tgt_lang: str):
+    def __init__(self, model_name_or_path: str, src_lang: str, tgt_lang: str, min_segment_seconds: float = 1.0):
         self.src_lang = src_lang
         self.tgt_lang = tgt_lang
         self.srt = None
-        
+        # Drop segments shorter than this many seconds; default 0.0 means keep all
+        self.min_segment_seconds = max(0.0, float(min_segment_seconds))
+
         if model_name_or_path == "API":
             self.model = None
             # Support official env var name from tutorial and a few common fallbacks
-            self.api_token = (
-                os.getenv("PYANNOTEAI_API_TOKEN")
-                or os.getenv("PYANNOTE_API_TOKEN")
-                or os.getenv("PYANNOTE_API_KEY")
-            )
+            self.api_token = os.getenv("PYANNOTE_API_KEY")
             if not self.api_token:
                 raise ValueError(
-                    "Set PYANNOTEAI_API_TOKEN (or PYANNOTE_API_TOKEN/PYANNOTE_API_KEY) to use API mode"
+                    "Set PYANNOTE_API_KEY to use API mode"
                 )
             # Back-compat attribute if referenced elsewhere
             self.api_key = self.api_token
@@ -147,17 +145,27 @@ class VAD:
             status_data = status_resp.json()
             status = status_data.get("status")
             if status == "succeeded":
-                segments = (
-                    status_data.get("output").get("diarization") or []
-                )
+                output = status_data.get("output") or {}
+                diar = output.get("diarization") or []
+                segments = diar if isinstance(diar, list) else []
+                # Ensure chronological order
+                try:
+                    segments.sort(key=lambda s: float(s.get("start") or 0.0))
+                except Exception:
+                    pass
+                # print(len(segments), "segments found")
                 for segment in segments or []:
-                    start_time = segment.get("start")
-                    end_time = segment.get("end")
+                    # API returns seconds as floats already – keep them as floats
+                    start_sec = float(segment.get("start") or 0.0)
+                    end_sec = float(segment.get("end") or 0.0)
                     speaker = segment.get("speaker")
-                    if start_time is None or end_time is None:
+
+                    # Basic sanity checks and consistent min-duration filter
+                    if end_sec <= start_sec:
                         continue
-                    if (end_time - start_time) < 1:
+                    if (end_sec - start_sec) < self.min_segment_seconds:
                         continue
+
                     srt.segments.append(
                         SrtSegment(
                             src_lang=self.src_lang,
@@ -165,8 +173,8 @@ class VAD:
                             src_text="",
                             translation="",
                             speaker=speaker,
-                            start_time=float(start_time),
-                            end_time=float(end_time),
+                            start_time=start_sec,
+                            end_time=end_sec,
                             idx=len(srt.segments),
                         )
                     )
@@ -179,6 +187,20 @@ class VAD:
             time.sleep(poll_interval)
         self.srt = srt
         return srt
+    
+    def _seconds_to_srt_time(self, secs: float) -> str:
+        if secs is None:
+            secs = 0.0
+        if secs < 0:
+            secs = 0.0
+        total_ms = int(round(float(secs) * 1000))
+        ms = total_ms % 1000
+        total_s = total_ms // 1000
+        s = total_s % 60
+        total_m = total_s // 60
+        m = total_m % 60
+        h = total_m // 60
+        return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
     def get_speaker_segments_api(self, audio_path: str, webhook_url: str = None):
         """High-level wrapper: upload -> create job -> poll for results."""
@@ -195,7 +217,7 @@ class VAD:
         srt = SrtScript(src_lang=self.src_lang, tgt_lang=self.tgt_lang)
         segments = self.model(audio_path)  
         for turn, _, speaker in segments.itertracks(yield_label=True):
-            if turn.end - turn.start < 1:
+            if (turn.end - turn.start) < self.min_segment_seconds:
                 continue
             srt.segments.append(SrtSegment(src_lang=self.src_lang, tgt_lang=self.tgt_lang, src_text="", translation="", speaker=speaker, start_time=turn.start, end_time=turn.end, idx=len(srt.segments)))  
         self.srt = srt

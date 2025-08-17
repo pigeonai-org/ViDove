@@ -20,9 +20,7 @@ from src.memory.basic_rag import BasicRAG
 from src.memory.direct_search_RAG import TavilySearchRAG
 from src.translators.translator import Translator
 from src.vision.gpt_vision_agent import GptVisionAgent, CLIPVisionAgent
-from src.audio.audio_agent import GeminiAudioAgent, ClassicAudioAgent
-#from src.VAD.VAD import VAD
-#from src.ASR.ASR import ASR
+from src.audio.audio_agent import GeminiAudioAgent, ClassicAudioAgent, GPT4oAudioAgent
 from src.editorial.editor import EditorAgent
 class TaskStatus(str, Enum):
     """
@@ -222,6 +220,9 @@ class Task:
                 # Classic audio agent that delegates to Whisper API ASR
                 self.audio_agent = ClassicAudioAgent(model_name="whisper-api")
                 self.task_logger.info(f"Using ClassicAudioAgent with model: {self.audio_setting['audio_agent']}")
+            elif agent_choice == "GPT4oAudioAgent":
+                self.audio_agent = GPT4oAudioAgent(model_name="gpt-4o", audio_config=self.audio_setting)
+                self.task_logger.info(f"Using GPT4oAudioAgent with model: {self.audio_setting['audio_agent']}")
             else:
                 raise ValueError(f"Unsupported audio model: {agent_choice}")
             
@@ -290,12 +291,22 @@ class Task:
             self.task_logger.info("No vision agent found, skipping visual cues extraction")
             return 
         else:
+            cache_dir = f"{self.task_local_dir}/.cache/video"
+            if not os.path.isdir(cache_dir):
+                self.task_logger.info("No video segments found; skipping visual cues extraction")
+                return
+            files = sorted(os.listdir(cache_dir))
+            if not files:
+                self.task_logger.info("Video segments directory is empty; skipping visual cues extraction")
+                return
             self.task_logger.info(f"Extracting visual cues from video using {self.vision_agent.model_name}")
-            for idx, segment_path in enumerate(os.listdir(f"{self.task_local_dir}/.cache/video")):
-                segment_path = f"{self.task_local_dir}/.cache/video/{segment_path}"
+            for idx, segment_file in enumerate(files):
+                segment_path = f"{cache_dir}/{segment_file}"
                 visual_cues = self.vision_agent.analyze_video(segment_path)
-                self.vision_knowledge.add_to_index(visual_cues, chunk_size=100, chunk_overlap=5)
-                self.SRT_Script.segments[idx].visual_cues = visual_cues
+                if self.vision_knowledge:
+                    self.vision_knowledge.add_to_index(visual_cues, chunk_size=100, chunk_overlap=5)
+                if idx < len(self.SRT_Script.segments):
+                    self.SRT_Script.segments[idx].visual_cues = visual_cues
             # print(self.vision_knowledge.retrieve_relevant_nodes("Protoss"))
 
     # Module 1 ASR: audio --> SRT_script
@@ -304,48 +315,72 @@ class Task:
         Perform ASR on each segment's audio, splitting into smaller segments if needed,
         but maintaining mapping to original segments.
         """
-        self.temp_segments_info = []  
+        self.temp_segments_info = []
 
+        # Prepare batch items
+        items = []
+        idx_to_segment = {}
         for idx, segment in enumerate(self.SRT_Script.segments):
-            if segment.audio_path is not None:
-                self.task_logger.info(f"Transcribing audio file: {segment.audio_path}")
-                temp_segment = self.audio_agent.transcribe(segment.audio_path, segment.visual_cues)
-
-                if temp_segment is None:
-                    self.task_logger.warning(f"No transcription found for segment {idx}, skipping.")
-                    continue
-                
-                for idx_, seg in enumerate(temp_segment):
-                    # Ensure the segment starts before it ends, if violation occurs, adjust the start time to end time of a former segment, if no former segment, set to 0
-                    if segment.timestr_to_seconds(seg['start']) >= segment.timestr_to_seconds(seg['end']):
-                        if idx_ > 0:
-                            self.task_logger.warning(f"Segment {idx_} start time is greater than or equal to end time, adjusting.")
-                            seg['start'] = temp_segment[idx_ - 1]['end']
-                        else:
-                            self.task_logger.warning(f"Segment {idx_} start time is greater than or equal to end time, setting start time to 0.")
-                            seg['start'] = segment.format_time(0)
-
-                    # Sort and adjust the start and end times of the segments, ensure the former ends before the latter starts
-                    if idx_ < len(temp_segment) - 1:
-                        if segment.timestr_to_seconds(seg['end']) > segment.timestr_to_seconds(temp_segment[idx_ + 1]['start']):
-                            self.task_logger.warning(f"Segment {idx_} end time is greater than next segment start time, adjusting.")
-                            seg['end'] = temp_segment[idx_ + 1]['start']
-                            
-                for idx_, seg in enumerate(temp_segment):
-                    seg['start'] = segment.timestr_to_seconds(seg['start']) + segment.start_time
-                    seg['end'] = segment.timestr_to_seconds(seg['end']) + segment.start_time
-
-                new_segments = self.SRT_Script.convert_transcribed_segments(temp_segment)
-
-                self.temp_segments_info.append({
-                    "orig_idx": idx,
-                    "orig_segment": segment,
-                    "new_segments": new_segments
+            if getattr(segment, 'audio_path', None):
+                items.append({
+                    "idx": idx,
+                    "audio_path": segment.audio_path,
+                    "visual_cues": getattr(segment, 'visual_cues', None),
                 })
-
-                self.task_logger.info(f"Transcribed Length: {len(new_segments)}")
+                idx_to_segment[idx] = segment
             else:
                 self.task_logger.info("No audio file found for this segment.")
+
+        if not items:
+            self.task_logger.warning("No segments with audio to transcribe.")
+            return
+
+        max_workers = self.audio_setting.get("threads", 4) if isinstance(self.audio_setting, dict) else 4
+
+        print("Number of audio segments to transcribe:", len(items))
+
+        # Execute concurrently if supported
+        if hasattr(self.audio_agent, 'transcribe_batch'):
+            batch_results = self.audio_agent.transcribe_batch(items, max_workers=max_workers) or {}
+        else:
+            batch_results = {}
+            for it in items:
+                batch_results[it["idx"]] = self.audio_agent.transcribe(it["audio_path"], it.get("visual_cues")) or []
+
+        # Normalize and offset per the original logic
+        for idx, segment in idx_to_segment.items():
+            temp_segment = batch_results.get(idx)
+            if not temp_segment:
+                self.task_logger.warning(f"No transcription found for segment {idx}, skipping.")
+                continue
+
+            for idx_, seg in enumerate(temp_segment):
+                if segment.timestr_to_seconds(seg['start']) >= segment.timestr_to_seconds(seg['end']):
+                    if idx_ > 0:
+                        self.task_logger.warning(f"Segment {idx_} start time is >= end time, adjusting.")
+                        seg['start'] = temp_segment[idx_ - 1]['end']
+                    else:
+                        self.task_logger.warning(f"Segment {idx_} start time is >= end time, setting start=0.")
+                        seg['start'] = segment.format_time(0)
+
+                if idx_ < len(temp_segment) - 1:
+                    if segment.timestr_to_seconds(seg['end']) > segment.timestr_to_seconds(temp_segment[idx_ + 1]['start']):
+                        self.task_logger.warning(f"Segment {idx_} end time > next start time, adjusting.")
+                        seg['end'] = temp_segment[idx_ + 1]['start']
+
+            for idx_, seg in enumerate(temp_segment):
+                seg['start'] = segment.timestr_to_seconds(seg['start']) + segment.start_time
+                seg['end'] = segment.timestr_to_seconds(seg['end']) + segment.start_time
+
+            new_segments = self.SRT_Script.convert_transcribed_segments(temp_segment)
+
+            self.temp_segments_info.append({
+                "orig_idx": idx,
+                "orig_segment": segment,
+                "new_segments": new_segments
+            })
+
+            self.task_logger.info(f"Transcribed Length: {len(new_segments)} for segment {idx}")
 
         self.SRT_Script.replace_seg(self.temp_segments_info)
 

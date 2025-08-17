@@ -1,5 +1,5 @@
 from typing import Optional, Literal, Union
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 from pathlib import Path
 
 
@@ -37,9 +37,9 @@ class AudioConfig(BaseModel):
         default=True, 
         description="Whether to enable audio processing"
     )
-    audio_agent: Literal["GeminiAudioAgent", "WhisperAPIAudioAgent"] = Field(
+    audio_agent: Literal["GeminiAudioAgent", "ClassicAudioAgent", "QwenAudioAgent", "GPT4oAudioAgent"] = Field(
         default="GeminiAudioAgent",
-        description="Audio agent: GeminiAudioAgent or WhisperAPIAudioAgent"
+        description="Audio agent: GeminiAudioAgent, ClassicAudioAgent, QwenAudioAgent, GPT4oAudioAgent"
     )
     model_path: Optional[str] = Field(
         default=None,
@@ -101,7 +101,7 @@ class PreProcessConfig(BaseModel):
 
 class TranslationConfig(BaseModel):
     """Translation module configuration"""
-    model: Literal["gpt-4", "gpt-4o-mini", "gpt-4o", "Assistant", "Multiagent", "RAG"] = Field(
+    model: Literal["gpt-4", "gpt-4o-mini", "gpt-4o", "Assistant", "Multiagent", "RAG", "gpt-5", "gpt-5-mini"] = Field(
         default="gpt-4o",
         description="Translation model: gpt-4, gpt-4o-mini, gpt-4o, Assistant, Multiagent, RAG"
     )
@@ -261,7 +261,7 @@ class TaskConfig(BaseModel):
         description="Whether it is assistant mode"
     )
 
-    @validator('source_lang', 'target_lang')
+    @field_validator('source_lang', 'target_lang')
     def validate_language_codes(cls, v):
         """Validate language code format"""
         valid_codes = ['EN', 'ZH', 'ES', 'FR', 'DE', 'RU', 'JA', 'AR', 'KR', 'IT', 'PT']
@@ -269,7 +269,7 @@ class TaskConfig(BaseModel):
             raise ValueError(f'Language code must be one of: {valid_codes}')
         return v
 
-    @validator('video_download')
+    @field_validator('video_download')
     def validate_video_download(cls, v):
         """Validate video download configuration"""
         if isinstance(v.resolution, int) and v.resolution not in [360, 480, 720]:

@@ -1,18 +1,18 @@
-from transformers import AutoModel, AutoTokenizer, AutoProcessor
+from transformers import AutoProcessor
 import torch
 from abc import ABC, abstractmethod
-import base64
+from openai import OpenAI
 import os
+from pydub import AudioSegment
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from google import genai
 from google.genai import types
-from google.genai.types import Part, HttpOptions
 from src.audio.audio_prompt import AUDIO_TRANSCRIBE_PROMPT, AUDIO_ANALYZE_PROMPT, AUDIO_TRANSCRIBE_PROMPT_WITH_VISUAL_CUES
 import json
 from src.audio.ASR import ASR
 from src.SRT.srt import SrtScript, SrtSegment
 from src.audio.VAD import VAD
 import librosa
-import logging
 
 class AudioAgent(ABC):
     def __init__(self, model_name, audio_config: dict=None):
@@ -27,6 +27,7 @@ class AudioAgent(ABC):
                 model_name_or_path=self.audio_config["VAD_model"],
                 src_lang=self.audio_config["src_lang"],
                 tgt_lang=self.audio_config["tgt_lang"],
+                min_segment_seconds=float(self.audio_config.get("min_segment_seconds", 0.2)),
             )
     
     def segment_audio(self, audio_path, cache_dir):
@@ -37,7 +38,14 @@ class AudioAgent(ABC):
         return self.segments
 
     def clip_video_and_save(self, video_path, cache_dir):
-        VAD.clip_video_and_save(self.segments, video_path, cache_dir)
+        # Only attempt clip when VAD exists and produced real segments
+        if not self.VAD_model:
+            return
+        try:
+            VAD.clip_video_and_save(self.segments, video_path, cache_dir)
+        except Exception:
+            # Be resilient in absence of usable segments
+            return
 
     @abstractmethod
     def load_model(self):
@@ -50,6 +58,96 @@ class AudioAgent(ABC):
     @abstractmethod
     def analyze_audio(self, audio_path):
         pass
+
+    def transcribe_batch(self, items: list[dict], max_workers: int = 4) -> dict[int, list[dict]]:
+        """
+        Concurrent transcription helper.
+        items: list of {idx: int, audio_path: str, visual_cues?: str}
+        Returns: { idx: [ {start: str, end: str, text: str}, ... ] }
+        """
+        results: dict[int, list[dict]] = {}
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(self.transcribe, it["audio_path"], it.get("visual_cues")): it["idx"]
+                for it in items
+            }
+            for fut in as_completed(futures):
+                idx = futures[fut]
+                try:
+                    results[idx] = fut.result() or []
+                except Exception:
+                    results[idx] = []
+        return results
+
+class GPT4oAudioAgent(AudioAgent):
+    def __init__(self, model_name="gpt-4o-mini-transcribe", audio_config: dict | None = None):
+        super().__init__(model_name, audio_config)
+
+    def load_model(self):
+        # Normalize model name to a valid audio transcription-capable model
+        normalized = self.model_name
+        # Known audio-capable identifiers as of current SDKs
+        if normalized in ("gpt-4o", "gpt-4o-mini"):
+            normalized = "gpt-4o-mini-transcribe"
+        self.model_name = normalized
+        self.client = OpenAI()
+    
+    def segment_audio(self, audio_path, cache_dir):
+        # Prefer VAD segmentation when configured; otherwise create a single placeholder segment
+        if self.VAD_model:
+            return super().segment_audio(audio_path, cache_dir)
+
+    def analyze_audio(self, audio_path):
+        # Not implemented for GPT4o transcription agent
+        return None
+
+    def transcribe(self, audio_path, visual_cues=None):
+        """
+        Transcribe a single (VAD-split) audio chunk via OpenAI gpt-4o(-mini)-transcribe.
+        API returns plain text. We wrap it in one SRT-timed segment covering the clip.
+        """
+        try:
+            with open(audio_path, "rb") as audio_file:
+                response = self.client.audio.transcriptions.create(
+                    model=self.model_name,
+                    file=audio_file,
+                    response_format="json",
+                )
+            text = None
+            if hasattr(response, "text"):
+                text = response.text
+            elif isinstance(response, dict):
+                text = response.get("text")
+            else:
+                text = str(response)
+            # duration for end timestamp
+            seg_audio = AudioSegment.from_file(audio_path)
+            duration_secs = len(seg_audio) / 1000.0
+            return [{
+                "start": self._seconds_to_srt_time(0.0),
+                "end": self._seconds_to_srt_time(duration_secs),
+                "text": text or "",
+            }]
+        except Exception as e:
+            print("Error occurred while transcribing:", e)
+            return []
+
+    # Removed legacy chunking helpers; VAD already splits inputs for the API.
+
+    def _seconds_to_srt_time(self, secs: float) -> str:
+        if secs is None:
+            secs = 0.0
+        if secs < 0:
+            secs = 0.0
+        total_ms = int(round(float(secs) * 1000))
+        ms = total_ms % 1000
+        total_s = total_ms // 1000
+        s = total_s % 60
+        total_m = total_s // 60
+        m = total_m % 60
+        h = total_m // 60
+        return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
 
 class ClassicAudioAgent(AudioAgent):
     def __init__(self, model_name="whisper-api", audio_config: dict | None = None):
@@ -116,12 +214,51 @@ class ClassicAudioAgent(AudioAgent):
                 i += 1
         return segments
 
+    def _srt_time_to_seconds(self, s: str) -> float:
+        # HH:MM:SS,mmm
+        try:
+            hh, mm, rest = s.split(":")
+            ss, ms = rest.split(",")
+            return int(hh) * 3600 + int(mm) * 60 + int(ss) + int(ms) / 1000.0
+        except Exception:
+            return 0.0
+
+    def _seconds_to_srt_time(self, secs: float) -> str:
+        if secs is None:
+            secs = 0.0
+        if secs < 0:
+            secs = 0.0
+        total_ms = int(round(float(secs) * 1000))
+        ms = total_ms % 1000
+        total_s = total_ms // 1000
+        s = total_s % 60
+        total_m = total_s // 60
+        m = total_m % 60
+        h = total_m // 60
+        return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
     def transcribe(self, audio_path, visual_cues=None):
         result = self.ASR_model.get_transcript(audio_path)
-        # If Whisper API returns SRT text, parse into segments list
+        # If Whisper API returns SRT text, keep as SRT time strings
         if isinstance(result, str):
             return self._parse_srt_to_segments(result)
-        return result
+        # If list of dicts with numeric times, convert to SRT strings
+        norm = []
+        for seg in (result or []):
+            start = seg.get("start", 0.0)
+            end = seg.get("end", 0.0)
+            text = seg.get("text", "")
+            # Some implementations may already return HH:MM:SS,mmm strings
+            if isinstance(start, str) and "-->" not in start:
+                start_srt = start
+            else:
+                start_srt = self._seconds_to_srt_time(start if not isinstance(start, str) else 0.0)
+            if isinstance(end, str) and "-->" not in end:
+                end_srt = end
+            else:
+                end_srt = self._seconds_to_srt_time(end if not isinstance(end, str) else 0.0)
+            norm.append({"start": start_srt, "end": end_srt, "text": text})
+        return norm
 
 
 class QwenAudioAgent(AudioAgent):
