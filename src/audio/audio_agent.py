@@ -15,10 +15,11 @@ from src.audio.VAD import VAD
 import librosa
 
 class AudioAgent(ABC):
-    def __init__(self, model_name, audio_config: dict=None):
+    def __init__(self, model_name, num_workers, audio_config: dict=None):
         self.model_name = model_name
         self.audio_config = audio_config or {}
         self.device = None
+        self.num_workers = num_workers
         self.load_model()
         # Initialize VAD only if configured
         self.VAD_model = None

@@ -79,6 +79,8 @@ class Task:
         self.source_lang = task_cfg["source_lang"]
         self.domain = task_cfg["domain"]
         self.instructions = task_cfg.get("instructions", [])
+        # Global workers control for VAD, proofreading, and editing
+        self.num_workers = task_cfg.get("num_workers", 4)
         self.pre_setting = task_cfg["pre_process"]
         self.post_setting = task_cfg["post_process"]
         self.chunk_size = task_cfg["translation"]["chunk_size"]
@@ -86,7 +88,6 @@ class Task:
         
         self.proofreader_setting = task_cfg["proofreader"]
         self.editor_setting = task_cfg["editor"]
-
 
         self.audio_path = None
         self.SRT_Script = None
@@ -237,7 +238,8 @@ class Task:
                 logger = self.task_logger,
                 batch_size = self.proofreader_setting["window_size"],
                 stm_len = self.proofreader_setting["short_term_memory_len"],
-                use_short_term_memory = self.proofreader_setting["enable_short_term_memory"]
+                use_short_term_memory = self.proofreader_setting["enable_short_term_memory"],
+                num_workers = self.num_workers
             )
             # Set agent history logger for proofreader
             if hasattr(self.proofreader, 'set_agent_history_logger'):
@@ -336,7 +338,10 @@ class Task:
             self.task_logger.warning("No segments with audio to transcribe.")
             return
 
-        max_workers = self.audio_setting.get("threads", 4) if isinstance(self.audio_setting, dict) else 4
+        # Use global workers by default; fall back to legacy audio.threads if set
+        max_workers = self.num_workers
+        if isinstance(self.audio_setting, dict):
+            max_workers = self.audio_setting.get("threads", max_workers)
 
         # print("Number of audio segments to transcribe:", len(items))
         self.task_logger.info(f"Number of audio segments to transcribe: {len(items)}")
@@ -489,7 +494,8 @@ class Task:
                 memory = self.local_knowledge,
                 logger = self.task_logger,
                 history_len = self.editor_setting["history_length"],
-                user_instruction = combined_instruction
+                user_instruction = combined_instruction,
+                num_workers = self.num_workers
             )
             # Set agent history logger for editor
             if hasattr(editor, 'set_agent_history_logger'):

@@ -1,65 +1,93 @@
-from typing import Callable, Dict, Optional
-from src.SRT.srt import SrtScript, SrtSegment
+from typing import Callable, Dict, Optional, List
+from src.SRT.srt import SrtScript
 from src.memory.abs_api_RAG import AbsApiRAG
 import logging
+import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 
-class EditorAgent():
+
+class EditorAgent:
     def __init__(
         self,
         client,
         srt: SrtScript,
         memory: Optional[AbsApiRAG] = None,
-        logger=None,
-        history_len = 10,
-        user_instruction:str = None
+        logger: Optional[logging.Logger] = None,
+        history_len: int = 10,
+        user_instruction: Optional[str] = None,
+        num_workers: int = 4,
     ):
-        """
-        client: an OpenAI or AzureOpenAI instance
-        srt: your parsed SrtScript
-        memory: TavilySearchRAG (long-term memory)
-        """
         self.client = client
         self.srt = srt
         self.memory = memory
         self.logger = logger
         self.history_len = history_len
         self.user_instruction = user_instruction
+        self.num_workers = max(1, int(num_workers))
         # Initialize agent history logger - will be set by task
         self.agent_history_logger = None
+        # Optional post-edit handlers registry
+        self.handlers: Dict[str, Callable] = {}
+        # Lock for thread-safe writes
+        self._lock = Lock()
 
     def set_agent_history_logger(self, logger):
-        """Set the agent history logger from task"""
         self.agent_history_logger = logger
 
     def register_handler(self, name: str, func: Callable):
-        """Register or replace a post-edit handler by name."""
         self.handlers[name] = func
 
-    def build_prompt(self, idx: int, src_text: str, translation: str, ) -> str:
-        """Construct an editing prompt for one subtitle segment."""
-        # Multimodal context from SRT short-term memory
+    def _snapshot_translations(self) -> List[str]:
+        return [seg.translation for seg in self.srt.segments]
+
+    def build_prompt(
+        self,
+        idx: int,
+        src_text: str,
+        translation: str,
+        base_translations: Optional[List[str]] = None,
+    ) -> str:
         seg = self.srt.segments[idx]
-        suggestion = getattr(seg, 'suggestion', None)
-        visual_ctx = getattr(seg, 'visual_cues', None)
+        suggestion = getattr(seg, "suggestion", None)
+        visual_ctx = getattr(seg, "visual_cues", None)
         visual_ctx = "\n".join(visual_ctx) if visual_ctx else "None"
-        audio_ctx = getattr(seg, 'audio_cues', None)
+        audio_ctx = getattr(seg, "audio_cues", None)
         audio_ctx = "\n".join(audio_ctx) if audio_ctx else "None"
-        # Translation history up to this segment
-        start = max(0, idx - self.history_len)
-        end = min(len(self.srt.segments), idx + self.history_len + 1)
-        prev = [s.translation for i, s in enumerate(self.srt.segments[start:]) if i + start != idx]
-        past = [s.translation for i, s in enumerate(self.srt.segments[:end]) if i + start != idx]
+
+        translations = (
+            base_translations if base_translations is not None else self._snapshot_translations()
+        )
+        n = len(translations)
+        prev_indices = range(max(0, idx - self.history_len), idx)
+        next_indices = range(idx + 1, min(n, idx + self.history_len + 1))
+        prev = [translations[i] for i in prev_indices]
+        past = [translations[i] for i in next_indices]
         prev_translation_history = "\n".join(prev) if prev else "None"
         past_translation_history = "\n".join(past) if past else "None"
+
         ltm = []
         if self.memory:
-            nodes = self.memory.retrieve_relevant_nodes(translation)
-            ltm = [n.text for n in nodes]
+            try:
+                nodes = self.memory.retrieve_relevant_nodes(translation)
+                ltm = [n.text for n in nodes if getattr(n, "text", None)]
+            except Exception:
+                ltm = []
         ltm = "\n".join(ltm) if ltm else "None"
 
-        if self.user_instruction:
-            user_instruction_str = self.user_instruction.replace("\n", "; ")
-            self.agent_history_logger.info(f'{{"role": "editor", "message": "I received the following user instruction: {user_instruction_str}"}}')
+        if self.user_instruction and self.agent_history_logger:
+            try:
+                user_instruction_str = self.user_instruction.replace("\n", "; ")
+                self.agent_history_logger.info(
+                    json.dumps(
+                        {
+                            "role": "editor",
+                            "message": f"I received the following user instruction: {user_instruction_str}",
+                        }
+                    )
+                )
+            except Exception:
+                pass
 
         return f"""You are an Editor ensuring overall translation quality and coherence,
                 aligning the translation with the original video content in domain `{self.srt.domain}`, you must ensure the term and style are aligned with the domain's language.
@@ -113,7 +141,6 @@ class EditorAgent():
                 Directly return the revised content only."""
 
     def send_request(self, prompt: str) -> str:
-        """Calls the LLM and returns the model's response."""
         resp = self.client.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
@@ -123,20 +150,106 @@ class EditorAgent():
         return resp.choices[0].message.content
 
     def srt_iterator(self):
-        """Yield (index, src_text, translation) for each subtitle segment."""
         for idx, seg in enumerate(self.srt.segments):
             yield idx, seg.src_text, seg.translation
 
-
     def edit_all(self) -> Dict[int, str]:
-        """Edit every segment and apply handlers. Returns dict index->final edits."""
-        self.agent_history_logger.info('{"role": "editor", "message": "Time to sprinkle some editorial magic. Let\'s make it smooth as butter!"}')
-        
-        for idx, src, trans in self.srt_iterator():
-            prompt = self.build_prompt(idx, src, trans)
-            edits = self.send_request(prompt)
-            self.srt.segments[idx].translation = edits.strip()
-            self.logger.info(f"Edited segment {idx}: {edits.strip()}") if self.logger else None
-            self.agent_history_logger.info(f'{{"role": "editor", "message": "Edited segment {idx}: {edits.strip()}"}}')
-        
-        self.agent_history_logger.info('{"role": "editor", "message": "All done! These lines are now as polished as my morning coffee mug."}')
+        if self.agent_history_logger:
+            try:
+                self.agent_history_logger.info(
+                    json.dumps(
+                        {
+                            "role": "editor",
+                            "message": "Time to sprinkle some editorial magic. Let us make it smooth as butter!",
+                        }
+                    )
+                )
+            except Exception:
+                pass
+
+        snapshot_translations = self._snapshot_translations()
+        results: Dict[int, str] = {}
+
+        def worker(item):
+            idx, src, trans = item
+            prompt = self.build_prompt(
+                idx, src, trans, base_translations=snapshot_translations
+            )
+            edits = self.send_request(prompt).strip()
+            return idx, edits
+
+        items = list(self.srt_iterator())
+        if self.num_workers == 1:
+            for item in items:
+                idx, edits = worker(item)
+                with self._lock:
+                    self.srt.segments[idx].translation = edits
+                    results[idx] = edits
+                if self.logger:
+                    self.logger.info(f"Edited segment {idx}: {edits}")
+                if self.agent_history_logger:
+                    try:
+                        self.agent_history_logger.info(
+                            json.dumps(
+                                {
+                                    "role": "editor",
+                                    "message": f"Edited segment {idx}: {edits}",
+                                }
+                            )
+                        )
+                    except Exception:
+                        pass
+        else:
+            with ThreadPoolExecutor(max_workers=self.num_workers) as ex:
+                future_map = {ex.submit(worker, item): item[0] for item in items}
+                for fut in as_completed(future_map):
+                    idx = future_map[fut]
+                    try:
+                        i, edits = fut.result()
+                    except Exception as e:
+                        if self.logger:
+                            self.logger.error(f"Editing segment {idx} failed: {e}")
+                        if self.agent_history_logger:
+                            try:
+                                self.agent_history_logger.info(
+                                    json.dumps(
+                                        {
+                                            "role": "editor",
+                                            "message": f"Editing segment {idx} failed: {e}",
+                                        }
+                                    )
+                                )
+                            except Exception:
+                                pass
+                        continue
+                    with self._lock:
+                        self.srt.segments[i].translation = edits
+                        results[i] = edits
+                    if self.logger:
+                        self.logger.info(f"Edited segment {i}: {edits}")
+                    if self.agent_history_logger:
+                        try:
+                            self.agent_history_logger.info(
+                                json.dumps(
+                                    {
+                                        "role": "editor",
+                                        "message": f"Edited segment {i}: {edits}",
+                                    }
+                                )
+                            )
+                        except Exception:
+                            pass
+
+        if self.agent_history_logger:
+            try:
+                self.agent_history_logger.info(
+                    json.dumps(
+                        {
+                            "role": "editor",
+                            "message": "All done! These lines are now as polished as my morning coffee mug.",
+                        }
+                    )
+                )
+            except Exception:
+                pass
+        return results

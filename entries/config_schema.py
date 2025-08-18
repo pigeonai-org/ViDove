@@ -194,6 +194,10 @@ class TaskConfig(BaseModel):
         default="EN",
         description="Source language"
     )
+    num_workers: int = Field(
+        default=4,
+        description="Global number of worker threads for VAD, proofreading, and editing"
+    )
     target_lang: Literal["EN", "ZH", "ES", "FR", "DE", "RU", "JA", "AR", "KR"] = Field(
         default="ZH",
         description="Target language"
@@ -295,28 +299,37 @@ class TaskConfig(BaseModel):
 
     def to_flat_dict(self) -> dict:
         """Convert to flattened dictionary format for web interface"""
-        flat_dict = {}
+        flat_dict: dict = {}
         config_dict = self.dict()
-        
+
         # Top-level fields
-        flat_dict['source_lang'] = config_dict['source_lang']
-        flat_dict['target_lang'] = config_dict['target_lang'] 
-        flat_dict['domain'] = config_dict['domain']
-        
+        flat_dict["source_lang"] = config_dict["source_lang"]
+        flat_dict["target_lang"] = config_dict["target_lang"]
+        flat_dict["domain"] = config_dict["domain"]
+        flat_dict["num_workers"] = config_dict["num_workers"]
+
         # Flatten nested configurations
         for section_name, section_data in config_dict.items():
-            if isinstance(section_data, dict) and section_name not in ['source_lang', 'target_lang', 'domain', 'instructions', 'api_source', 'is_assistant']:
+            if isinstance(section_data, dict) and section_name not in [
+                "source_lang",
+                "target_lang",
+                "domain",
+                "instructions",
+                "api_source",
+                "is_assistant",
+                "num_workers",
+            ]:
                 for field_name, field_value in section_data.items():
                     flat_dict[f"{section_name}.{field_name}"] = field_value
-        
+
         # Handle special cases
-        if config_dict.get('instructions'):
-            flat_dict['instructions'] = config_dict['instructions']
-        if config_dict.get('api_source'):
-            flat_dict['api_source'] = config_dict['api_source']
-        if config_dict.get('is_assistant') is not None:
-            flat_dict['is_assistant'] = config_dict['is_assistant']
-            
+        if config_dict.get("instructions"):
+            flat_dict["instructions"] = config_dict["instructions"]
+        if config_dict.get("api_source"):
+            flat_dict["api_source"] = config_dict["api_source"]
+        if config_dict.get("is_assistant") is not None:
+            flat_dict["is_assistant"] = config_dict["is_assistant"]
+
         return flat_dict
     
     @classmethod
@@ -325,7 +338,7 @@ class TaskConfig(BaseModel):
         nested_dict = {}
         
         # Handle top-level fields
-        for key in ['source_lang', 'target_lang', 'domain', 'instructions', 'api_source', 'is_assistant']:
+        for key in ['source_lang', 'target_lang', 'domain', 'instructions', 'api_source', 'is_assistant', 'num_workers']:
             if key in flat_dict:
                 nested_dict[key] = flat_dict[key]
         

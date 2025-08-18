@@ -1,11 +1,11 @@
-import os
-import openai
-from typing import Callable, Dict, Optional, List, Tuple
+from typing import Optional, List, Tuple
 from src.SRT.srt import SrtScript
 from src.memory.abs_api_RAG import AbsApiRAG
-import logging
+import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 
-class ProofreaderAgent():
+class ProofreaderAgent:
     def __init__(
         self,
         client,
@@ -16,7 +16,8 @@ class ProofreaderAgent():
         batch_size: int = 5,
         stm_len: int = 10,
         use_short_term_memory: bool = False,
-        verbose: int = 2
+        verbose: int = 2,
+        num_workers: int = 4,
     ):
         self.client = client
         self.srt = srt
@@ -28,8 +29,11 @@ class ProofreaderAgent():
         self.verbose = verbose
         self.use_short_term_memory = use_short_term_memory
         self.short_term_memory = ""
+        self.num_workers = max(1, int(num_workers))
         # Initialize agent history logger - will be set by task
         self.agent_history_logger = None
+        # Lock for thread-safe SRT writes
+        self._lock = Lock()
 
     def set_agent_history_logger(self, logger):
         """Set the agent history logger from task"""
@@ -37,7 +41,8 @@ class ProofreaderAgent():
 
     def set_srt(self, srt: SrtScript):
         self.srt = srt
-        self.agent_history_logger.info('{"role": "proofreader", "message": "Alright, let me put on my red pen and nitpick these lines. No mercy! ✏️"}')
+        if self.agent_history_logger:
+            self.agent_history_logger.info('{"role": "proofreader", "message": "Alright, let me put on my red pen and nitpick these lines. No mercy! ✏️"}')
 
     def srt_iterator(self):
         for idx, seg in enumerate(self.srt.segments):
@@ -120,22 +125,24 @@ class ProofreaderAgent():
                 """
 
     def proofread_all(self):
-        self.agent_history_logger.info('{"role": "proofreader", "message": "Let\'s see what we\'ve got here... time to hunt for typos and awkward phrasing!"}')
-        
-        segments = list(self.srt_iterator())
-        for i in range(0, len(segments), self.batch_size):
-            batch = segments[i:i + self.batch_size]
-            prompt = self.build_batch_prompt(batch)
+        if self.agent_history_logger:
+            try:
+                self.agent_history_logger.info(json.dumps({
+                    "role": "proofreader",
+                    "message": "Let's see what we've got here... time to hunt for typos and awkward phrasing!",
+                }))
+            except Exception:
+                pass
 
+        segments = list(self.srt_iterator())
+
+        def process_batch(batch):
+            prompt = self.build_batch_prompt(batch)
             if self.logger:
                 self.logger.info(f"Prompting LLM for segments {[idx for idx, _, _ in batch]}")
-
             if self.verbose > 1 and self.logger:
                 self.logger.info(f"Prompt content:\n{prompt}")
-
             content = self.send_request(prompt)
-
-            # Parse suggestions back line-by-line
             lines = content.strip().splitlines()
             suggestions = {}
             for line in lines:
@@ -145,19 +152,49 @@ class ProofreaderAgent():
                         if self.verbose > 0 and self.logger:
                             self.logger.info(f"Processing suggestion for {prefix.strip()}: {suggestion.strip()}")
                         if self.agent_history_logger:
-                            self.agent_history_logger.info(f'{{"role": "proofreader", "message": "My suggestion for {prefix.strip()}: {suggestion.strip()}"}}')
+                            try:
+                                self.agent_history_logger.info(json.dumps({
+                                    "role": "proofreader",
+                                    "message": f"My suggestion for {prefix.strip()}: {suggestion.strip()}",
+                                }))
+                            except Exception:
+                                pass
                         idx = int(prefix.replace("Segment ", "").strip())
                         suggestions[idx] = suggestion.strip()
                     except Exception:
                         continue
-
-            for idx, src, trans in batch:
+            # Apply suggestions
+            for idx, _, trans in batch:
                 suggestion = suggestions.get(idx, "PASS")
                 if self.use_short_term_memory:
-                    self.conclude_to_stm(trans)
+                    try:
+                        with self._lock:
+                            self.conclude_to_stm(trans)
+                    except Exception:
+                        pass
                 if suggestion != "PASS":
-                    self.srt.segments[idx].suggestion = suggestion
-                    self.logger.info(f"Added suggestion for segment {self.srt.segments[idx].translation}") if self.logger else None
-        
-        self.agent_history_logger.info('{"role": "proofreader", "message": "Proofreading done! If I missed anything, it must be perfect already 😏"}')
+                    with self._lock:
+                        self.srt.segments[idx].suggestion = suggestion
+                    if self.logger:
+                        self.logger.info(f"Added suggestion for segment {idx}")
+
+        # Build batches
+        batches = [segments[i:i + self.batch_size] for i in range(0, len(segments), self.batch_size)]
+        if self.num_workers == 1:
+            for b in batches:
+                process_batch(b)
+        else:
+            with ThreadPoolExecutor(max_workers=self.num_workers) as ex:
+                futures = [ex.submit(process_batch, b) for b in batches]
+                for _ in as_completed(futures):
+                    pass
+
+        if self.agent_history_logger:
+            try:
+                self.agent_history_logger.info(json.dumps({
+                    "role": "proofreader",
+                    "message": "Proofreading done! If I missed anything, it must be perfect already 😏",
+                }))
+            except Exception:
+                pass
                     
