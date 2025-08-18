@@ -7,7 +7,7 @@ from pydub import AudioSegment
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from google import genai
 from google.genai import types
-from src.audio.audio_prompt import AUDIO_TRANSCRIBE_PROMPT, AUDIO_ANALYZE_PROMPT, AUDIO_TRANSCRIBE_PROMPT_WITH_VISUAL_CUES
+from src.audio.audio_prompt import AUDIO_TRANSCRIBE_PROMPT, AUDIO_ANALYZE_PROMPT, AUDIO_TRANSCRIBE_PROMPT_WITH_VISUAL_CUES, AUDIO_TRANSCRIBE_GPT_PROMPT
 import json
 from src.audio.ASR import ASR
 from src.SRT.srt import SrtScript, SrtSegment
@@ -88,7 +88,7 @@ class GPT4oAudioAgent(AudioAgent):
         normalized = self.model_name
         # Known audio-capable identifiers as of current SDKs
         if normalized in ("gpt-4o", "gpt-4o-mini"):
-            normalized = "gpt-4o-mini-transcribe"
+            normalized = normalized + "-transcribe"
         self.model_name = normalized
         self.client = OpenAI()
     
@@ -109,6 +109,7 @@ class GPT4oAudioAgent(AudioAgent):
         try:
             with open(audio_path, "rb") as audio_file:
                 response = self.client.audio.transcriptions.create(
+                    prompt=AUDIO_TRANSCRIBE_GPT_PROMPT,
                     model=self.model_name,
                     file=audio_file,
                     response_format="json",

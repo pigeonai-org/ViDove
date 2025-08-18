@@ -6,6 +6,7 @@ import requests
 import time
 import uuid
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Add the project root directory to the Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -225,70 +226,157 @@ class VAD:
     
     @staticmethod
     def clip_audio_and_save(srt: SrtScript, audio_path: str, output_dir: str):
-        
+        """Cut audio segments quickly.
+        Optimization:
+        - Normalize once to 16k mono PCM WAV in the output_dir and then stream-copy per segment.
+        - Use fast seek (-ss before -i) with sample-accurate PCM.
+        - Parallelize clipping with a bounded thread pool.
+        """
         os.makedirs(output_dir, exist_ok=True)
 
-        for segment in srt.segments:
+        # 1) Normalize input once to 16k/mono PCM WAV to avoid re-decode/re-sample N times
+        norm_wav = os.path.join(output_dir, "source_16k_mono.wav")
+        if not (os.path.isfile(norm_wav) and os.path.getsize(norm_wav) > 0):
+            norm_cmd = [
+                "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                "-i", audio_path,
+                "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
+                norm_wav,
+            ]
+            try:
+                subprocess.run(norm_cmd, check=True, capture_output=True)
+            except subprocess.CalledProcessError as e:
+                print(f"Error normalizing audio for clipping: {e}")
+                # Fallback to original audio if normalization fails
+                norm_wav = audio_path
+
+        # 2) Prepare all commands and execute in parallel
+        tasks = []
+        segments = list(srt.segments)
+        # Optional throttling to avoid overloading backend when many segments
+        sample_rate = max(1, int(os.getenv("VAD_VIDEO_SAMPLE_RATE", "1")))
+        max_clips_env = os.getenv("VAD_VIDEO_MAX_CLIPS", "")
+        try:
+            max_clips = int(max_clips_env) if max_clips_env.strip() != "" else None
+        except Exception:
+            max_clips = None
+        if sample_rate > 1:
+            segments = [seg for i, seg in enumerate(segments) if i % sample_rate == 0]
+        if max_clips is not None and max_clips >= 0:
+            segments = segments[:max_clips]
+
+        for segment in segments:
             start_time = segment.start_time
             end_time = segment.end_time
-            # Convert time to milliseconds for ffmpeg
-            start_ms = int(start_time * 1000)
-            end_ms = int(end_time * 1000)
+            start_ms = int(max(0.0, start_time) * 1000)
+            end_ms = int(max(0.0, end_time) * 1000)
+            if end_ms <= start_ms:
+                continue
             duration_ms = end_ms - start_ms
 
-            # Format timestamps for ffmpeg
             start_time_str = str(datetime.timedelta(milliseconds=start_ms))
             duration_str = str(datetime.timedelta(milliseconds=duration_ms))
 
-            # Generate output filename
             output_filename = os.path.join(output_dir, f"segment_{start_ms}_{end_ms}.wav")
             segment.audio_path = output_filename
-            # Use ffmpeg to extract segment
-            ffmpeg_cmd = [
-                "ffmpeg", "-y",
-                "-i", audio_path,
-                "-ss", start_time_str,
-                "-t", duration_str,
-                "-acodec", "pcm_s16le",
-                "-ar", "16000",
-                "-ac", "1",
-                output_filename
-            ]
 
-            try:
-                subprocess.run(ffmpeg_cmd, check=True, capture_output=True)
-            except subprocess.CalledProcessError as e:
-                print(f"Error processing segment {start_ms}-{end_ms}: {e}")
+            # With PCM WAV source, we can stream copy for blazing fast cuts
+            cmd = [
+                "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                "-ss", start_time_str, "-i", norm_wav,
+                "-t", duration_str,
+                "-c", "copy",
+                output_filename,
+            ]
+            tasks.append((segment, cmd, start_ms, end_ms))
+
+        max_workers = int(os.getenv("VAD_FFMPEG_WORKERS", str(min(32, (os.cpu_count() or 4)))))
+        errors = []
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {pool.submit(subprocess.run, cmd, check=True, capture_output=True): (seg, start_ms, end_ms)
+                       for (seg, cmd, start_ms, end_ms) in tasks}
+            for fut in as_completed(futures):
+                seg, s_ms, e_ms = futures[fut]
+                try:
+                    _ = fut.result()
+                except subprocess.CalledProcessError as e:
+                    errors.append((s_ms, e_ms, str(e)))
+        for s_ms, e_ms, msg in errors:
+            print(f"Error processing audio segment {s_ms}-{e_ms}: {msg}")
     
     @staticmethod
     def clip_video_and_save(srt: SrtScript, video_path: str, output_dir: str):
+        """Cut video segments efficiently for vision cues.
+        Optimization:
+        - Use fast seek with stream copy: -ss before -i, -t duration, -c copy.
+        - Parallelize clipping with bounded threads.
+        - Fallback to re-encode on rare failures.
+        Note: Keyframe alignment may cause small timing drift; acceptable for visual cues.
+        """
         os.makedirs(output_dir, exist_ok=True)
+
+        tasks = []
         for segment in srt.segments:
-            start_time = segment.start_time
-            end_time = segment.end_time
-            # Convert time to milliseconds for ffmpeg
+            start_time = max(0.0, float(segment.start_time or 0.0))
+            end_time = max(0.0, float(segment.end_time or 0.0))
             start_ms = int(start_time * 1000)
             end_ms = int(end_time * 1000)
+            if end_ms <= start_ms:
+                continue
             duration_ms = end_ms - start_ms
 
-            # Format timestamps for ffmpeg
             start_time_str = str(datetime.timedelta(milliseconds=start_ms))
             duration_str = str(datetime.timedelta(milliseconds=duration_ms))
 
-            output_filename = os.path.join(output_dir, f"segment_{start_time}_{end_time}.mp4")
+            output_filename = os.path.join(output_dir, f"segment_{start_ms}_{end_ms}.mp4")
             segment.video_path = output_filename
-            ffmpeg_cmd = [
-                "ffmpeg", "-y",
-                "-i", video_path,
-                "-ss", start_time_str,
-                "-t", duration_str,
-                output_filename
-            ]
 
+            fast_cmd = [
+                "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                "-ss", start_time_str, "-i", video_path,
+                "-t", duration_str,
+                "-c", "copy",
+                "-avoid_negative_ts", "1",
+                "-movflags", "+faststart",
+                output_filename,
+            ]
+            # Slower but accurate fallback
+            slow_cmd = [
+                "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                "-i", video_path,
+                "-ss", start_time_str, "-t", duration_str,
+                "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+                "-c:a", "aac", "-b:a", "128k",
+                output_filename,
+            ]
+            tasks.append((segment, start_ms, end_ms, fast_cmd, slow_cmd))
+
+        max_workers = int(os.getenv("VAD_FFMPEG_WORKERS", str(min(16, (os.cpu_count() or 4)))))
+        errors = []
+        def run_with_fallback(fast_cmd, slow_cmd):
             try:
-                subprocess.run(ffmpeg_cmd, check=True, capture_output=True)
-            except subprocess.CalledProcessError as e:
-                print(f"Error processing segment {start_ms}-{end_ms}: {e}")
+                subprocess.run(fast_cmd, check=True, capture_output=True)
+                return True
+            except subprocess.CalledProcessError:
+                try:
+                    subprocess.run(slow_cmd, check=True, capture_output=True)
+                    return True
+                except subprocess.CalledProcessError as e2:
+                    return e2
+
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {pool.submit(run_with_fallback, fast, slow): (s, s_ms, e_ms)
+                       for (s, s_ms, e_ms, fast, slow) in tasks}
+            for fut in as_completed(futures):
+                seg, s_ms, e_ms = futures[fut]
+                try:
+                    res = fut.result()
+                    if res is not True:
+                        errors.append((s_ms, e_ms, str(res)))
+                except Exception as e:
+                    errors.append((s_ms, e_ms, str(e)))
+        for s_ms, e_ms, msg in errors:
+            print(f"Error processing video segment {s_ms}-{e_ms}: {msg}")
 
 if __name__ == "__main__":
     vad = VAD("API", "en", "en")

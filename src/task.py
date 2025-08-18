@@ -653,33 +653,27 @@ class YoutubeTask(Task):
                 raise RuntimeError(f"Failed to download video {self.youtube_url}")
             ydl.close()
 
-        # Extract audio from downloaded video using ffmpeg (same as VideoTask)
+        # Extract audio from downloaded video using ffmpeg as 16k mono WAV for faster downstream clipping
         self.video_path = self.task_local_dir.joinpath(f"task_{self.task_id}.mp4")
-        audio_path = self.task_local_dir.joinpath(f"task_{self.task_id}.mp3")
-        
+        audio_path = self.task_local_dir.joinpath(f"task_{self.task_id}.wav")
+
         self.task_logger.info("using ffmpeg to extract audio from downloaded video")
         result = subprocess.run(
             [
-                "ffmpeg",
-                "-i",
-                str(self.video_path),
-                "-f",
-                "mp3",
-                "-ab",
-                "192000",
-                "-vn",
+                "ffmpeg", "-hide_banner", "-loglevel", "error",
+                "-i", str(self.video_path),
+                "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
                 str(audio_path),
             ],
             capture_output=True,
             text=True
         )
-        
+
         if result.returncode != 0:
             self.task_logger.error(f"FFmpeg audio extraction failed: {result.stderr}")
             raise RuntimeError(f"Failed to extract audio from video: {result.stderr}")
-            
+
         self.task_logger.info("audio extraction finished")
-        
         self.audio_path = audio_path
 
         self.task_logger.info(f" Video File Dir: {self.video_path}")
@@ -720,23 +714,18 @@ class VideoTask(Task):
         #     self.visual_cues = None
 
     def run(self, pre_load_asr_model=None):
-        self.task_logger.info("using ffmpeg to extract audio")
+        self.task_logger.info("using ffmpeg to extract audio (16k mono WAV)")
         subprocess.run(
             [
-                "ffmpeg",
-                "-i",
-                self.video_path,
-                "-f",
-                "mp3",
-                "-ab",
-                "192000",
-                "-vn",
-                self.task_local_dir.joinpath(f"task_{self.task_id}.mp3"),
+                "ffmpeg", "-hide_banner", "-loglevel", "error",
+                "-i", self.video_path,
+                "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
+                self.task_local_dir.joinpath(f"task_{self.task_id}.wav"),
             ]
         )
         self.task_logger.info("audio extraction finished")
 
-        self.audio_path = self.task_local_dir.joinpath(f"task_{self.task_id}.mp3")
+        self.audio_path = self.task_local_dir.joinpath(f"task_{self.task_id}.wav")
         self.task_logger.info(f" Video File Dir: {self.video_path}")
         self.task_logger.info(f" Audio File Dir: {self.audio_path}")
         self.task_logger.info("Data Prep Complete. Start pipeline")
