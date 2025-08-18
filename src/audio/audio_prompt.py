@@ -71,22 +71,6 @@ Example output:
 ]
 """
 
-AUDIO_TRANSCRIBE_GPT_PROMPT = """
-You are a professional transcription assistant.
-
-Please transcribe the audio into JSON with precise sentence boundaries and valid timestamps. Follow these instructions carefully:
-
-1. Each segment should:
-    - Contain a natural sentence or clause, not too long.
-    - Have a valid start and end time in the format `mm:ss:ms` (e.g., "01:05:129").
-    - Ensure that start < end, and that each segment's start time equals the previous segment's end time (no overlap or gap).
-    - If unsure, round timestamps to the nearest 10 milliseconds.
-
-2. Be careful with:
-    - Proper nouns and technical terms — keep them accurate.
-    - Sentence boundary — don’t split in the middle of a natural pause.
-"""
-
 AUDIO_ANALYZE_PROMPT = """Analyze the given audio and provide a detailed, structured description by addressing each of the following components. Your final output should be well-organized and result in a rich, natural-sounding caption.
 
 Speaker Profile:

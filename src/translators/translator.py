@@ -58,7 +58,7 @@ class Translator:
             self.translator = Assistant(
                 self.client, system_prompt=self.system_prompt, domain=domain
             )
-        elif self.model_name in ["gpt-4o-mini", "gpt-4o"]:
+        elif self.model_name in ["gpt-4o-mini", "gpt-4o", "gpt-5", "gpt-5-mini", "gpt-5-nano"]:
             self.translator = LLM(
                 self.client, self.model_name, system_prompt=self.system_prompt
             )

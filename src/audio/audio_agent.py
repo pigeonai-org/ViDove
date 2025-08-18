@@ -110,7 +110,7 @@ class GPT4oAudioAgent(AudioAgent):
         try:
             with open(audio_path, "rb") as audio_file:
                 response = self.client.audio.transcriptions.create(
-                    prompt=AUDIO_TRANSCRIBE_GPT_PROMPT,
+                    prompt=AUDIO_TRANSCRIBE_PROMPT_WITH_VISUAL_CUES.format(visual_cues=visual_cues) if visual_cues else AUDIO_TRANSCRIBE_PROMPT,
                     model=self.model_name,
                     file=audio_file,
                     response_format="json",
