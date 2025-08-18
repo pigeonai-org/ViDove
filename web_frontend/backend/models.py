@@ -45,7 +45,7 @@ class SessionConfig(BaseModel):
     audio_VAD_model: Literal["pyannote/speaker-diarization-3.1", "API"] = Field(default="pyannote/speaker-diarization-3.1", alias="audio.VAD_model")
     audio_src_lang: str = Field(default="en", alias="audio.src_lang")
     audio_tgt_lang: str = Field(default="zh", alias="audio.tgt_lang")
-    vision_enable_vision: bool = Field(default=True, alias="vision.enable_vision")
+    vision_enable_vision: bool = Field(default=False, alias="vision.enable_vision")
     vision_vision_model: Literal["CLIP", "gpt-4o"] = Field(default="gpt-4o", alias="vision.vision_model")
     vision_model_path: str = Field(default="./ViDove/vision_model/clip-vit-base-patch16", alias="vision.model_path")
     vision_frame_cache_dir: str = Field(default="./cache", alias="vision.frame_cache_dir")

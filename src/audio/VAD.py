@@ -8,11 +8,15 @@ import uuid
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from logging import getLogger
+
 # Add the project root directory to the Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from src.SRT.srt import SrtScript, SrtSegment
 import datetime
+
+logger = getLogger(__name__)
 
 class VAD:
     def __init__(self, model_name_or_path: str, src_lang: str, tgt_lang: str, min_segment_seconds: float = 1.0):
@@ -205,7 +209,7 @@ class VAD:
 
     def get_speaker_segments_api(self, audio_path: str, webhook_url: str = None):
         """High-level wrapper: upload -> create job -> poll for results."""
-        print(f"Processing audio file via API: {audio_path}")
+        logger.info(f"Processing audio file via API: {audio_path}")
         media_url = self.upload_media(audio_path)
         job_id = self.create_diarization_job(media_url, webhook_url)
         return self.poll_diarization_results(job_id)
@@ -213,8 +217,8 @@ class VAD:
     def get_speaker_segments(self, audio_path: str, webhook_url: str = None):
         if self.model is None:
             return self.get_speaker_segments_api(audio_path, webhook_url)
-            
-        print(f"Processing audio file: {audio_path}")
+
+        logger.info(f"Processing audio file: {audio_path}")
         srt = SrtScript(src_lang=self.src_lang, tgt_lang=self.tgt_lang)
         segments = self.model(audio_path)  
         for turn, _, speaker in segments.itertracks(yield_label=True):
@@ -350,6 +354,9 @@ class VAD:
                 output_filename,
             ]
             tasks.append((segment, start_ms, end_ms, fast_cmd, slow_cmd))
+        
+        logger.info(f"Preparing {len(tasks)} video segments for clipping with {len(os.sched_getaffinity(0))} CPU cores")
+        
 
         max_workers = int(os.getenv("VAD_FFMPEG_WORKERS", str(min(16, (os.cpu_count() or 4)))))
         errors = []
@@ -376,7 +383,9 @@ class VAD:
                 except Exception as e:
                     errors.append((s_ms, e_ms, str(e)))
         for s_ms, e_ms, msg in errors:
-            print(f"Error processing video segment {s_ms}-{e_ms}: {msg}")
+            logger.error(f"Error processing video segment {s_ms}-{e_ms}: {msg}")
+
+        logger.info("Finished processing video segments.")
 
 if __name__ == "__main__":
     vad = VAD("API", "en", "en")

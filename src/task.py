@@ -280,6 +280,7 @@ class Task:
         Handles the VAD module to convert audio to speaker segments.
         """
         self.SRT_Script = self.audio_agent.segment_audio(self.audio_path, f"{self.task_local_dir}/.cache/audio")
+        self.task_logger.info(f"Speaker segments created with {self.audio_agent.model_name} for audio: {self.audio_path}")
         if self.video_path is not None and self.vision_agent is not None:
             self.audio_agent.clip_video_and_save(self.video_path, f"{self.task_local_dir}/.cache/video")
 
@@ -337,7 +338,8 @@ class Task:
 
         max_workers = self.audio_setting.get("threads", 4) if isinstance(self.audio_setting, dict) else 4
 
-        print("Number of audio segments to transcribe:", len(items))
+        # print("Number of audio segments to transcribe:", len(items))
+        self.task_logger.info(f"Number of audio segments to transcribe: {len(items)}")
 
         # Execute concurrently if supported
         if hasattr(self.audio_agent, 'transcribe_batch'):
