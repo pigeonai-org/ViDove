@@ -14,12 +14,12 @@ from src.SRT.srt import SrtScript, SrtSegment
 from src.audio.VAD import VAD
 import librosa
 
+
 class AudioAgent(ABC):
-    def __init__(self, model_name, num_workers, audio_config: dict=None):
+    def __init__(self, model_name, audio_config: dict=None):
         self.model_name = model_name
         self.audio_config = audio_config or {}
         self.device = None
-        self.num_workers = num_workers
         self.load_model()
         # Initialize VAD only if configured
         self.VAD_model = None
@@ -28,7 +28,7 @@ class AudioAgent(ABC):
                 model_name_or_path=self.audio_config["VAD_model"],
                 src_lang=self.audio_config["src_lang"],
                 tgt_lang=self.audio_config["tgt_lang"],
-                min_segment_seconds=float(self.audio_config.get("min_segment_seconds", 0.2)),
+                min_segment_seconds=float(self.audio_config.get("min_segment_seconds", 1.0)),
             )
     
     def segment_audio(self, audio_path, cache_dir):

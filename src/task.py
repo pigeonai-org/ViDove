@@ -389,6 +389,8 @@ class Task:
 
             self.task_logger.info(f"Transcribed Length: {len(new_segments)} for segment {idx}")
 
+        self.task_logger.info("Transcription completed, updating SRT script.")
+
         self.SRT_Script.replace_seg(self.temp_segments_info)
 
 
