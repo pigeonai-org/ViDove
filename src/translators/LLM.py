@@ -2,11 +2,6 @@ from .abs_api_model import AbsApiModel
 from llama_index.core import PromptTemplate
 from openai import AzureOpenAI, OpenAI
 
-
-
-# add RAG support in here
-
-
 class LLM(AbsApiModel):
     def __init__(self, client:AzureOpenAI|OpenAI, model_name, system_prompt:PromptTemplate, temp=0.15, enable_rag = False) -> None:
         super().__init__()

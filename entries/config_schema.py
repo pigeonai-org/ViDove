@@ -65,7 +65,7 @@ class VisionConfig(BaseModel):
         default=True, 
         description="Whether to enable vision processing"
     )
-    vision_model: Literal["CLIP", "gpt-4o"] = Field(
+    vision_model: Literal["CLIP", "gpt-4o", "gpt-4o-mini"] = Field(
         default="gpt-4o",
         description="Vision model: CLIP or gpt-4o"
     )
@@ -109,6 +109,16 @@ class TranslationConfig(BaseModel):
         default=2000,
         description="Translation chunk size"
     )
+    use_history: bool = Field(
+        default=True,
+        description="Include recent translation history in each request (may reduce throughput)"
+    )
+    max_retries: int = Field(
+        default=1,
+        description="Max retries per chunk for transient API errors"
+    )
+    # Note: Parallelism is globally controlled by TaskConfig.num_workers (>1 enables parallel). 
+    # The deprecated fields 'parallel' and 'workers' are intentionally removed.
 
 
 class PostProcessConfig(BaseModel):

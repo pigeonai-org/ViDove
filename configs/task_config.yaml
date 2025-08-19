@@ -31,8 +31,8 @@ audio:
   tgt_lang: zh
 
 vision:
-  enable_vision: False
-  vision_model: gpt-4o # clip or other vLLMs
+  enable_vision: True
+  vision_model: gpt-4o-mini # clip or other vLLMs
   model_path: ./ViDove/vision_model/clip-vit-base-patch16 # replace it with your own model path
   frame_cache_dir: ./cache #should be cleared after task finished
   frame_per_seg: 4 # number of frame extracted from segment
@@ -45,8 +45,10 @@ pre_process:
 
 # Translation module config
 translation:
-  model: gpt-4o # choices=["gpt-3.5-turbo", "gpt-4", "gpt-4o", "Assistant", "Multiagent"]
+  model: gpt-4o 
   chunk_size: 2000
+  use_history: True     # include recent translation history per request
+  max_retries: 1        # retries per chunk for transient API errors
 
 # post-process module config
 post_process:

@@ -2,11 +2,12 @@ import logging
 import shutil
 import subprocess
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from enum import Enum
 from os import getenv
 from pathlib import Path
-from time import gmtime, strftime, time
+from time import gmtime, strftime, time, sleep
 
 # pytube deprecated
 # from pytube import YouTube
@@ -194,7 +195,7 @@ class Task:
                     frame_per_seg = self.vision_setting["frame_per_seg"],
                     cache_dir = self.vision_setting["frame_cache_dir"],
                 )
-            elif self.vision_setting["vision_model"] == "gpt-4o":
+            elif self.vision_setting["vision_model"] in ("gpt-4o", "gpt-4o-mini"):
                 self.vision_agent = GptVisionAgent(
                     model_name = self.vision_setting["vision_model"],
                     model_path = None,
@@ -293,23 +294,62 @@ class Task:
         if self.vision_agent is None:
             self.task_logger.info("No vision agent found, skipping visual cues extraction")
             return 
+        cache_dir = f"{self.task_local_dir}/.cache/video"
+        if not os.path.isdir(cache_dir):
+            self.task_logger.info("No video segments found; skipping visual cues extraction")
+            return
+        files = sorted(os.listdir(cache_dir))
+        if not files:
+            self.task_logger.info("Video segments directory is empty; skipping visual cues extraction")
+            return
+        self.task_logger.info(f"Extracting visual cues from video using {self.vision_agent.model_name}")
+
+        # Prepare jobs
+        jobs = [(idx, f"{cache_dir}/{segment_file}") for idx, segment_file in enumerate(files)]
+        results = {}
+
+        # Run in parallel across segments, controlled by global num_workers
+        max_workers = self.num_workers if isinstance(self.num_workers, int) and self.num_workers > 0 else 1
+
+        def analyze_one(idx, path):
+            # simple retry for robustness
+            import random
+            for attempt in range(3):
+                try:
+                    return self.vision_agent.analyze_video(path)
+                except Exception as e:
+                    backoff = min(10, 1 + attempt * 2) + random.random()
+                    self.task_logger.warning(
+                        f"Vision analysis failed for segment {idx} (attempt {attempt+1}/3): {e}. Retrying in {backoff:.1f}s"
+                    )
+                    sleep(backoff)
+            self.task_logger.error(
+                f"Vision analysis failed for segment {idx} after retries; leaving empty."
+            )
+            return ""
+
+        if max_workers > 1:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_map = {executor.submit(analyze_one, idx, path): idx for idx, path in jobs}
+                for future in as_completed(future_map):
+                    idx = future_map[future]
+                    try:
+                        summary = future.result()
+                    except Exception as e:
+                        self.task_logger.error(f"Worker crashed for segment {idx}: {e}")
+                        summary = ""
+                    results[idx] = summary
         else:
-            cache_dir = f"{self.task_local_dir}/.cache/video"
-            if not os.path.isdir(cache_dir):
-                self.task_logger.info("No video segments found; skipping visual cues extraction")
-                return
-            files = sorted(os.listdir(cache_dir))
-            if not files:
-                self.task_logger.info("Video segments directory is empty; skipping visual cues extraction")
-                return
-            self.task_logger.info(f"Extracting visual cues from video using {self.vision_agent.model_name}")
-            for idx, segment_file in enumerate(files):
-                segment_path = f"{cache_dir}/{segment_file}"
-                visual_cues = self.vision_agent.analyze_video(segment_path)
-                if self.vision_knowledge:
-                    self.vision_knowledge.add_to_index(visual_cues, chunk_size=100, chunk_overlap=5)
-                if idx < len(self.SRT_Script.segments):
-                    self.SRT_Script.segments[idx].visual_cues = visual_cues
+            for idx, path in jobs:
+                results[idx] = analyze_one(idx, path)
+
+        # Apply results in order; update memory sequentially to avoid concurrency issues
+        for idx in range(len(files)):
+            visual_cues = results.get(idx, "")
+            if self.vision_knowledge and visual_cues:
+                self.vision_knowledge.add_to_index(visual_cues, chunk_size=100, chunk_overlap=5)
+            if idx < len(self.SRT_Script.segments):
+                self.SRT_Script.segments[idx].visual_cues = visual_cues
             # print(self.vision_knowledge.retrieve_relevant_nodes("Protoss"))
 
     # Module 1 ASR: audio --> SRT_script
@@ -440,7 +480,21 @@ class Task:
             "---------------------Start Translation--------------------"
         )
         self.translator.set_srt(self.SRT_Script)
-        self.translator.translate()
+        # Parallel translation is controlled globally by num_workers: > 1 enables parallel
+        max_retries = self.translation_setting.get("max_retries", 2)
+        use_history = self.translation_setting.get("use_history", True)
+        if isinstance(self.num_workers, int) and self.num_workers > 1:
+            self.task_logger.info(
+                f"Using parallel translation controlled by num_workers={self.num_workers}; retries={max_retries}, use_history={use_history}"
+            )
+            self.translator.translate_parallel(
+                max_workers=self.num_workers,
+                max_retries=max_retries,
+                use_history=use_history,
+            )
+        else:
+            self.task_logger.info("Using sequential translation (num_workers <= 1)")
+            self.translator.translate()
 
     # Module 4: perform srt post process steps
     def postprocess(self):
