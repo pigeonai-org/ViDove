@@ -21,7 +21,7 @@ from src.memory.basic_rag import BasicRAG
 from src.memory.direct_search_RAG import TavilySearchRAG
 from src.translators.translator import Translator
 from src.vision.gpt_vision_agent import GptVisionAgent, CLIPVisionAgent
-from src.audio.audio_agent import GeminiAudioAgent, ClassicAudioAgent, GPT4oAudioAgent
+from src.audio.audio_agent import GeminiAudioAgent, WhisperAudioAgent, GPT4oAudioAgent
 from src.editorial.editor import EditorAgent
 class TaskStatus(str, Enum):
     """
@@ -218,10 +218,10 @@ class Task:
                 self.audio_agent = GeminiAudioAgent(audio_config=audio_config)
                 self.task_logger.info(f"Using GeminiAudioAgent with model: {self.audio_setting['audio_agent']}")
                 self.audio_agent.set_agent_history_logger(self.agent_history_logger)
-            elif agent_choice == "WhisperAPIAudioAgent":
-                # Classic audio agent that delegates to Whisper API ASR
-                self.audio_agent = ClassicAudioAgent(model_name="whisper-api")
-                self.task_logger.info(f"Using ClassicAudioAgent with model: {self.audio_setting['audio_agent']}")
+            elif agent_choice == "WhisperAudioAgent":
+                # Whisper audio agent that delegates to Whisper ASR and uses VAD when configured
+                self.audio_agent = WhisperAudioAgent(model_name="whisper-api", audio_config=self.audio_setting)
+                self.task_logger.info(f"Using WhisperAudioAgent with model: {self.audio_setting['audio_agent']}")
             elif agent_choice == "GPT4oAudioAgent":
                 self.audio_agent = GPT4oAudioAgent(model_name="gpt-4o", audio_config=self.audio_setting)
                 self.task_logger.info(f"Using GPT4oAudioAgent with model: {self.audio_setting['audio_agent']}")

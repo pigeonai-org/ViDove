@@ -151,31 +151,21 @@ class GPT4oAudioAgent(AudioAgent):
         return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
-class ClassicAudioAgent(AudioAgent):
+class WhisperAudioAgent(AudioAgent):
     def __init__(self, model_name="whisper-api", audio_config: dict | None = None):
-        # For whisper-api, do not initialize VAD (pass empty config);
-        # Classic agent is primarily used with whisper-api here.
-        if model_name == "whisper-api":
-            super().__init__(model_name, audio_config={})
-        else:
-            super().__init__(model_name, audio_config=audio_config)
+        # Enable VAD when audio_config provides it; otherwise operate without VAD.
+        super().__init__(model_name, audio_config=audio_config or {})
 
     def load_model(self):
         self.ASR_model = ASR.create(self.model_name)
         
     def segment_audio(self, audio_path, cache_dir):
-        # Whisper API path: do not perform VAD; create a single placeholder segment
-        srt = SrtScript(src_lang=self.audio_config.get("src_lang", "en") if self.audio_config else "en",
-                        tgt_lang=self.audio_config.get("tgt_lang", "zh") if self.audio_config else "zh")
-        # single segment covering whole file; exact end not needed since ASR returns timestamped segments
-        placeholder = SrtSegment(src_lang=srt.src_lang, tgt_lang=srt.tgt_lang,
-                                    src_text="", translation="", speaker="",
-                                    start_time=0.0, end_time=0.0, idx=0)
-        placeholder.audio_path = audio_path
-        srt.segments.append(placeholder)
-        self.segments = srt
-        return srt
-        # Fallback to base behavior (use VAD)
+        """Create speaker segments and clip per-segment audio.
+
+        - If VAD is configured, use it to segment and clip the original audio into
+            cache_dir (each segment will have segment.audio_path set).
+        """
+        return super().segment_audio(audio_path, cache_dir)
 
     def analyze_audio(self, audio_path):
         pass  # No specific analysis for classic agent, just return empty result
@@ -240,7 +230,10 @@ class ClassicAudioAgent(AudioAgent):
         return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
     def transcribe(self, audio_path, visual_cues=None):
-        result = self.ASR_model.get_transcript(audio_path)
+        # Transcribe the given (per-VAD) audio clip with Whisper ASR.
+        # Return SRT-like segments with HH:MM:SS,mmm timestamps relative to this clip.
+        src_lang = (self.audio_config or {}).get("src_lang")
+        result = self.ASR_model.get_transcript(audio_path, source_lang=src_lang)
         # If Whisper API returns SRT text, keep as SRT time strings
         if isinstance(result, str):
             return self._parse_srt_to_segments(result)

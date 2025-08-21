@@ -1,7 +1,6 @@
 import os
 import re
 from copy import deepcopy
-from datetime import timedelta
 import datetime
 from tqdm import tqdm
 
@@ -80,6 +79,12 @@ class SrtSegment(object):
             self.timestamp_str = f"{self.start_time_str} --> {self.end_time_str}"
         else:
             self.timestamp_str = timestamp_str
+
+    def update_timestamps(self):
+        """Recompute the string timestamps from numeric start/end times."""
+        self.start_time_str = self.format_time(self.start_time)
+        self.end_time_str = self.format_time(self.end_time)
+        self.timestamp_str = f"{self.start_time_str} --> {self.end_time_str}"
 
  
             
@@ -271,7 +276,83 @@ class SrtScript(object):
         new_segments.sort(key=lambda s: s.start_time)
 
         self.segments = new_segments
+        # Final clean up to avoid overlaps/duplicates across VAD boundaries
+        self._fix_overlaps_and_deduplicate()
         self.task_logger.info("Segments replacement complete. New total: %d", len(self.segments))
+
+    def _normalize_text_for_compare(self, text: str) -> str:
+        if not text:
+            return ""
+        # Basic normalization: lowercase and strip common whitespace
+        t = text.casefold().strip()
+        # Collapse whitespace (incl. CJK space)
+        t = re.sub(r"[\s\u3000]+", " ", t)
+        # Remove lightweight punctuation and quotes across languages
+        t = re.sub(r'[\.,!?:;()\[\]{}\-–—\"\'“”’，。！？：；（）]+', '', t)
+        return t
+
+    def _fix_overlaps_and_deduplicate(self, max_gap_to_merge: float = 0.2, epsilon: float = 0.02, min_duration: float = 0.08):
+        """Ensure time monotonicity and drop obvious duplicates across adjacent segments.
+
+        - Clamp start >= previous end (within epsilon), adjust if needed.
+        - Ensure minimal duration for each segment.
+        - If two adjacent segments have very similar text and overlap or are extremely close,
+          drop the latter one to avoid repetition from boundary re-recognition.
+        """
+        if not self.segments:
+            return
+
+        # Work on a sorted copy by start_time just to be safe
+        segs = sorted(self.segments, key=lambda s: float(s.start_time or 0.0))
+        cleaned = []
+
+        for seg in segs:
+            # Enforce numeric
+            try:
+                seg.start_time = float(seg.start_time or 0.0)
+                seg.end_time = float(seg.end_time or 0.0)
+            except Exception:
+                seg.start_time = 0.0
+                seg.end_time = 0.0
+
+            if cleaned:
+                prev = cleaned[-1]
+                # If this starts before prev ends, clamp to prev end
+                if seg.start_time < prev.end_time - epsilon:
+                    seg.start_time = max(prev.end_time, seg.start_time)
+
+                # If strong text similarity and temporal overlap/nearby, drop current
+                prev_norm = self._normalize_text_for_compare(prev.src_text)
+                cur_norm = self._normalize_text_for_compare(seg.src_text)
+                near_in_time = (seg.start_time - prev.end_time) <= max_gap_to_merge
+                overlaps = seg.start_time < prev.end_time + epsilon
+                similar = False
+                if prev_norm and cur_norm:
+                    # Simple similarity: one contains another or high overlap in shorter length
+                    if prev_norm in cur_norm or cur_norm in prev_norm:
+                        similar = True
+                    else:
+                        # Token overlap ratio
+                        prev_tokens = set(prev_norm.split())
+                        cur_tokens = set(cur_norm.split())
+                        inter = len(prev_tokens & cur_tokens)
+                        denom = max(1, min(len(prev_tokens), len(cur_tokens)))
+                        if inter / denom >= 0.8:
+                            similar = True
+                if similar and (overlaps or near_in_time):
+                    # Drop the latter duplicate
+                    continue
+
+            # Ensure minimum duration
+            if seg.end_time <= seg.start_time:
+                seg.end_time = seg.start_time + min_duration
+            elif (seg.end_time - seg.start_time) < min_duration:
+                seg.end_time = seg.start_time + min_duration
+
+            seg.update_timestamps()
+            cleaned.append(seg)
+
+        self.segments = cleaned
 
     def form_whole_sentence(self):
         """
@@ -670,27 +751,31 @@ class SrtScript(object):
 
     def realtime_write_srt(self, path, range, length, idx):
         # DEPRECATED
-        start_seg_id = range[0]
-        end_seg_id = range[1]
+        _start_seg_id = range[0]
+        _end_seg_id = range[1]
         with open(path, "a", encoding='utf-8') as f:
             # for i, seg in enumerate(self.segments[start_seg_id-1:end_seg_id+length]):
             #     f.write(f'{i+idx}\n')
             #     f.write(seg.get_trans_str())
             for i, seg in enumerate(self.segments):
-                if i < range[0] - 1: continue
-                if i >= range[1] + length: break
+                if i < range[0] - 1:
+                    continue
+                if i >= range[1] + length:
+                    break
                 f.write(f'{i + idx}\n')
                 f.write(seg.get_trans_str())
         pass
 
     def realtime_bilingual_write_srt(self, path, range, length, idx):
         # DEPRECATED
-        start_seg_id = range[0]
-        end_seg_id = range[1]
+        _start_seg_id = range[0]
+        _end_seg_id = range[1]
         with open(path, "a", encoding='utf-8') as f:
             for i, seg in enumerate(self.segments):
-                if i < range[0] - 1: continue
-                if i >= range[1] + length: break
+                if i < range[0] - 1:
+                    continue
+                if i >= range[1] + length:
+                    break
                 f.write(f'{i + idx}\n')
                 f.write(seg.get_bilingual_str())
         pass
@@ -701,7 +786,7 @@ class SrtScript(object):
             if seg.audio_path is not None:
                 audio_path = seg.audio_path
                 init_prompt = seg.visual_cues if seg.visual_cues is not None else "Hello, welcome to my lecture."
-                seg_transcript = self.asr.get_transcript(audio_path=audio_path, source_lang=self.src_lang, init_prompt=init_prompt)
+                _seg_transcript = self.asr.get_transcript(audio_path=audio_path, source_lang=self.src_lang, init_prompt=init_prompt)
                 exit()
 
 def split_script(script_in, chunk_size=1000):
