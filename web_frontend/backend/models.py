@@ -42,7 +42,7 @@ class SessionConfig(BaseModel):
     audio_enable_audio: bool = Field(default=True, alias="audio.enable_audio")
     audio_audio_agent: Literal["GeminiAudioAgent"] = Field(default="GeminiAudioAgent", alias="audio.audio_agent")
     audio_model_path: Optional[str] = Field(default=None, alias="audio.model_path")
-    audio_VAD_model: Literal["pyannote/speaker-diarization-3.1", "API"] = Field(default="pyannote/speaker-diarization-3.1", alias="audio.VAD_model")
+    audio_VAD_model: Literal["pyannote/speaker-diarization-3.1", "API"] = Field(default="API", alias="audio.VAD_model")
     audio_src_lang: str = Field(default="en", alias="audio.src_lang")
     audio_tgt_lang: str = Field(default="zh", alias="audio.tgt_lang")
     vision_enable_vision: bool = Field(default=False, alias="vision.enable_vision")
