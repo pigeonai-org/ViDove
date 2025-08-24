@@ -5,6 +5,8 @@ import logging
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
+from uuid import uuid4
+from datetime import datetime
 
 
 class EditorAgent:
@@ -17,6 +19,8 @@ class EditorAgent:
         history_len: int = 10,
         user_instruction: Optional[str] = None,
         num_workers: int = 4,
+        usage_log_path: Optional[str] = None,
+        task_id: Optional[str] = None,
     ):
         self.client = client
         self.srt = srt
@@ -31,12 +35,55 @@ class EditorAgent:
         self.handlers: Dict[str, Callable] = {}
         # Lock for thread-safe writes
         self._lock = Lock()
+        # Usage logging context
+        self.usage_log_path = usage_log_path
+        self.task_id = task_id
 
     def set_agent_history_logger(self, logger):
         self.agent_history_logger = logger
 
     def register_handler(self, name: str, func: Callable):
         self.handlers[name] = func
+
+    def set_usage_log_path(self, path: Optional[str]):
+        self.usage_log_path = path
+
+    def set_task_id(self, task_id: Optional[str]):
+        self.task_id = task_id
+
+    def _record_usage(
+        self,
+        *,
+        provider: str,
+        model: str,
+        category: str,
+        prompt_tokens: Optional[int],
+        completion_tokens: Optional[int],
+        total_tokens: Optional[int],
+        phrase_index: Optional[int] = None,
+        extra: Optional[dict] = None,
+    ) -> None:
+        if not self.usage_log_path:
+            return
+        try:
+            rec = {
+                "request_id": str(uuid4()),
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "task_id": self.task_id,
+                "provider": provider,
+                "model": model,
+                "category": category,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+                "phrase_index": phrase_index,
+            }
+            if extra:
+                rec.update({"extra": extra})
+            with open(self.usage_log_path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
 
     def _snapshot_translations(self) -> List[str]:
         return [seg.translation for seg in self.srt.segments]
@@ -140,13 +187,30 @@ class EditorAgent:
                 --- Important ---
                 Directly return the revised content only."""
 
-    def send_request(self, prompt: str) -> str:
+    def send_request(self, prompt: str, phrase_index: Optional[int] = None) -> str:
         resp = self.client.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.0,
             max_tokens=3000,
         )
+        # Best-effort usage logging
+        try:
+            usage = getattr(resp, "usage", None)
+            pt = getattr(usage, "prompt_tokens", None) if usage else None
+            ct = getattr(usage, "completion_tokens", None) if usage else None
+            tt = getattr(usage, "total_tokens", None) if usage else None
+            self._record_usage(
+                provider="openai",
+                model="gpt-4o",
+                category="text",
+                prompt_tokens=pt,
+                completion_tokens=ct,
+                total_tokens=tt,
+                phrase_index=phrase_index,
+            )
+        except Exception:
+            pass
         return resp.choices[0].message.content
 
     def srt_iterator(self):
@@ -175,7 +239,7 @@ class EditorAgent:
             prompt = self.build_prompt(
                 idx, src, trans, base_translations=snapshot_translations
             )
-            edits = self.send_request(prompt).strip()
+            edits = self.send_request(prompt, phrase_index=idx).strip()
             return idx, edits
 
         items = list(self.srt_iterator())

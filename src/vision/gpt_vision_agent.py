@@ -15,7 +15,7 @@ from transformers import (
 )
 from src.vision.vision_agent import VisionAgent
 import logging
-# import clip # use huggingface clip later
+import clip # use huggingface clip later
 
 class GptVisionAgent(VisionAgent):
     def __init__(self, model_name, model_path, frame_per_seg, cache_dir=None):

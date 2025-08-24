@@ -116,6 +116,8 @@ class Task:
         self.agent_history_logger.setLevel(logging.INFO)
         agent_history_file_handler = logging.FileHandler(f"{self.task_local_dir}/agent_history.jsonl", "w", encoding="utf-8")
         self.agent_history_logger.addHandler(agent_history_file_handler)
+        # usage log path for per-request token usage events
+        self.usage_log_path = f"{self.task_local_dir}/usage.jsonl"
         
         print(f"Task ID: {self.task_id}")
         self.task_logger.info(f"Task ID: {self.task_id}")
@@ -183,6 +185,7 @@ class Task:
             self.web_search,
             self.vision_knowledge,
             self.chunk_size,
+            usage_log_path=self.usage_log_path,
         )
 
         # initialize vision agent
@@ -211,10 +214,11 @@ class Task:
         self.audio_agent = None   
         if self.audio_setting["enable_audio"]:
             agent_choice = self.audio_setting.get("audio_agent")
+            audio_config = self.audio_setting.copy()
+            audio_config["task_id"] = self.task_id
+            audio_config["usage_log_path"] = self.usage_log_path
             if agent_choice == "GeminiAudioAgent":
                 # Add task_id to audio_config for logger
-                audio_config = self.audio_setting.copy()
-                audio_config["task_id"] = self.task_id
                 self.audio_agent = GeminiAudioAgent(audio_config=audio_config)
                 self.task_logger.info(f"Using GeminiAudioAgent with model: {self.audio_setting['audio_agent']}")
                 self.audio_agent.set_agent_history_logger(self.agent_history_logger)

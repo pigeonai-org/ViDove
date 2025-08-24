@@ -34,7 +34,7 @@ SUPPORT_LANG_MAP = {
 
 class Translator:
     def __init__(
-        self, model_name, src_lang, tgt_lang, domain, task_id, client, local_knowledge:BasicRAG=None, web_search:TavilySearchRAG=None, vision_knowledge:BasicRAG=None, chunk_size=1000,
+        self, model_name, src_lang, tgt_lang, domain, task_id, client, local_knowledge:BasicRAG=None, web_search:TavilySearchRAG=None, vision_knowledge:BasicRAG=None, chunk_size=1000, usage_log_path: str | None = None,
     ):
         self.task_logger = logging.getLogger(f"task_{task_id}")
         self.task_logger.info("initializing translator")
@@ -55,6 +55,7 @@ class Translator:
         self.vision_knowledge = vision_knowledge
         self.translation_history = []
         self.srt = None
+        self.usage_log_path = usage_log_path
 
         if self.model_name == "Assistant":
             self.translator = Assistant(
@@ -62,7 +63,7 @@ class Translator:
             )
         elif self.model_name in ["gpt-4o-mini", "gpt-4o", "gpt-5", "gpt-5-mini", "gpt-5-nano"]:
             self.translator = LLM(
-                self.client, self.model_name, system_prompt=self.system_prompt
+                self.client, self.model_name, system_prompt=self.system_prompt, task_id=self.task_id, usage_log_path=self.usage_log_path
             )
         elif self.model_name == "Multiagent":
             self.translator = MTA(

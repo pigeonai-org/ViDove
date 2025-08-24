@@ -4,6 +4,8 @@ from src.memory.abs_api_RAG import AbsApiRAG
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
+from uuid import uuid4
+from datetime import datetime
 
 class ProofreaderAgent:
     def __init__(
@@ -18,6 +20,8 @@ class ProofreaderAgent:
         use_short_term_memory: bool = False,
         verbose: int = 2,
         num_workers: int = 4,
+        usage_log_path: Optional[str] = None,
+        task_id: Optional[str] = None,
     ):
         self.client = client
         self.srt = srt
@@ -34,10 +38,53 @@ class ProofreaderAgent:
         self.agent_history_logger = None
         # Lock for thread-safe SRT writes
         self._lock = Lock()
+        # Usage logging context
+        self.usage_log_path = usage_log_path
+        self.task_id = task_id
 
     def set_agent_history_logger(self, logger):
         """Set the agent history logger from task"""
         self.agent_history_logger = logger
+
+    def set_usage_log_path(self, path: Optional[str]):
+        self.usage_log_path = path
+
+    def set_task_id(self, task_id: Optional[str]):
+        self.task_id = task_id
+
+    def _record_usage(
+        self,
+        *,
+        provider: str,
+        model: str,
+        category: str,
+        prompt_tokens: Optional[int],
+        completion_tokens: Optional[int],
+        total_tokens: Optional[int],
+        phrase_index: Optional[int] = None,
+        extra: Optional[dict] = None,
+    ) -> None:
+        if not self.usage_log_path:
+            return
+        try:
+            rec = {
+                "request_id": str(uuid4()),
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "task_id": self.task_id,
+                "provider": provider,
+                "model": model,
+                "category": category,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+                "phrase_index": phrase_index,
+            }
+            if extra:
+                rec.update({"extra": extra})
+            with open(self.usage_log_path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
 
     def set_srt(self, srt: SrtScript):
         self.srt = srt
@@ -55,12 +102,29 @@ class ProofreaderAgent:
         if self.verbose > 1 and self.logger:
             self.logger.info(f"Updated STM: {self.short_term_memory}")
 
-    def send_request(self, prompt: str):
+    def send_request(self, prompt: str, phrase_index: Optional[int] = None):
         resp = self.client.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.0
         )
+        # Best-effort usage logging
+        try:
+            usage = getattr(resp, "usage", None)
+            pt = getattr(usage, "prompt_tokens", None) if usage else None
+            ct = getattr(usage, "completion_tokens", None) if usage else None
+            tt = getattr(usage, "total_tokens", None) if usage else None
+            self._record_usage(
+                provider="openai",
+                model="gpt-4o",
+                category="text",
+                prompt_tokens=pt,
+                completion_tokens=ct,
+                total_tokens=tt,
+                phrase_index=phrase_index,
+            )
+        except Exception:
+            pass
         return resp.choices[0].message.content
 
     def build_batch_prompt(self, batch: List[Tuple[int, str, str]]) -> str:
@@ -142,7 +206,9 @@ class ProofreaderAgent:
                 self.logger.info(f"Prompting LLM for segments {[idx for idx, _, _ in batch]}")
             if self.verbose > 1 and self.logger:
                 self.logger.info(f"Prompt content:\n{prompt}")
-            content = self.send_request(prompt)
+            # Use the first segment index in the batch as phrase_index for attribution
+            phrase_index = batch[0][0] if batch else None
+            content = self.send_request(prompt, phrase_index=phrase_index)
             lines = content.strip().splitlines()
             suggestions = {}
             for line in lines:
