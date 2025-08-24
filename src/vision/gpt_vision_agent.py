@@ -2,6 +2,7 @@ import os
 import time
 import base64
 from datetime import timedelta
+from collections import Counter
 import cv2
 import ffmpeg
 import torch
@@ -68,7 +69,24 @@ class GptVisionAgent(VisionAgent):
                 }
             ],
         )
-        #print(response.choices[0]['message']['content'])
+        # Best-effort usage logging
+        try:
+            usage = getattr(response, "usage", None)
+            pt = getattr(usage, "prompt_tokens", None) if usage else None
+            ct = getattr(usage, "completion_tokens", None) if usage else None
+            tt = getattr(usage, "total_tokens", None) if usage else None
+            if hasattr(self, "_record_usage"):
+                self._record_usage(
+                    provider="openai",
+                    model="gpt-4o",
+                    prompt_tokens=pt,
+                    completion_tokens=ct,
+                    total_tokens=tt,
+                    phrase_index=None,
+                    extra={}
+                )
+        except Exception:
+            pass
         return response.choices[0].message.content
     
     def summarize_cue(self):
@@ -86,7 +104,24 @@ class GptVisionAgent(VisionAgent):
                 }
             ],
         )
-        
+        # Best-effort usage logging
+        try:
+            usage = getattr(response, "usage", None)
+            pt = getattr(usage, "prompt_tokens", None) if usage else None
+            ct = getattr(usage, "completion_tokens", None) if usage else None
+            tt = getattr(usage, "total_tokens", None) if usage else None
+            if hasattr(self, "_record_usage"):
+                self._record_usage(
+                    provider="openai",
+                    model="gpt-4o",
+                    prompt_tokens=pt,
+                    completion_tokens=ct,
+                    total_tokens=tt,
+                    phrase_index=None,
+                    extra={}
+                )
+        except Exception:
+            pass
         if self.agent_history_logger:
             self.agent_history_logger.info('{"role": "vision_agent", "message": "Visual summary ready! I could do this all day, but I won\'t."}')
         return response.choices[0].message.content
@@ -121,8 +156,8 @@ class GptVisionAgent(VisionAgent):
         
         if self.agent_history_logger:
             self.agent_history_logger.info('{"role": "vision_agent", "message": "Video frame analysis done! My eyes need a break, but let\'s summarize first."}')
-        
-        return self.summarize_cue()
+        result = self.summarize_cue()
+        return result
 
 
 

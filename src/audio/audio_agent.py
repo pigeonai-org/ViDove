@@ -185,19 +185,22 @@ class GPT4oAudioAgent(AudioAgent):
 
             seg_audio = AudioSegment.from_file(audio_path)
             duration_secs = len(seg_audio) / 1000.0
-            # Best-effort usage logging using per-minute pricing
-            try:
+
+            usage = getattr(response, "usage", None)
+            pt = getattr(usage, "prompt_tokens", None) if usage else None
+            ct = getattr(usage, "output_tokens", None) if usage else None
+            tt = getattr(usage, "total_tokens", None) if usage else None
+            if hasattr(self, "_record_usage"):
                 self._record_usage(
                     provider="openai",
                     model=self.model_name,
-                    category="audio",
-                    prompt_tokens=None,
-                    completion_tokens=None,
-                    total_tokens=None,
+                    prompt_tokens=pt,
+                    completion_tokens=ct,
+                    total_tokens=tt,
+                    phrase_index=None,
                     extra={"duration_secs": duration_secs, "agent": "audio"},
                 )
-            except Exception:
-                pass
+                
             return [
                 {
                     "start": self._seconds_to_srt_time(0.0),

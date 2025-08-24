@@ -208,6 +208,11 @@ class Task:
                 # Set agent history logger for vision agent
                 if hasattr(self.vision_agent, 'set_agent_history_logger'):
                     self.vision_agent.set_agent_history_logger(self.agent_history_logger)
+                # Wire usage tracking context
+                if hasattr(self.vision_agent, 'set_task_id'):
+                    self.vision_agent.set_task_id(self.task_id)
+                if hasattr(self.vision_agent, 'set_usage_log_path'):
+                    self.vision_agent.set_usage_log_path(self.usage_log_path)
             else:
                 raise ValueError(f"Unsupported vision model: {self.vision_setting['vision_model']}")
         
