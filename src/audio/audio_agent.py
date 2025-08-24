@@ -194,7 +194,7 @@ class GPT4oAudioAgent(AudioAgent):
                     prompt_tokens=None,
                     completion_tokens=None,
                     total_tokens=None,
-                    extra={"duration_secs": duration_secs},
+                    extra={"duration_secs": duration_secs, "agent": "audio"},
                 )
             except Exception:
                 pass
@@ -311,6 +311,22 @@ class WhisperAudioAgent(AudioAgent):
         # Return SRT-like segments with HH:MM:SS,mmm timestamps relative to this clip.
         src_lang = (self.audio_config or {}).get("src_lang")
         result = self.ASR_model.get_transcript(audio_path, source_lang=src_lang)
+        # If this path uses OpenAI Whisper API under the hood, record per-minute usage
+        try:
+            from pydub import AudioSegment
+            seg_audio = AudioSegment.from_file(audio_path)
+            duration_secs = len(seg_audio) / 1000.0
+            self._record_usage(
+                provider="openai",
+                model="whisper-1",
+                category="audio",
+                prompt_tokens=None,
+                completion_tokens=None,
+                total_tokens=None,
+                extra={"duration_secs": duration_secs, "agent": "audio"},
+            )
+        except Exception:
+            pass
         # If Whisper API returns SRT text, keep as SRT time strings
         if isinstance(result, str):
             return self._parse_srt_to_segments(result)
@@ -538,7 +554,7 @@ class GeminiAudioAgent(AudioAgent):
                         prompt_tokens=pt,
                         completion_tokens=ct,
                         total_tokens=tt,
-                        extra=({"duration_secs": duration_secs} if duration_secs is not None else None),
+                        extra=({"duration_secs": duration_secs, "agent": "audio"} if duration_secs is not None else {"agent": "audio"}),
                     )
                 except Exception:
                     pass

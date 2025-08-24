@@ -208,6 +208,7 @@ class EditorAgent:
                 completion_tokens=ct,
                 total_tokens=tt,
                 phrase_index=phrase_index,
+                extra={"agent": "editor"},
             )
         except Exception:
             pass

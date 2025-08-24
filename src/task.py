@@ -224,10 +224,10 @@ class Task:
                 self.audio_agent.set_agent_history_logger(self.agent_history_logger)
             elif agent_choice == "WhisperAudioAgent":
                 # Whisper audio agent that delegates to Whisper ASR and uses VAD when configured
-                self.audio_agent = WhisperAudioAgent(model_name="whisper-api", audio_config=self.audio_setting)
+                self.audio_agent = WhisperAudioAgent(model_name="whisper-api", audio_config=audio_config)
                 self.task_logger.info(f"Using WhisperAudioAgent with model: {self.audio_setting['audio_agent']}")
             elif agent_choice == "GPT4oAudioAgent":
-                self.audio_agent = GPT4oAudioAgent(model_name="gpt-4o", audio_config=self.audio_setting)
+                self.audio_agent = GPT4oAudioAgent(model_name="gpt-4o", audio_config=audio_config)
                 self.task_logger.info(f"Using GPT4oAudioAgent with model: {self.audio_setting['audio_agent']}")
             else:
                 raise ValueError(f"Unsupported audio model: {agent_choice}")
@@ -244,7 +244,9 @@ class Task:
                 batch_size = self.proofreader_setting["window_size"],
                 stm_len = self.proofreader_setting["short_term_memory_len"],
                 use_short_term_memory = self.proofreader_setting["enable_short_term_memory"],
-                num_workers = self.num_workers
+                num_workers = self.num_workers,
+                usage_log_path = self.usage_log_path,
+                task_id = self.task_id,
             )
             # Set agent history logger for proofreader
             if hasattr(self.proofreader, 'set_agent_history_logger'):
@@ -555,7 +557,9 @@ class Task:
                 logger = self.task_logger,
                 history_len = self.editor_setting["history_length"],
                 user_instruction = combined_instruction,
-                num_workers = self.num_workers
+                num_workers = self.num_workers,
+                usage_log_path = self.usage_log_path,
+                task_id = self.task_id,
             )
             # Set agent history logger for editor
             if hasattr(editor, 'set_agent_history_logger'):

@@ -122,6 +122,7 @@ class ProofreaderAgent:
                 completion_tokens=ct,
                 total_tokens=tt,
                 phrase_index=phrase_index,
+                extra={"agent": "proofreader"},
             )
         except Exception:
             pass

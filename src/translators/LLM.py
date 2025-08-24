@@ -56,6 +56,8 @@ class LLM(AbsApiModel):
                         "total_tokens": tt,
                         "phrase_index": call_idx,
                     }
+                    # Tag agent for aggregation
+                    rec["extra"] = {"agent": "translator"}
                     with open(self.usage_log_path, "a", encoding="utf-8") as fh:
                         fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
         except Exception:
