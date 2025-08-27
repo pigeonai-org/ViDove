@@ -113,7 +113,6 @@ Here's why:
 3. Install Requirments, we switch to use `uv` as our package manager, so you need to install `uv` first.
    ```sh
    curl -LsSf https://astral.sh/uv/install.sh | sh
-   uv venv --python 3.10
    uv sync
    source .venv/bin/activate
    ```
@@ -460,3 +459,4 @@ Use this space to list resources you find helpful and would like to give credit 
 [issues-url]: https://github.com/project-kxkg/ViDove/issues
 [license-shield]: https://img.shields.io/github/license/project-kxkg/ViDove.svg?style=for-the-badge
 [license-url]: https://github.com/project-kxkg/ViDove/blob/main/LICENSE
+
