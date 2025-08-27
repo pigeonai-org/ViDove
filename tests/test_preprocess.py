@@ -3,7 +3,7 @@ import __init_path__
 import unittest
 
 import src.dict_util as dict_util
-from src.srt_util.srt import SrtScript
+from src.SRT.srt import SrtScript
 
 class TestPreprocess(unittest.TestCase):
 

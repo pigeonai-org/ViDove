@@ -1,0 +1,30 @@
+# Result files directory - contains processed videos/subtitles
+results/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual environment
+webvenv/
+
+# Uploaded files (temporary)
+uploads/
+
+# Environment variables
+.env
+.env.local
+.env.production
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
