@@ -20,7 +20,7 @@ MEMEORY:
   enable_local_knowledge: False
   enable_vision_knowledge: True
   enable_web_search: False
-  local_knowledge_path: "/home/macrodove/ViDove/domain_dict"
+  local_knowledge_path: "./domain_dict"
 
 audio:
   enable_audio: True

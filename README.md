@@ -13,7 +13,7 @@
     <img src="images/logo_draft.png" alt="Logo" width="80" height="80">
   </a>
 
-  <h3 align="center">🐦ViDove: RAG Augmented End-to-end Multimodal Translation Agent</h3>
+  <h3 align="center">ViDove: A Translation Agent System with Multimodal Context and Memory-Augmented Reasoning</h3>
 
   <p align="center">
     Transcribe and Translate Your Video with a Single Click
@@ -48,6 +48,9 @@
       </ul>
     </li>
     <li><a href="#usage">Usage</a></li>
+    <li><a href="#dovebench">DoveBench</a></li>
+    <li><a href="#experiments">Experiments</a></li>
+    <li><a href="#citation">Citation</a></li>
     <li><a href="#contributing">Contributing</a></li>
     <li><a href="#license">License</a></li>
     <li><a href="#contact">Contact</a></li>
@@ -55,28 +58,36 @@
 </details>
 
 ## Release
-- [09/07/25] We are happy to release our paper on arXiv： [ViDove: A Translation Agent System with Multimodal Context and Memory-Augmented Reasoning](https://arxiv.org/abs/2507.07306)
+- [09/07/25] 🔥**ViDove V1.0.0:** We are happy to release ViDove V1.0.0 and our paper on arXiv： [ViDove: A Translation Agent System with Multimodal Context and Memory-Augmented Reasoning](https://arxiv.org/abs/2507.07306)
 - [03/03/24]  We are happy to tell you that you could try to use RAG-boosted translation by selecting specific domain assistant in the UI under the translation section.
 - [12/20]🔥**ViDove V0.1 Released**: We are happy to release our initial version of ViDove: End-to-end Video Translation Toolkit. 
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+## Join Us
+**We are looking for talented people to join our team. If you are interested in our project, please send your resume to gggzmz@163.com.**
+
 
 <!-- ABOUT THE PROJECT -->
 ## About The Project
 
 <!-- [![Product Name Screen Shot][product-screenshot]](https://example.com) -->
 
-Introducing **ViDove**, a pioneering video automated machine translation toolkit, meticulously crafted for professional domains. Developed by Pigeon.AI, ViDove promises rapid, precise, and relatable translations, revolutionizing the workflow of subtitle groups and translation professionals. It's an open-source tool, offering unparalleled flexibility, transparency, and security, alongside scalable architecture for customization. Featuring domain adaptation, ViDove effortlessly adjusts to various professional fields, and its end-to-end pipeline turns video links into captioned content with a single click. ViDove is not just a translation tool; it's a bridge connecting content across languages, making video translation more accessible, efficient, and accurate than ever.
-
+Introducing **ViDove**, a translation agent system that brings multimodal context and memory-augmented reasoning into an end-to-end video subtitling workflow. Inspired by professional translators, ViDove coordinates specialized agents (Vision, Auditory, Translation, Proofreader, Editor) over a unified memory to leverage visual/audio cues, domain knowledge, and retrieval-augmented context for accurate, consistent, and scalable translations. The system is open-source, modular, privacy-friendly, and configurable without model fine-tuning.
 
 Here's why:
-* **End-to-End Pipeline** (from video link to captioned video): 
-  - **One-Click Deployment:** Users can deploy the tool with just one click.
-  - **Video Link to Translated Video:** Simply input a video link to generate a translated video with ease.
-* **Domain Adaptation:**
-  - Our pipeline is adaptable to various professional fields (e.g., StarCraft II). Users can easily upload customized dictionaries and fine-tune models based on specific data corpora.
-* **Open Source:**
-  - Our toolkit is entirely open source, and we warmly welcome and look forward to the participation of the broader developer community in the ongoing development of the toolkit.
+* **Multimodal, agentic pipeline** (media/link → subtitles/video):
+  - Ingest YouTube links or local video/audio, extract frames and speech cues, then collaborate across agents to produce bilingual SRT and rendered video.
+  - Modular stages: ASR/SpeechLM → pre_process → LLM translation → post_process → output render.
+* **Memory-augmented reasoning**:
+  - Short-term memory maintains intra-video context (translation history, visual/audio cues) for terminology and style consistency.
+  - Long-term memory integrates domain knowledge and optional web knowledge for better factuality and adaptation.
+* **Retrieval and domain adaptation**:
+  - Domain assistants with RAG and custom dictionaries help preserve terms and tone in specialized fields (e.g., StarCraft II).
+* **Quality and consistency**:
+  - Demonstrates higher BLEU/BLEURT and lower SubER versus strong baselines on DoveBench; see Experiments for tables.
+* **Open and extensible**:
+  - Streamlit UI for quick start; YAML configs in `configs/*.yaml`; plug in ASR models (e.g., Whisper), LLM providers, and tools to fit your environment.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -147,9 +158,17 @@ Here's why:
     ```sh
     python3 entries/run.py --audio_file path/to/audio_file
     ```
+  - Start with SRT input:
+    ```sh
+    python3 entries/run.py --srt_file path/to/subtitles.srt
+    ```
+  - Assistant mode (disables spell check and term correction automatically):
+    ```sh
+    python3 entries/run.py --link "your_youtube_link" --is_assistant True
+    ```
   - Terminal Usage:
     ```sh
-    usage: run.py [-h] [--link LINK] [--video_file VIDEO_FILE] [--audio_file AUDIO_FILE] [--launch_cfg LAUNCH_CFG] [--task_cfg TASK_CFG]
+    usage: run.py [-h] [--link LINK] [--video_file VIDEO_FILE] [--audio_file AUDIO_FILE] [--srt_file SRT_FILE] [--is_assistant IS_ASSISTANT] [--launch_cfg LAUNCH_CFG] [--task_cfg TASK_CFG]
 
     options:
       -h, --help            show this help message and exit
@@ -158,16 +177,30 @@ Here's why:
                             local video path here
       --audio_file AUDIO_FILE
                             local audio path here
+      --srt_file SRT_FILE   srt file input path here
+      --is_assistant IS_ASSISTANT
+                            is assistant mode (True/False)
       --launch_cfg LAUNCH_CFG
                             launch config path
       --task_cfg TASK_CFG   task config path
     ```
 
-### Quick Start with Streamlit User Interface
-   ```sh
-   streamlit run entries/app.py 
-   ```
+  Tips: API source and keys
+  - Edit `configs/local_launch.yaml` to switch API provider and mode:
+    - `api_source: openai | azure`
+    - `environ: local | demo`
+  - If `api_source: openai`, set your key before running:
+    - UNIX: `export OPENAI_API_KEY="your_api_key"`
+    - Windows: `set OPENAI_API_KEY="your_api_key"`
+  - If `api_source: azure`, set your key before running:
+    - UNIX: `export AZURE_OPENAI_API_KEY="your_api_key"`
+    - Windows: `set AZURE_OPENAI_API_KEY="your_api_key"`
+  - Streamlit UI (`entries/app.py`) can accept keys via the interface in `demo` mode; in `local` mode it reads env vars according to `api_source`.
 
+### Quick Start with Streamlit User Interface
+  ```sh
+  streamlit run entries/app.py 
+  ```
 
 ### Configs
   Use "--launch_cfg" and "--task_cfg" in run.py to change launch or task configuration
@@ -175,7 +208,8 @@ Here's why:
     ```yaml
     # launch config for local environment
     local_dump: ./local_dump # change local dump dir here
-    environ: local
+    environ: local # demo or local
+    api_source: openai # openai or azure
     ```
   - configs/task_config.yaml
     
@@ -184,14 +218,41 @@ Here's why:
     # configuration for each task
     source_lang: EN
     target_lang: ZH
-    field: General
+    domain: General
 
-    # ASR config
-    ASR:
-      ASR_model: whisper
-      whisper_config:
-        whisper_model: tiny
-        method: stable
+    # Global parallelism control
+    num_workers: 8
+
+    # Customize User Instruction
+    instructions:
+      - "Keep the translation natural and fluent"
+      - "Use appropriate terminology for the domain"
+      - "Maintain the original tone and style"
+
+    # YouTube Download Option
+    video_download:
+      resolution: 480 # 360, 480, 720, best(best we can find)
+
+    MEMEORY:
+      enable_local_knowledge: False
+      enable_vision_knowledge: True
+      enable_web_search: False
+      local_knowledge_path: ./domain_dict
+
+    audio:
+      enable_audio: True
+      audio_agent: WhisperAudioAgent # GeminiAudioAgent | WhisperAudioAgent | QwenAudioAgent | GPT4oAudioAgent
+      model_path:  # replace it with your own model path
+      VAD_model: API # pyannote/speaker-diarization-3.1
+      src_lang: en
+      tgt_lang: zh
+
+    vision:
+      enable_vision: True
+      vision_model: gpt-4o-mini # CLIP | gpt-4o | gpt-4o-mini
+      model_path: ./ViDove/vision_model/clip-vit-base-patch16 # replace it with your own model path
+      frame_cache_dir: ./cache # should be cleared after task finished
+      frame_per_seg: 4 # number of frames extracted from segment
       
     # pre-process module config
     pre_process: 
@@ -201,20 +262,111 @@ Here's why:
 
     # Translation module config
     translation:
-      model: gpt-4
-      chunk_size: 1000
+      model: gpt-4o # gpt-4 | gpt-4o-mini | gpt-4o | Assistant | Multiagent | RAG | gpt-5 | gpt-5-mini
+      chunk_size: 2000
+      use_history: True     # include recent translation history per request
+      max_retries: 1        # retries per chunk for transient API errors
 
     # post-process module config
-    post_process: 
+    post_process:
+      enable_post_process: True
       check_len_and_split: True
       remove_trans_punctuation: True
+
+    proofreader: 
+      enable_proofreading: True
+      window_size: 5 # number of sentences per proofreading chunk
+      short_term_memory_len: 5 # maximum number of sentences stored in short term memory
+      enable_short_term_memory: False # whether to use short term memory for proofreading
+      verbose: True # whether to print the proofreading process
+
+    editor:
+      enable_editor: True
+      editor_context_window: 10 # number of sentences to be provided as context for the editor(previous and next {n} sentences)
+      history_length: 5 # number of sentences to be provided as history for the editor(previous {n} sentences)
+      user_instruction: none # none | formal | casual | technical
 
     # output type that user receive
     output_type: 
       subtitle: srt
-      video: True
+      video: False
       bilingual: True
     ```
+
+## DoveBench
+
+DoveBench is an open benchmark for long-form video automatic subtitling introduced with ViDove. It focuses on end-to-end media-to-subtitle evaluation under realistic conditions.
+
+- Scale: ~17 hours of videos; average length ~20 minutes per video
+- Annotations: Professional Chinese (ZH) subtitles aligned to timestamps
+- Use cases: Evaluates consistency, terminology fidelity, and readability in long-form scenarios
+- Metrics: BLEU, BLEURT, SubER, SubSONAR, sCOMET (see Experiments)
+- Categories: Includes specialized domains (e.g., StarCraft II) for domain adaptation analysis
+
+Planned release: The SRT data and related resources will be released in this repository in the future. Stay tuned.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+## Experiments
+
+We summarize core findings from our paper on retrieval-augmented, multimodal, and memory-enhanced translation:
+
+- Strong end-to-end performance across media-to-subtitle workflows, improving translation quality and consistency compared to non-contextual baselines.
+- Retrieval-augmented domain assistants reduce terminology errors and improve style adherence in specialized domains.
+- Incorporating multimodal visual cues helps disambiguate entities and improves subtitle readability on challenging clips.
+- Memory-augmented reasoning maintains cross-segment consistency for names, terms, and speaker styles over longer videos.
+
+For full benchmarks, datasets, and ablation details, please see the paper: [ViDove: A Translation Agent System with Multimodal Context and Memory-Augmented Reasoning](https://arxiv.org/abs/2507.07306).
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+### Main Results
+
+ViDove compared with baseline systems on DoveBench and BigVideo:
+
+| Model              | DoveBench BLEU (↑) | BLEURT (↑) | SubER (↓) | SubSONAR (↑) | BigVideo BLEU (↑) | sCOMET (↑) |
+|--------------------|--------------------:|-----------:|----------:|-------------:|------------------:|-----------:|
+| Gemini-2.5-Flash   |               8.11  |      17.21 |    103.46 |         0.31 |             26.43 |      **0.75** |
+| Qwen-2.5-Omni      |              14.60  |      13.83 |    108.94 |         0.39 |             10.67 |       0.58 |
+| VideoCaptioner     |              12.65  |      14.62 |     85.75 |      **0.41** |         **30.36** |      **0.75** |
+| Whisper + DelTA    |              18.26  |      12.30 |     86.83 |         0.28 |             29.09 |       0.69 |
+| ViDove             |            **23.51** |   **19.55** | **73.38** |         0.39 |             26.05 |       0.73 |
+
+- On DoveBench, ViDove achieves the best BLEU (23.51), BLEURT (19.55), and lowest SubER (73.38).
+- Compared to the strongest baseline (Whisper + DelTA), ViDove is +28.8% BLEU, +58.9% BLEURT, and −15.5% SubER.
+- On BigVideo, VideoCaptioner leads BLEU (30.36) and ties sCOMET (0.75) with Gemini-2.5-Flash; ViDove is competitive (BLEU 26.05, sCOMET 0.73).
+
+### Ablation Study (DoveBench subset)
+
+| Model Variant                    | BLEU (↑) | SubER (↓) | BLEURT (↑) |
+|----------------------------------|---------:|----------:|-----------:|
+| ViDove (full)                    |    15.84 |     76.26 |      17.11 |
+| w/o domain memory                |    14.86 |     77.31 |      17.84 |
+| w/o domain memory & vision       |    14.56 |     77.55 |      17.50 |
+| w/o Proofreader                  |    13.56 |     80.76 |      16.93 |
+
+Observations:
+- Domain memory improves BLEU and reduces SubER; removing it degrades consistency.
+- Proofreader removal causes the largest quality drop, showing its importance for corrections and consistency.
+- Vision has limited effect on BLEU/BLEURT averages but helps entity-level correctness for names/objects.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+## Citation
+
+If you find ViDove useful for your research or applications, please cite our paper:
+
+```bibtex
+@misc{lu2025vidovetranslationagentmultimodal,
+      title={ViDove: A Translation Agent System with Multimodal Context and Memory-Augmented Reasoning}, 
+      author={Yichen Lu and Wei Dai and Jiaen Liu and Ching Wing Kwok and Zongheng Wu and Xudong Xiao and Ao Sun and Sheng Fu and Jianyuan Zhan and Yian Wang and Takatomo Saito and Sicheng Lai},
+      year={2025},
+      eprint={2507.07306},
+      archivePrefix={arXiv},
+      primaryClass={cs.AI},
+      url={https://arxiv.org/abs/2507.07306}, 
+}
+```
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
