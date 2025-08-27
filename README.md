@@ -13,7 +13,7 @@
     <img src="images/logo_draft.png" alt="Logo" width="80" height="80">
   </a>
 
-  <h3 align="center">🐦ViDove: RAG Augmented End-to-end Video Translation Toolkit</h3>
+  <h3 align="center">🐦ViDove: RAG Augmented End-to-end Multimodal Translation Agent</h3>
 
   <p align="center">
     Transcribe and Translate Your Video with a Single Click
@@ -21,11 +21,13 @@
     <a href="https://pigeonai.club/"><strong>Offical Website »</strong></a>
     <br />
     <br />
-    <a href="http://43.153.174.128:7860/">Try Demo</a>
+    <a href="https://arxiv.org/abs/2507.07306">📃 Paper</a>
+    <!-- ·
+    <a href="https://pigeonai.club/">🌐 Demo</a> -->
     ·
-    <a href="https://github.com/project-kxkg/ViDove/issues">Report Bug</a>
+    <a href="https://github.com/project-kxkg/ViDove/issues">🐛 Report Bug</a>
     ·
-    <a href="https://github.com/project-kxkg/ViDove/issues">Request Feature</a>
+    <a href="https://github.com/project-kxkg/ViDove/issues">💡 Request Feature</a>
   </p>
 </div>
 
@@ -53,6 +55,7 @@
 </details>
 
 ## Release
+- [09/07/25] We are happy to release our paper on arXiv： [ViDove: A Translation Agent System with Multimodal Context and Memory-Augmented Reasoning](https://arxiv.org/abs/2507.07306)
 - [03/03/24]  We are happy to tell you that you could try to use RAG-boosted translation by selecting specific domain assistant in the UI under the translation section.
 - [12/20]🔥**ViDove V0.1 Released**: We are happy to release our initial version of ViDove: End-to-end Video Translation Toolkit. 
 
@@ -78,17 +81,9 @@ Here's why:
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 ## Main Contributors
-[![](https://github.com/yichen14.png?size=50)](https://github.com/yichen14)
-[![](https://github.com/TheAnsIs42.png?size=50)](https://github.com/TheAnsIs42)
-[![](https://github.com/JiaenLiu.png?size=50)](https://github.com/JiaenLiu)
-[![](https://github.com/worldqwq.png?size=50)](https://github.com/worldqwq)
-[![](https://github.com/Yuhan-Lu.png?size=50)](https://github.com/Yuhan-Lu)
-[![](https://github.com/CanYing0913.png?size=50)](https://github.com/CanYing0913)
-[![](https://github.com/willbe03.png?size=50)](https://github.com/willbe03)
-[![](https://github.com/pinqian77.png?size=50)](https://github.com/pinqian77)
-
-[**Web Dev: Tingyu Su**](https://www.sutingyu.com/)
-
+<a href="https://github.com/pigeonai-org/ViDove/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=pigeonai-org/ViDove"  alt="contributors"/>
+</a>
 
 
 <!-- GETTING STARTED -->
@@ -104,12 +99,12 @@ Here's why:
    git clone https://github.com/project-kxkg/ViDove.git
    cd ViDove
    ```
-3. Install Requirments
+3. Install Requirments, we switch to use `uv` as our package manager, so you need to install `uv` first.
    ```sh
-   conda create -n ViDove python=3.10 -y
-   conda activate ViDove
-   pip install --upgrade pip
-   pip install -r requirements.txt
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   uv venv --python 3.10
+   uv sync
+   source .venv/bin/activate
    ```
 4. Enter your API in bash
    
@@ -139,11 +134,6 @@ Here's why:
 <!-- USAGE EXAMPLES -->
 ## Usage
 
-### Quick Start with Gradio User Interface
-   ```sh
-   python3 entries/app.py
-   ```
-
 ### Launch with configs
   - Start with Youtube Link input:
     ```sh
@@ -172,6 +162,12 @@ Here's why:
                             launch config path
       --task_cfg TASK_CFG   task config path
     ```
+
+### Quick Start with Streamlit User Interface
+   ```sh
+   streamlit run entries/app.py 
+   ```
+
 
 ### Configs
   Use "--launch_cfg" and "--task_cfg" in run.py to change launch or task configuration

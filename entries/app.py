@@ -3,7 +3,7 @@ from pathlib import Path
 from uuid import uuid4
 from cryptography.fernet import Fernet
 import os 
-import gradio as gr
+import streamlit as st
 import stable_whisper
 import torch
 from yaml import Loader, load
@@ -14,7 +14,7 @@ launch_config = "./configs/local_launch.yaml"
 task_config = './configs/task_config.yaml'
 launch_cfg = load(open(launch_config), Loader=Loader)
 LAUNCH_MODE = launch_cfg["environ"]
-
+API_SOURCE = launch_cfg["api_source"]
 
 model_dict = {"stable_large": None, "stable_medium": None, "stable_base": None}
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -32,25 +32,32 @@ def init(apikey, opt_resolution, opt_post, opt_pre, output_type, src_lang, tgt_l
             try:
                 fernet = Fernet(VIDOVE_DECODE_KEY.encode())
                 apikey = fernet.decrypt(apikey.encode()).decode()
-            except:  # noqa: E722
-                raise gr.Error("Invalid API key")
-            task_cfg["AZURE_OPENAI_API_KEY"] = apikey 
+            except:
+                raise st.error("Invalid API key")
+            if API_SOURCE == "openai":
+                task_cfg["OPENAI_API_KEY"] = apikey
+            elif API_SOURCE == "azure":
+                task_cfg["AZURE_OPENAI_API_KEY"] = apikey
         else:
-            task_cfg["AZURE_OPENAI_API_KEY"] = os.getenv("AZURE_OPENAI_API_KEY")
+            if API_SOURCE == "openai":
+                task_cfg["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
+            elif API_SOURCE == "azure":
+                task_cfg["AZURE_OPENAI_API_KEY"] = os.getenv("AZURE_OPENAI_API_KEY")
             translation_model = "gpt-4o-mini"
             resolution = 480
-            gr.Warning("Free Mode: API key is not provided, you can only use gpt-4o-mini model for translation. And the video resolution is set to <=480p.")
+            st.warning("Free Mode: API key is not provided, you can only use gpt-4o-mini model for translation. And the video resolution is set to <=480p.")
     elif LAUNCH_MODE == "local":
         if apikey != "":
             task_cfg["AZURE_OPENAI_API_KEY"] = apikey
         else:
             task_cfg["AZURE_OPENAI_API_KEY"] = os.getenv("AZURE_OPENAI_API_KEY")
-            print(os.getenv("AZURE_OPENAI_API_KEY"))
     else:
-        raise gr.Error("Invalid Launch Mode")
-    
-    print(f"API Key: {task_cfg['AZURE_OPENAI_API_KEY']}")
+        st.error("Invalid Launch Mode")
+        return None, None, None, None
 
+    print(f"API Key: {task_cfg['AZURE_OPENAI_API_KEY']}")
+    task_cfg["api_source"] = API_SOURCE
+    
     task_cfg["video_download"]["resolution"] = resolution
     task_cfg["source_lang"] = src_lang
     if src_lang == "ZH":
@@ -124,93 +131,179 @@ def init(apikey, opt_resolution, opt_post, opt_pre, output_type, src_lang, tgt_l
 
 def process_input(apikey, video_file, audio_file, srt_file, youtube_link, opt_resolution, src_lang, tgt_lang, domain, opt_asr_method, opt_post, opt_pre, output_type, chunk_size, translation_model):
     task_id, task_dir, task_cfg, pre_load_asr_model = init(apikey, opt_resolution, opt_post, opt_pre, output_type, src_lang, tgt_lang, domain, opt_asr_method, chunk_size, translation_model)
+    
+    
+    # save video file to the local_dump directory, and then use the path to create a Task instance
+        
     if youtube_link:
+        
         task = Task.fromYoutubeLink(youtube_link, task_id, task_dir, task_cfg)
         task.run(pre_load_asr_model)
         return task.result, task.log_dir
     elif audio_file is not None:
-        task = Task.fromAudioFile(audio_file.name, task_id, task_dir, task_cfg)
+        audio_file_path = os.path.join(task_dir, audio_file.name)
+        with open(audio_file_path, "wb") as f:
+            f.write(audio_file.getbuffer())
+        
+        task = Task.fromAudioFile(audio_file_path, task_id, task_dir, task_cfg)
         task.run(pre_load_asr_model)
         return task.result, task.log_dir
     elif srt_file is not None:
-        task = Task.fromSRTFile(srt_file.name, task_id, task_dir, task_cfg)
+        srt_file_path = os.path.join(task_dir, srt_file.name)
+        with open(srt_file_path, "wb") as f:
+            f.write(srt_file.getbuffer())
+        
+        task = Task.fromSRTFile(srt_file_path, task_id, task_dir, task_cfg)
         task.run()
         return task.result, task.log_dir
     elif video_file is not None:
-        task = Task.fromVideoFile(video_file, task_id, task_dir, task_cfg)
+        video_file_path = os.path.join(task_dir, video_file.name)
+        with open(video_file_path, "wb") as f:
+            f.write(video_file.getbuffer())
+        
+        # task = Task.fromVideoFile(video_file, task_id, task_dir, task_cfg)
+        task = Task.fromVideoFile(video_file_path, task_id, task_dir, task_cfg)
         task.run(pre_load_asr_model)
         return task.result, task.log_dir
     else:
         return None
 
-
-with gr.Blocks() as demo:
-    gr.Markdown("# ViDove V0.1.1: Pigeon AI Video Translation Toolkit Demo")
-    gr.Markdown("### General Information")
-    gr.Markdown("[Official Website](https://pigeonai.club/) / [Github](https://github.com/pigeonai-org/ViDove) / [Discord](https://discord.gg/9EcCBvAN87) / [Feedback Form](https://wj.qq.com/s2/14361192/a182/) / [Bilibili](https://space.bilibili.com/195670539)")
-    gr.Markdown("Discussion Group(QQ): 749825364 / Email: gggzmz@163.com")
-    gr.Markdown("**Please give us a star on GitHub!**")
-
-    gr.Markdown("### Update Log")
-    gr.Markdown("- 2024-04-05: ViDove V0.1.1 is released! Now we support SC2 domain expert translation model.")
-    gr.Markdown("- 2024-04-05: ViDove V0.1.1 已发布! 现在可以使用针对星际2领域的翻译模型.")
-
-    gr.Markdown("### Purchase")
-    gr.Markdown("Note that you can use our demo without purchasing an API key, but you can only use the **gpt-3.5-turbo** model for translation. If you want to use other models, please purchase an API key.")
-    gr.Markdown("**注意** ：你可以不填写API key即可使用我们的demo,但是你只能使用 **gpt-3.5-turbo** 模型.如果你需要使用更多模型,除了自己本地部署外,可以点击下方链接购买专用API key.")
-    gr.Markdown("[Purchase API Key Here](https://afdian.com/a/gggzmz)")
+def main():
+    st.set_page_config(page_title="ViDove: Pigeon AI Video Translation Toolkit", layout="wide")
     
-    gr.Markdown("### Input")
+    st.title("ViDove V0.1.1: Pigeon AI Video Translation Toolkit Demo")
+    
+    st.markdown("### General Information")
+    st.markdown("[Official Website](https://pigeonai.club/) / [Github](https://github.com/pigeonai-org/ViDove) / [Discord](https://discord.gg/9EcCBvAN87) / [Feedback Form](https://wj.qq.com/s2/14361192/a182/) / [Bilibili](https://space.bilibili.com/195670539)")
+    st.markdown("Discussion Group(QQ): 749825364 / Email: gggzmz@163.com")
+    st.markdown("**Please give us a star on GitHub!**")
 
-    apikey = gr.components.Textbox(label="Insert Your API Key Here", type="password")
-    with gr.Tab("Youtube Link"):
-        link = gr.components.Textbox(label="Enter a YouTube URL")
+    with st.expander("Update Log"):
+        st.markdown("- 2024-04-05: ViDove V0.1.1 is released! Now we support SC2 domain expert translation model.")
+        st.markdown("- 2024-04-05: ViDove V0.1.1 已发布! 现在可以使用针对星际2领域的翻译模型.")
+
+    with st.expander("Purchase"):
+        st.markdown("Note that you can use our demo without purchasing an API key, but you can only use the **gpt-3.5-turbo** model for translation. If you want to use other models, please purchase an API key.")
+        st.markdown("**注意** ：你可以不填写API key即可使用我们的demo,但是你只能使用 **gpt-3.5-turbo** 模型.如果你需要使用更多模型,除了自己本地部署外,可以点击下方链接购买专用API key.")
+
+        st.markdown("[Purchase API Key Here](https://afdian.com/a/gggzmz)")
+    
+    with st.sidebar:
+        st.header("Settings")
+        apikey = st.text_input("Insert Your API Key Here", type="password")
+        
+        st.subheader("Language and Domain Settings")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            opt_src = st.selectbox("Select Source Language", ["EN", "ZH", "KR"], index=0)
+        with col2:
+            opt_tgt = st.selectbox("Select Target Language", ["ZH", "EN", "KR"], index=0)
+        with col3:
+            opt_domain = st.selectbox("Select Dictionary", ["General", "SC2", "CS:GO"], index=0)
+            
+        if opt_src == opt_tgt:
+            st.error("Source and Target Language should be different")
+        
+        st.subheader("ASR Settings")
+        if device.type == "cuda":
+            opt_asr_method = st.selectbox(
+                "Select ASR Module Inference Method",
+                ["whisper-api", "stable-whisper-base", "stable-whisper-medium", "stable-whisper-large"],
+                index=3,
+                help="use api if you don't have GPU"
+            )
+        else:
+            opt_asr_method = st.selectbox(
+                "Select ASR Module Inference Method",
+                ["whisper-api", "stable-whisper-base", "stable-whisper-medium"],
+                index=0,
+                help="use api if you don't have GPU"
+            )
+            
+        st.subheader("Pre-process Settings")
+        default_pre = ["Sentence form", 'Term Correct'] if opt_src == "EN" else []
+        opt_pre = st.multiselect(
+            "Pre-process Module",
+            ["Sentence form", "Spell Check", "Term Correct"],
+            default=default_pre,
+            help="Pre-process module settings"
+        )
+        
+        st.subheader("Post-process Settings")
+        opt_post = st.multiselect(
+            "Post-process Module",
+            ["Split Sentence", "Remove Punc"],
+            default=["Split Sentence", "Remove Punc"],
+            help="Post-process module settings"
+        )
+        
+        st.subheader("Translation Settings")
+        translation_model = st.selectbox(
+            "Select Translation Model",
+            ["gpt-3.5-turbo", "gpt-4", "gpt-4o", "SC2 Domain Expert(beta test)"],
+            index=2
+        )
+        
+        default_chunksize = 2000 if opt_src == "EN" else 100
+        chunk_size = st.number_input("Chunk Size", value=default_chunksize, help="100 for ZH as source language")
+        
+        st.subheader("Output Settings")
+        opt_out = st.multiselect("Output Settings", ["Bilingual", "Video File", ".ass output"], default=[], help="What do you want?")
+        
         resolution_choices = ["best", "720p", "480p", "360p"]
         if LAUNCH_MODE == "demo":
             resolution_choices = ["720p", "480p", "360p"]
-        opt_resolution = gr.components.Dropdown(choices=resolution_choices, label="Select Resolution", value="480p")
-    with gr.Tab("Video File"):
-        video = gr.components.Video(label="Upload a video")
-    with gr.Tab("Audio File"):
-        audio = gr.File(label="Upload an Audio File")
-    with gr.Tab("SRT File"):
-        srt = gr.File(label="Upload a SRT file")
+        opt_resolution = st.selectbox("Select Resolution", resolution_choices, index=1)
 
-    gr.Markdown("### Settings")
-    with gr.Row():
-        opt_src = gr.components.Dropdown(choices=["EN", "ZH", "KR"], label="Select Source Language", value="EN")
-        opt_tgt = gr.components.Dropdown(choices=["ZH", "EN", "KR"], label="Select Target Language", value="ZH")
-        if opt_src.value == opt_tgt.value:
-            gr.Error("Source and Target Language should be different")
-        opt_domain = gr.components.Dropdown(choices=["General", "SC2"], label="Select Dictionary", value="General")
-    with gr.Tab("ASR"):
-        if device.type == "cuda":
-            opt_asr_method = gr.components.Dropdown(choices=["whisper-api", "stable-whisper-base", "stable-whisper-medium", "stable-whisper-large"], label="Select ASR Module Inference Method", value="stable-whisper-large", info="use api if you don't have GPU")
-        else:
-            opt_asr_method = gr.components.Dropdown(choices=["whisper-api", "stable-whisper-base", "stable-whisper-medium"], label="Select ASR Module Inference Method", value="whisper-api", info="use api if you don't have GPU")
-    with gr.Tab("Pre-process"):
-        default_pre = ["Sentence form", 'Term Correct'] if opt_src.value == "EN" else []
-        opt_pre = gr.CheckboxGroup(["Sentence form", "Spell Check", "Term Correct"], label="Pre-process Module", info="Pre-process module settings", value=default_pre)
-    with gr.Tab("Post-process"):
-        opt_post = gr.CheckboxGroup(["Split Sentence", "Remove Punc"], label="Post-process Module", info="Post-process module settings", value=["Split Sentence", "Remove Punc"])
-    with gr.Tab("Translation"):
-        gr.Markdown("## Translation Settings:")
-        translation_model = gr.Dropdown(choices=["gpt-4o-mini", "gpt-4o", "SC2 Domain Expert(beta test)"], label="Select Translation Model", value="gpt-4o")
-        default_chunksize = 2000 if opt_src.value == "EN" else 100
-        chunk_size = gr.Number(value=default_chunksize, info="100 for ZH as source language")
+    # Main content area
+    st.header("Input")
     
-    opt_out = gr.CheckboxGroup(["Bilingual"], label="Output Settings", info="What do you want?")
-
-    submit_button = gr.Button("Submit")
-
-    gr.Markdown("### Output")
-    file_output = gr.components.File(label="SRT Output")
-    gr.Markdown("##### If you have any issue, please download the log file and send it to us via email or discord.")
-    log_output = gr.components.File(label="Log Output")
-
-    submit_button.click(process_input, inputs=[apikey, video, audio, srt, link, opt_resolution, opt_src, opt_tgt, opt_domain, opt_asr_method, opt_post, opt_pre, opt_out, chunk_size, translation_model], outputs=[file_output, log_output])
+    tab1, tab2, tab3, tab4 = st.tabs(["YouTube Link", "Video File", "Audio File", "SRT File"])
+    
+    with tab1:
+        youtube_link = st.text_input("Enter a YouTube URL")
+    with tab2:
+        video_file = st.file_uploader("Upload a video")
+        # video_file = st.file_uploader("Upload a video", type=['mp4', 'avi', 'mov', 'mkv'])
+    with tab3:
+        audio_file = st.file_uploader("Upload an Audio File")
+        # audio_file = st.file_uploader("Upload an Audio File", type=['mp3', 'wav'])
+    with tab4:
+        srt_file = st.file_uploader("Upload a SRT file", type=['srt'])
+    
+    if st.button("Submit"):
+        # Show progress and processing info
+        with st.spinner("Processing your request..."):
+            result, log_dir = process_input(
+                apikey, video_file, audio_file, srt_file, youtube_link, 
+                opt_resolution, opt_src, opt_tgt, opt_domain, opt_asr_method, 
+                opt_post, opt_pre, opt_out, chunk_size, translation_model
+            )
+            
+            if result:
+                st.success("Processing complete!")
+                st.header("Output")
+                
+                with open(result, "rb") as file:
+                    st.download_button(
+                        label="Download SRT Output",
+                        data=file,
+                        file_name=os.path.basename(result),
+                        mime="text/plain"
+                    )
+                
+                if log_dir:
+                    with open(log_dir, "rb") as file:
+                        st.download_button(
+                            label="Download Log File",
+                            data=file,
+                            file_name=os.path.basename(log_dir),
+                            mime="text/plain"
+                        )
+                    st.markdown("If you have any issue, please download the log file and send it to us via email or discord.")
+            else:
+                st.error("Processing failed, please check your input and settings.")
 
 if __name__ == "__main__":
     print(f"Launch Mode: {LAUNCH_MODE}")
-    demo.queue(max_size=5)
-    demo.launch(show_error=True)
+    main()

@@ -2,7 +2,7 @@ import __init_path__
 # refactor it by using unittest and pytest
 import unittest
 from src.translators import LLM, translation
-from src.srt_util.srt import SrtScript
+from src.SRT.srt import SrtScript
 
 class TestTranslation(unittest.TestCase):
     def test_LLM_task(self):

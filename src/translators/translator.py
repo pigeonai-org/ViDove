@@ -1,17 +1,23 @@
 import logging
 import traceback
-from time import sleep
 import warnings
-import openai
+from time import sleep
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import random
 
+import openai
+from llama_index.core import PromptTemplate
 from tqdm import tqdm
 
-from src.srt_util.srt import split_script
+from src.memory.basic_rag import BasicRAG
+from src.memory.direct_search_RAG import TavilySearchRAG
+from src.SRT.srt import split_script
+from src.translators.assistant import Assistant
+from src.translators.LLM import LLM
+from src.translators.MTA import MTA
 
-from .assistant import Assistant
-from .basic_rag import BasicRAG
-from .LLM import LLM
-from .MTA import MTA
+from .prompts import system_prompt
+from .prompts import get_input_prompt
 
 SUPPORT_LANG_MAP = {
     "EN": "English",
@@ -28,10 +34,14 @@ SUPPORT_LANG_MAP = {
 
 class Translator:
     def __init__(
-        self, model_name, src_lang, tgt_lang, domain, task_id, client, chunk_size=1000
+        self, model_name, src_lang, tgt_lang, domain, task_id, client, local_knowledge:BasicRAG=None, web_search:TavilySearchRAG=None, vision_knowledge:BasicRAG=None, chunk_size=1000, usage_log_path: str | None = None,
     ):
         self.task_logger = logging.getLogger(f"task_{task_id}")
         self.task_logger.info("initializing translator")
+
+        self.agent_history_logger = logging.getLogger(f"agent_history_{task_id}")
+        self.agent_history_logger.setLevel(logging.INFO)
+
         self.model_name = model_name
         self.chunk_size = chunk_size
         self.src_lang = src_lang
@@ -40,15 +50,20 @@ class Translator:
         self.task_id = task_id
         self.system_prompt = self.prompt_selector()
         self.client = client
+        self.local_knowledge = local_knowledge
+        self.web_search = web_search
+        self.vision_knowledge = vision_knowledge
+        self.translation_history = []
         self.srt = None
+        self.usage_log_path = usage_log_path
 
         if self.model_name == "Assistant":
             self.translator = Assistant(
                 self.client, system_prompt=self.system_prompt, domain=domain
             )
-        elif self.model_name in ["gpt-4o-mini", "gpt-4o"]:
+        elif self.model_name in ["gpt-4o-mini", "gpt-4o", "gpt-5", "gpt-5-mini", "gpt-5-nano"]:
             self.translator = LLM(
-                self.client, self.model_name, system_prompt=self.system_prompt
+                self.client, self.model_name, system_prompt=self.system_prompt, task_id=self.task_id, usage_log_path=self.usage_log_path
             )
         elif self.model_name == "Multiagent":
             self.translator = MTA(
@@ -62,8 +77,6 @@ class Translator:
             )
         elif self.model_name == "RAG":
             self.translator = BasicRAG(
-                self.src_lang,
-                self.tgt_lang,
                 self.task_logger,
                 self.domain,
                 self.model_name,
@@ -80,24 +93,26 @@ class Translator:
             srt.get_source_only(), self.chunk_size
         )
         self.task_logger.info("SRT file set")
+        self.agent_history_logger.info('{"role": "translator", "message": "Got the SRT! Time to flex my translation muscles! 💪"}')
 
-    def prompt_selector(self):
+    def prompt_selector(self) -> PromptTemplate:
         try:
             src_lang = SUPPORT_LANG_MAP[self.src_lang]
             tgt_lang = SUPPORT_LANG_MAP[self.tgt_lang]
             assert src_lang != tgt_lang
-        except:
+        except Exception:
             print("Unsupported language, is your abbreviation correct?")
             print(f"supported language map: {SUPPORT_LANG_MAP}")
             self.task_logger.info(
-                f"Unsupported language detected: {src_lang} to {tgt_lang}"
+                f"Unsupported language detected: {self.src_lang} to {self.tgt_lang}"
             )
 
-        prompt = f"""
-            you are a translation assistant, your job is to translate a video in domain of {self.domain} from {src_lang} to {tgt_lang},
-            you will be provided with a segement in {src_lang} parsed by line, where your translation text should keep the original
-            meaning and the number of lines. DO NOT INCLUDE THE INDEX NUMBER IN YOUR TRANSLATION.  /n/n
-            """
+        prompt = PromptTemplate(system_prompt).format(
+            domain=self.domain,
+            source_language=src_lang,
+            target_language=tgt_lang,
+        )
+        
         self.task_logger.info(f"System Prompt: {prompt}")
         return prompt
 
@@ -116,6 +131,9 @@ class Translator:
         if self.system_prompt is None:
             self.system_prompt = "你是一个翻译助理，你的任务是翻译视频，你会被提供一个按行分割的英文段落，你需要在保证句意和行数的情况下输出翻译后的文本。"
             self.task_logger.info(f"translation prompt: {self.system_prompt}")
+        
+        self.agent_history_logger.info('{"role": "translator", "message": "Starting translation process with knowledge retrieval... "}')
+        
         previous_length = 0
         for sentence, range_ in tqdm(zip(self.script_arr, self.range_arr)):
             # update the range based on previous length
@@ -126,7 +144,25 @@ class Translator:
             retry_count = 0
             while retry_count < max_retries:
                 try:
-                    translation = self.translator.send_request(sentence)
+                    # add knowledge retrieve before translation
+                    # TODO: disable the knowledge if assistant is active
+                    # convert nodes to string
+
+                    input_dict = {}
+                    if len(self.translation_history) != 0:
+                        input_dict["history_str"] = "\n".join(self.translation_history[-5:])
+                    if self.local_knowledge is not None:
+                        input_dict["context_str"] = self.local_knowledge.retrieve_relevant_nodes(sentence)
+                    if self.web_search is not None:
+                        input_dict["supporting_documents"] = self.web_search.retrieve_relevant_nodes(sentence)
+                    if self.vision_knowledge is not None:
+                        input_dict["video_clips_description"] = self.vision_knowledge.retrieve_relevant_nodes(sentence)
+                    input_dict["query_str"] = sentence
+
+                    input = get_input_prompt(self.domain, self.src_lang, self.tgt_lang, input_dict)
+
+                    translation = self.translator.send_request(input)
+                    self.translation_history.append(translation)
                     break  # Success - exit the loop
                 except openai.BadRequestError as e:
                     retry_count += 1
@@ -165,3 +201,141 @@ class Translator:
             self.task_logger.info(f"source text: {sentence}")
             self.task_logger.info(f"translate text: {translation}")
             self.srt.set_translation(translation, range_, self.model_name, self.task_id)
+        
+        self.agent_history_logger.info('{"role": "translator", "message": "Whew, translation marathon complete! If you spot a typo, it was totally intentional..."}')
+
+    def translate_parallel(self, max_workers: int = 4, max_retries: int = 2, use_history: bool = True):
+        """
+        Parallel translation for API-based models (e.g., LLM) using a thread pool.
+
+        Guarantees output ordering by collecting results and applying them in original chunk order.
+        - max_workers: number of parallel threads
+        - max_retries: retries per chunk on transient errors (e.g., rate limits)
+        - use_history: whether to include recent translation history per request
+                        (off by default to avoid cross-thread coupling)
+        """
+        if self.srt is None:
+            raise ValueError("SRT file not set")
+
+        # Only enable parallelism for API LLM-style models we know are stateless per request
+        api_models = {"gpt-4o-mini", "gpt-4o", "gpt-5", "gpt-5-mini", "gpt-5-nano"}
+        if self.model_name not in api_models:
+            self.task_logger.info(
+                f"Model {self.model_name} is not an API LLM; falling back to sequential translate()."
+            )
+            return self.translate(max_retries=max_retries)
+
+        if self.system_prompt is None:
+            self.system_prompt = "你是一个翻译助理，你的任务是翻译视频，你会被提供一个按行分割的英文段落，你需要在保证句意和行数的情况下输出翻译后的文本。"
+            self.task_logger.info(f"translation prompt: {self.system_prompt}")
+
+        self.agent_history_logger.info('{"role": "translator", "message": "Starting parallel translation with knowledge retrieval..."}')
+
+        # Build job list with absolute index ranges (like sequential logic)
+        jobs = []  # (idx, sentence, (start, end))
+        previous_length = 0
+        for idx, (sentence, range_) in enumerate(zip(self.script_arr, self.range_arr)):
+            abs_range = (range_[0] + previous_length, range_[1] + previous_length)
+            jobs.append((idx, sentence, abs_range))
+
+        if not jobs:
+            self.task_logger.info("No chunks to translate; skipping.")
+            return
+
+        # local helper: build input with optional knowledge; do not mutate shared state
+        def build_input_for(sentence: str, idx: int):
+            input_dict = {}
+            if use_history and len(self.translation_history) != 0:
+                input_dict["history_str"] = "\n".join(self.translation_history[-5:])
+            if self.local_knowledge is not None:
+                input_dict["context_str"] = self.local_knowledge.retrieve_relevant_nodes(sentence)
+            if self.web_search is not None:
+                input_dict["supporting_documents"] = self.web_search.retrieve_relevant_nodes(sentence)
+            if self.vision_knowledge is not None:
+                input_dict["video_clips_description"] = self.vision_knowledge.retrieve_relevant_nodes(sentence)
+            input_dict["query_str"] = sentence
+            return get_input_prompt(self.domain, self.src_lang, self.tgt_lang, input_dict)
+
+        def translate_one(idx: int, sentence: str):
+            retry_count = 0
+            last_err = None
+            while retry_count <= max_retries:
+                try:
+                    prompt_input = build_input_for(sentence, idx)
+                    translation = self.translator.send_request(prompt_input)
+                    return translation
+                except openai.BadRequestError as e:
+                    # content filter or invalid request; do not retry beyond configured
+                    retry_count += 1
+                    last_err = e
+                    try:
+                        error_response = e.response.json()
+                        filter_results = error_response['error']['innererror']['content_filter_result']
+                        filtered_categories = [
+                            category for category, details in filter_results.items()
+                            if details.get('filtered') is True
+                        ]
+                        filtered_with_severity = {
+                            category: details['severity']
+                            for category, details in filter_results.items()
+                            if details.get('filtered') is True
+                        }
+                        self.task_logger.warning(
+                            f"BadRequestError on idx={idx}. Filtered: {filtered_categories} severity={filtered_with_severity}"
+                        )
+                    except Exception:
+                        # best-effort parsing
+                        pass
+                    if retry_count <= max_retries:
+                        # short backoff
+                        sleep(2)
+                except (openai.RateLimitError, openai.APIError, openai.APIConnectionError, openai.InternalServerError, TimeoutError) as e:
+                    retry_count += 1
+                    last_err = e
+                    backoff = min(10, 1 + retry_count * 2) + random.random()
+                    self.task_logger.info(
+                        f"Transient error on idx={idx} (attempt {retry_count}/{max_retries}). Backing off {backoff:.1f}s"
+                    )
+                    sleep(backoff)
+                except Exception as e:
+                    # Unknown error: do one retry then give up
+                    retry_count += 1
+                    last_err = e
+                    self.task_logger.debug(
+                        f"Unexpected error for idx={idx}: {e}\n{traceback.format_exc()}"
+                    )
+                    sleep(1)
+            # Max retries exceeded
+            warnings.warn(f"Max retries reached, skipping translation for chunk {idx}")
+            if last_err is not None:
+                self.task_logger.warning(f"Failed to translate chunk {idx}: {last_err}")
+            return ""
+
+        results: dict[int, tuple[str, tuple[int, int]]] = {}
+
+        self.task_logger.info(f"Submitting {len(jobs)} translation chunks with {max_workers} workers...")
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_map = {executor.submit(translate_one, idx, sentence): (idx, abs_range)
+                          for idx, sentence, abs_range in jobs}
+
+            for future in as_completed(future_map):
+                idx, abs_range = future_map[future]
+                try:
+                    translation = future.result()
+                except Exception as e:
+                    self.task_logger.warning(f"Worker crashed on chunk {idx}: {e}")
+                    translation = ""
+                results[idx] = (translation, abs_range)
+                # optional: update translation_history in submission order only when use_history
+                if use_history and translation:
+                    self.translation_history.append(translation)
+
+        # Apply results in order to keep deterministic output
+        for idx in sorted(results.keys()):
+            translation, abs_range = results[idx]
+            sentence = self.script_arr[idx]
+            self.task_logger.info(f"source text: {sentence}")
+            self.task_logger.info(f"translate text: {translation}")
+            self.srt.set_translation(translation, abs_range, self.model_name, self.task_id)
+
+        self.agent_history_logger.info('{"role": "translator", "message": "Parallel translation complete. All chunks processed."}')
