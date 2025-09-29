@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from uuid import uuid4
+from openai import OpenAI
 
 from src.audio.ASR import ASR
 from src.audio.audio_prompt import (
@@ -12,6 +13,7 @@ from src.audio.audio_prompt import (
     AUDIO_TRANSCRIBE_PROMPT_WITH_VISUAL_CUES,
 )
 from src.audio.VAD import VAD
+from src.audio.vad_agent import create_vad
 
 
 class AudioAgent(ABC):
@@ -26,13 +28,17 @@ class AudioAgent(ABC):
         # Initialize VAD only if configured
         self.VAD_model = None
         if all(k in self.audio_config for k in ("VAD_model", "src_lang", "tgt_lang")):
-            self.VAD_model = VAD(
+            provider_options = self.audio_config.get("VAD_options") or {}
+            if not isinstance(provider_options, dict):
+                provider_options = {}
+            self.VAD_model = create_vad(
                 model_name_or_path=self.audio_config["VAD_model"],
                 src_lang=self.audio_config["src_lang"],
                 tgt_lang=self.audio_config["tgt_lang"],
                 min_segment_seconds=float(
                     self.audio_config.get("min_segment_seconds", 1.0)
                 ),
+                **provider_options,
             )
 
     def set_usage_log_path(self, path: str | None):
@@ -143,8 +149,7 @@ class GPT4oAudioAgent(AudioAgent):
         if normalized in ("gpt-4o", "gpt-4o-mini"):
             normalized = normalized + "-transcribe"
         self.model_name = normalized
-        from openai import OpenAI
-
+        
         self.client = OpenAI()
 
     def segment_audio(self, audio_path, cache_dir):
