@@ -177,26 +177,29 @@ def convert_web_config_to_task_config(session_config: SessionConfig) -> Dict[str
         "source_lang": session_config.source_lang,
         "target_lang": session_config.target_lang,
         "domain": session_config.domain,
+        "num_workers": getattr(session_config, 'num_workers', 8),
         "instructions": getattr(session_config, 'instructions', None),
         "video_download": {
             "resolution": session_config.video_download_resolution
         },
         "translation": {
             "model": session_config.translation_model,
-            "chunk_size": session_config.translation_chunk_size
+            "chunk_size": session_config.translation_chunk_size,
+            "use_history": getattr(session_config, 'translation_use_history', True),
+            "max_retries": getattr(session_config, 'translation_max_retries', 1)
         },
         "audio": {
-            "enable_audio": True,
+            "enable_audio": True,  # Audio is always enabled
             "audio_agent": session_config.audio_audio_agent,
-            "model_path": None,
+            "model_path": session_config.audio_model_path,  # Can be None
             "VAD_model": session_config.audio_VAD_model,
             "src_lang": session_config.audio_src_lang,
             "tgt_lang": session_config.audio_tgt_lang
         },
         "vision": {
-            "enable_vision": True,
+            "enable_vision": session_config.vision_enable_vision,
             "vision_model": session_config.vision_vision_model,
-            "model_path": None,
+            "model_path": session_config.vision_model_path,  # Required, has default
             "frame_cache_dir": ".cache/frames",
             "frame_per_seg": session_config.vision_frame_per_seg
         },
@@ -331,9 +334,7 @@ def run_vidove_task(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            env=os.environ.copy(),  # Inherit current environment variables
-            preexec_fn=os.setsid if hasattr(os, 'setsid') else None,  # Create new process group to prevent signal propagation
-            start_new_session=True  # Additional isolation
+            env=os.environ.copy()  # Inherit current environment variables
         )
         
         try:
@@ -354,25 +355,25 @@ def run_vidove_task(
             # Properly terminate the timed-out process
             print(f"Task {task_id} timed out, terminating process...")
             
-            # Kill the entire process group to ensure all child processes are terminated
+            # Try to terminate process gracefully
             try:
-                os.killpg(os.getpgid(process.pid), signal.SIGTERM)
-                print(f"Sent SIGTERM to process group {os.getpgid(process.pid)}")
+                process.terminate()
+                print(f"Sent SIGTERM to process {process.pid}")
             except (ProcessLookupError, OSError):
-                # Process or group may already be dead
+                # Process may already be dead
                 pass
             
             # Give the process a chance to terminate gracefully
             try:
                 process.wait(timeout=10)  # Wait up to 10 seconds for graceful termination
             except subprocess.TimeoutExpired:
-                # Force kill the entire process group if it doesn't terminate gracefully
-                print(f"Process group didn't terminate gracefully, force killing...")
+                # Force kill if it doesn't terminate gracefully
+                print("Process didn't terminate gracefully, force killing...")
                 try:
-                    os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-                    print(f"Sent SIGKILL to process group {os.getpgid(process.pid)}")
+                    process.kill()
+                    print(f"Sent SIGKILL to process {process.pid}")
                 except (ProcessLookupError, OSError):
-                    # Process or group may already be dead
+                    # Process may already be dead
                     pass
                 process.wait()  # Wait for the process to be fully cleaned up
             
@@ -474,9 +475,14 @@ def run_vidove_task(
             if process and process.poll() is None:
                 print(f"Terminating remaining subprocess for task {task_id}")
                 try:
-                    # Kill the entire process group
-                    os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+                    process.terminate()
                     process.wait(timeout=5)
+                except (subprocess.TimeoutExpired, ProcessLookupError, OSError):
+                    try:
+                        process.kill()
+                        process.wait()
+                    except (ProcessLookupError, OSError):
+                        pass  # Process already terminated
                 except (subprocess.TimeoutExpired, ProcessLookupError, OSError):
                     try:
                         # Force kill the entire process group

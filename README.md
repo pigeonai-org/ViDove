@@ -102,7 +102,30 @@ Here's why:
 
 **We recommend you use UNIX like operating systems(MacOS/Linux Family) for local installation.**
 
-### Installation
+### Quick Start with Docker (Recommended)
+
+The easiest way to run ViDove is using Docker to host our web-demos:
+
+```sh
+# 1. Clone the repository
+git clone https://github.com/project-kxkg/ViDove.git
+cd ViDove
+
+# 2. Set up environment variables
+cp .env.example .env
+# Edit .env and add your API keys
+
+# 3. Start the services
+./docker-manage.sh start
+
+# 4. Access the web interface
+# Frontend: http://localhost:3000
+# Backend API: http://localhost:8000/docs
+```
+
+For detailed Docker deployment guide, see the [Docker Deployment Doc](doc/DOCKER_DEPLOYMENT.md).
+
+### Installation (Local Development)
 
 1. Get a OpenAI API Key at [https://platform.openai.com/api-keys](https://platform.openai.com/api-keys)
 2. Clone the repo

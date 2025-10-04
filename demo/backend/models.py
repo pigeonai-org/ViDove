@@ -36,17 +36,20 @@ class SessionConfig(BaseModel):
     source_lang: Literal["EN", "ZH", "ES", "FR", "DE", "RU", "JA", "AR", "KR"] = "EN"
     target_lang: Literal["EN", "ZH", "ES", "FR", "DE", "RU", "JA", "AR", "KR"] = "ZH"
     domain: Literal["General", "SC2", "CS:GO"] = "General"
+    num_workers: int = Field(default=8, description="Global number of worker threads for VAD, proofreading, and editing")
     video_download_resolution: Union[Literal[360, 480, 720], Literal["best"]] = Field(default=480, alias="video_download.resolution")
-    translation_model: Literal["gpt-4", "gpt-4o-mini", "gpt-4o", "Assistant", "Multiagent", "RAG"] = Field(default="gpt-4o", alias="translation.model")
+    translation_model: Literal["gpt-4", "gpt-4o-mini", "gpt-4o", "gpt-5", "gpt-5-mini"] = Field(default="gpt-5", alias="translation.model")
     translation_chunk_size: int = Field(default=2000, alias="translation.chunk_size")
-    audio_enable_audio: bool = Field(default=True, alias="audio.enable_audio")
-    audio_audio_agent: Literal["GeminiAudioAgent"] = Field(default="GeminiAudioAgent", alias="audio.audio_agent")
+    translation_use_history: bool = Field(default=True, alias="translation.use_history", description="Include recent translation history in each request")
+    translation_max_retries: int = Field(default=1, alias="translation.max_retries", description="Max retries per chunk for transient API errors")
+    # Audio is always enabled, agent selection is required
+    audio_audio_agent: Literal["GeminiAudioAgent", "WhisperAudioAgent", "QwenAudioAgent", "GPT4oAudioAgent"] = Field(default="WhisperAudioAgent", alias="audio.audio_agent", description="Audio agent for transcription (always enabled)")
     audio_model_path: Optional[str] = Field(default=None, alias="audio.model_path")
     audio_VAD_model: Literal["pyannote/speaker-diarization-3.1", "API"] = Field(default="API", alias="audio.VAD_model")
     audio_src_lang: str = Field(default="en", alias="audio.src_lang")
     audio_tgt_lang: str = Field(default="zh", alias="audio.tgt_lang")
     vision_enable_vision: bool = Field(default=False, alias="vision.enable_vision")
-    vision_vision_model: Literal["CLIP", "gpt-4o"] = Field(default="gpt-4o", alias="vision.vision_model")
+    vision_vision_model: Literal["CLIP", "gpt-4o", "gpt-4o-mini"] = Field(default="gpt-4o", alias="vision.vision_model")
     vision_model_path: str = Field(default="./ViDove/vision_model/clip-vit-base-patch16", alias="vision.model_path")
     vision_frame_cache_dir: str = Field(default="./cache", alias="vision.frame_cache_dir")
     vision_frame_per_seg: int = Field(default=4, alias="vision.frame_per_seg")
@@ -65,7 +68,7 @@ class SessionConfig(BaseModel):
     editor_user_instruction: Literal["none", "formal", "casual", "technical"] = Field(default="none", alias="editor.user_instruction")
     editor_editor_context_window: int = Field(default=10, alias="editor.editor_context_window")
     editor_history_length: int = Field(default=5, alias="editor.history_length")
-    MEMEORY_enable_local_knowledge: bool = Field(default=False, alias="MEMEORY.enable_local_knowledge")
+    MEMEORY_enable_local_knowledge: bool = Field(default=True, alias="MEMEORY.enable_local_knowledge")
     MEMEORY_enable_web_search: bool = Field(default=False, alias="MEMEORY.enable_web_search")
     MEMEORY_enable_vision_knowledge: bool = Field(default=True, alias="MEMEORY.enable_vision_knowledge")
     MEMEORY_local_knowledge_path: str = Field(default="/home/macrodove/ViDove/domain_dict", alias="MEMEORY.local_knowledge_path")
