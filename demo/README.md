@@ -37,7 +37,7 @@ A modern, fully-typed web frontend for ViDove translation configuration using co
 ### 1. Environment Setup
 ```bash
 # Clone the repository
-cd web_frontend
+cd demo
 
 # Create environment file
 cp env.example .env

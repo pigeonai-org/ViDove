@@ -111,8 +111,8 @@ Edit `docker-compose.yml` to customize:
 
 The following directories are mounted as volumes for persistence:
 
-- `./web_frontend/backend/uploads`: Uploaded files
-- `./web_frontend/backend/results`: Translation results
+- `./demo/backend/uploads`: Uploaded files
+- `./demo/backend/results`: Translation results
 - `./domain_dict`: Custom translation dictionaries
 - `./configs`: Configuration files
 
@@ -220,7 +220,7 @@ volumes:
 
 ### Security Considerations
 
-1. **Update CORS settings** in `web_frontend/backend/main.py`
+1. **Update CORS settings** in `demo/backend/main.py`
 2. **Use secrets management** for API keys (Docker secrets, Kubernetes secrets)
 3. **Enable HTTPS** with reverse proxy (nginx, traefik)
 4. **Set resource limits** appropriately
@@ -283,7 +283,7 @@ docker-compose logs --no-color > logs.txt
 ### Backup Results and Uploads
 
 ```bash
-tar -czf backup.tar.gz web_frontend/backend/uploads web_frontend/backend/results
+tar -czf backup.tar.gz demo/backend/uploads demo/backend/results
 ```
 
 ### Restore

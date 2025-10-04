@@ -104,7 +104,7 @@ Here's why:
 
 ### Quick Start with Docker (Recommended)
 
-The easiest way to run ViDove is using Docker with our new split-container architecture:
+The easiest way to run ViDove is using Docker to host our web-demos:
 
 ```sh
 # 1. Clone the repository
@@ -113,23 +113,17 @@ cd ViDove
 
 # 2. Set up environment variables
 cp .env.example .env
-# Edit .env and add your OPENAI_API_KEY
+# Edit .env and add your API keys
 
 # 3. Start the services
-docker-compose up -d
+./docker-manage.sh start
 
 # 4. Access the web interface
 # Frontend: http://localhost:3000
 # Backend API: http://localhost:8000/docs
 ```
 
-**Benefits of Docker deployment:**
-- ✅ Isolated frontend and backend containers
-- ✅ If ViDove subprocess crashes, frontend remains responsive
-- ✅ Easy to scale and manage
-- ✅ No manual dependency installation required
-
-For detailed Docker deployment guide, see [DOCKER_DEPLOYMENT.md](DOCKER_DEPLOYMENT.md)
+For detailed Docker deployment guide, see the [Docker Deployment Doc](doc/DOCKER_DEPLOYMENT.md).
 
 ### Installation (Local Development)
 

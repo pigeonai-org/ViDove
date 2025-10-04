@@ -53,20 +53,20 @@ docker compose up -d --build
    - Changed all `docker-compose` to `docker compose` (v2 syntax)
    - Made `jq` optional in health check
 
-2. **`web_frontend/frontend/src/services/api.ts`**
+2. **`demo/frontend/src/services/api.ts`**
    - Changed: `${window.location.hostname}` 
    - To: `${window.location.hostname}:8000`
    - Now frontend can connect to backend on correct port
 
 3. **`docker-compose.dev.yml`**
-   - Fixed command to use `bash -c "cd /app/web_frontend/backend && ..."`
+   - Fixed command to use `bash -c "cd /app/demo/backend && ..."`
    - This ensures uvicorn runs from correct directory
 
 4. **`docker-compose.yml`**
    - Added build args for `REACT_APP_API_URL`
    - Frontend now knows backend is on port 8000
 
-5. **`web_frontend/frontend/Dockerfile`**
+5. **`demo/frontend/Dockerfile`**
    - Accepts `REACT_APP_API_URL` as build argument
    - Passes it to React build process
 
@@ -198,7 +198,7 @@ docker compose up -d
 Changes to these directories auto-reload in dev mode:
 - `src/`
 - `entries/`
-- `web_frontend/backend/`
+- `demo/backend/`
 
 Start dev mode:
 ```bash
@@ -209,7 +209,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 
 **Option 1 - Local Development (Recommended for frontend work):**
 ```bash
-cd web_frontend/frontend
+cd demo/frontend
 npm install
 REACT_APP_API_URL=http://localhost:8000 npm start
 ```
@@ -277,8 +277,8 @@ docker compose up -d
 # Nuclear option - removes everything
 docker compose down -v
 docker system prune -a --volumes
-rm -rf web_frontend/backend/uploads/*
-rm -rf web_frontend/backend/results/*
+rm -rf demo/backend/uploads/*
+rm -rf demo/backend/results/*
 
 # Then rebuild
 docker compose build --no-cache

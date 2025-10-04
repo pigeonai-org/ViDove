@@ -23,8 +23,8 @@ services:
       - DEFAULT_TRANSLATION_MODEL=${DEFAULT_TRANSLATION_MODEL:-gpt-5}
     volumes:
       # Mount results and uploads for persistence
-      - ./web_frontend/backend/uploads:/app/web_frontend/backend/uploads
-      - ./web_frontend/backend/results:/app/web_frontend/backend/results
+      - ./demo/backend/uploads:/app/demo/backend/uploads
+      - ./demo/backend/results:/app/demo/backend/results
       # Optional: Mount domain_dict for custom dictionaries
       - ./domain_dict:/app/domain_dict
       # Optional: Mount local config if needed
@@ -45,7 +45,7 @@ services:
 
   frontend:
     build:
-      context: ./web_frontend/frontend
+      context: ./demo/frontend
       dockerfile: Dockerfile
       args:
         - REACT_APP_API_URL=http://localhost:8000

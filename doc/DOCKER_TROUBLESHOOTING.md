@@ -155,7 +155,7 @@ docker compose logs -f
 
 ### Working on Backend Code
 ```bash
-# Changes to Python files in src/ or web_frontend/backend/ 
+# Changes to Python files in src/ or demo/backend/ 
 # will auto-reload with --reload flag in dev mode
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 ```
@@ -163,7 +163,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 ### Working on Frontend Code
 Option 1 - Run frontend locally:
 ```bash
-cd web_frontend/frontend
+cd demo/frontend
 npm install
 npm start  # Runs on port 3000 with hot reload
 ```
@@ -198,7 +198,7 @@ docker compose exec backend /bin/bash
 # Inside container
 ls -la /app/
 ls -la /app/backend-venv/bin/
-cd /app/web_frontend/backend
+cd /app/demo/backend
 /app/backend-venv/bin/python --version
 ```
 

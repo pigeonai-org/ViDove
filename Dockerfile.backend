@@ -30,7 +30,7 @@ ENV UV_PROJECT_ENVIRONMENT=/app/venv
 RUN uv sync --no-dev --python /app/venv/bin/python
 
 # Install web backend dependencies in separate venv
-COPY web_frontend/backend/requirements.txt ./backend_requirements.txt
+COPY demo/backend/requirements.txt ./backend_requirements.txt
 RUN uv venv /app/backend-venv
 RUN uv pip install --python /app/backend-venv/bin/python --no-cache-dir -r backend_requirements.txt
 
@@ -48,7 +48,7 @@ RUN if [ -d "/tmp/fonts" ]; then \
 COPY . .
 
 # Create necessary directories
-RUN mkdir -p /app/local_dump /app/web_frontend/backend/uploads /app/web_frontend/backend/results
+RUN mkdir -p /app/local_dump /app/demo/backend/uploads /app/demo/backend/results
 
 # Set environment variables
 ENV PYTHONPATH=/app
@@ -63,7 +63,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
   CMD curl -f http://localhost:8000/health || exit 1
 
 # Change to backend directory
-WORKDIR /app/web_frontend/backend
+WORKDIR /app/demo/backend
 
 # Start FastAPI backend with increased request body size limit
 CMD ["/app/backend-venv/bin/python", "-m", "uvicorn", "main:app", \

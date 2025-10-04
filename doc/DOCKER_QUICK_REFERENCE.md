@@ -107,8 +107,8 @@ docker system prune -a
 - **App**: `/app`
 - **Pipeline venv**: `/app/venv`
 - **Backend venv**: `/app/backend-venv`
-- **Uploads**: `/app/web_frontend/backend/uploads`
-- **Results**: `/app/web_frontend/backend/results`
+- **Uploads**: `/app/demo/backend/uploads`
+- **Results**: `/app/demo/backend/results`
 - **Configs**: `/app/configs`
 
 ### Frontend
@@ -156,8 +156,8 @@ docker-compose up -d --scale backend=3
 ### Backup
 ```bash
 tar -czf vidove-backup-$(date +%Y%m%d).tar.gz \
-  web_frontend/backend/uploads \
-  web_frontend/backend/results
+  demo/backend/uploads \
+  demo/backend/results
 ```
 
 ### Restore

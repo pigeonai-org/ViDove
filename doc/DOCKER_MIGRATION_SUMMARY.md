@@ -86,13 +86,13 @@ The original unified container had a critical issue:
    - FFmpeg and system dependencies
    - Health check endpoint
 
-3. **`web_frontend/frontend/Dockerfile`** - Frontend container image
+3. **`demo/frontend/Dockerfile`** - Frontend container image
    - Multi-stage build (Node.js builder + Nginx production)
    - Optimized React build
    - Nginx for serving static files
    - Custom nginx configuration
 
-4. **`web_frontend/frontend/nginx.conf`** - Nginx configuration
+4. **`demo/frontend/nginx.conf`** - Nginx configuration
    - React Router support
    - Gzip compression
    - Security headers
@@ -126,12 +126,12 @@ The original unified container had a critical issue:
    - API key placeholders
    - Configuration options
 
-10. **`web_frontend/frontend/.dockerignore`** - Frontend build optimization
+10. **`demo/frontend/.dockerignore`** - Frontend build optimization
     - Excludes unnecessary files from frontend image
 
 ### Modified Files
 
-1. **`web_frontend/backend/main.py`**
+1. **`demo/backend/main.py`**
    - Added `/health` endpoint for Docker health checks
    - Separated from root `/` endpoint
 
@@ -208,7 +208,7 @@ docker-compose up -d
 
 **Virtual Environments**:
 - `/app/venv`: Pipeline dependencies (from pyproject.toml)
-- `/app/backend-venv`: Backend dependencies (from web_frontend/backend/requirements.txt)
+- `/app/backend-venv`: Backend dependencies (from demo/backend/requirements.txt)
 
 **Volumes**:
 - `uploads/`: User uploaded files
@@ -327,8 +327,8 @@ If you were using the unified container (`Dockerfile.unified`):
 
 2. **Backup data** (if needed):
    ```bash
-   docker cp <unified-container-name>:/app/web_frontend/backend/uploads ./backup_uploads
-   docker cp <unified-container-name>:/app/web_frontend/backend/results ./backup_results
+   docker cp <unified-container-name>:/app/demo/backend/uploads ./backup_uploads
+   docker cp <unified-container-name>:/app/demo/backend/results ./backup_results
    ```
 
 3. **Start new split containers**:
@@ -338,8 +338,8 @@ If you were using the unified container (`Dockerfile.unified`):
 
 4. **Restore data** (if backed up):
    ```bash
-   cp -r backup_uploads/* ./web_frontend/backend/uploads/
-   cp -r backup_results/* ./web_frontend/backend/results/
+   cp -r backup_uploads/* ./demo/backend/uploads/
+   cp -r backup_results/* ./demo/backend/results/
    ```
 
 ## Performance Improvements
