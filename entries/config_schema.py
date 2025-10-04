@@ -14,7 +14,7 @@ class VideoDownloadConfig(BaseModel):
 class MemoryConfig(BaseModel):
     """Memory and knowledge base configuration"""
     enable_local_knowledge: bool = Field(
-        default=False, 
+        default=True, 
         description="Whether to enable local knowledge base"
     )
     enable_vision_knowledge: bool = Field(
@@ -205,7 +205,7 @@ class TaskConfig(BaseModel):
         description="Source language"
     )
     num_workers: int = Field(
-        default=4,
+        default=8,
         description="Global number of worker threads for VAD, proofreading, and editing"
     )
     target_lang: Literal["EN", "ZH", "ES", "FR", "DE", "RU", "JA", "AR", "KR"] = Field(

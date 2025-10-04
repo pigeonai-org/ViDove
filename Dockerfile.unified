@@ -1,0 +1,124 @@
+# ⚠️ DEPRECATED - This unified container is no longer recommended
+# 
+# This Dockerfile has been replaced by a split-container architecture:
+# - Dockerfile.backend: Backend + ViDove pipeline
+# - web_frontend/frontend/Dockerfile: React frontend
+# 
+# Use docker-compose.yml for the new architecture
+# See DOCKER_DEPLOYMENT.md for migration guide
+#
+# Issues with this unified approach:
+# - Single point of failure (ViDove crash brings down everything)
+# - Difficult to scale independently
+# - Hard to debug and monitor
+# - Poor resource management
+#
+# -------------------------------------------------------------------
+
+# ViDove Unified Container - Pipeline, Backend, and Frontend
+FROM python:3.10-slim
+
+# Install system dependencies including git for pip VCS installs
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    fontconfig \
+    curl \
+    git \
+    build-essential \
+    gcc \
+    g++ \
+    python3-dev \
+    libssl-dev \
+    libffi-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js for frontend
+RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
+    && apt-get install -y nodejs
+
+# Install uv for fast Python package management
+RUN pip install --no-cache-dir uv
+
+# Set working directory
+WORKDIR /app
+
+# Copy Python project configuration files
+COPY pyproject.toml uv.lock ./
+
+# Install pipeline dependencies using uv in separate venv
+RUN uv venv /app/venv
+ENV UV_PROJECT_ENVIRONMENT=/app/venv
+RUN uv sync --no-dev --python /app/venv/bin/python
+
+# Install web backend dependencies in separate venv
+COPY web_frontend/backend/requirements.txt ./backend_requirements.txt
+RUN uv venv /app/backend-venv
+RUN uv pip install --python /app/backend-venv/bin/python --no-cache-dir -r backend_requirements.txt
+
+# Install fonts (handle missing files gracefully)
+RUN mkdir -p /usr/local/share/fonts/truetype
+COPY fonts/ /tmp/fonts/
+RUN if [ -d "/tmp/fonts" ]; then \
+        find /tmp/fonts -name "*.otf" -exec cp {} /usr/local/share/fonts/truetype/ \; 2>/dev/null || true; \
+        find /tmp/fonts -name "*.ttc" -exec cp {} /usr/local/share/fonts/truetype/ \; 2>/dev/null || true; \
+        fc-cache -f -v; \
+        rm -rf /tmp/fonts; \
+    fi
+
+# Copy the entire project
+COPY . .
+
+# Install frontend dependencies and build for production
+WORKDIR /app/web_frontend/frontend
+RUN npm ci
+RUN npm install -g serve
+RUN npm run build
+
+# Return to app directory
+WORKDIR /app
+
+# Create startup script to run both backend and frontend
+RUN echo '#!/bin/bash\n\
+set -e\n\
+\n\
+# Start FastAPI backend with its own venv and increased request body size limit\n\
+cd /app/web_frontend/backend\n\
+/app/backend-venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000 \\\n\
+  --limit-max-requests 1000 \\\n\
+  --limit-concurrency 1000 \\\n\
+  --h11-max-incomplete-event-size 1073741824 &\n\
+BACKEND_PID=$!\n\
+\n\
+# Start React frontend in background\n\
+cd /app/web_frontend/frontend\n\
+npx serve -s build -l 3000 &\n\
+FRONTEND_PID=$!\n\
+\n\
+# Function to cleanup on exit\n\
+cleanup() {\n\
+    echo "Shutting down services..."\n\
+    kill $BACKEND_PID $FRONTEND_PID 2>/dev/null || true\n\
+    wait\n\
+}\n\
+\n\
+# Setup signal handlers\n\
+trap cleanup SIGTERM SIGINT\n\
+\n\
+# Wait for both processes\n\
+wait' > /app/start.sh
+
+RUN chmod +x /app/start.sh
+
+# Create necessary directories
+RUN mkdir -p /app/local_dump /app/web_frontend/backend/uploads /app/web_frontend/backend/results
+
+# Set environment variables
+ENV PYTHONPATH=/app
+ENV PIPELINE_VENV=/app/venv
+ENV BACKEND_VENV=/app/backend-venv
+
+# Expose ports for both frontend and backend
+EXPOSE 3000 8000
+
+# Start all services
+CMD ["/app/start.sh"]

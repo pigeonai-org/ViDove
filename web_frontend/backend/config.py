@@ -24,6 +24,12 @@ CONFIGURATION_SCHEMA = {
         default="General",
         description="Domain/field of the content for specialized translation"
     ),
+    "num_workers": ConfigurationValue(
+        type="number",
+        range=[1, 16],
+        default=8,
+        description="Global number of worker threads for parallel processing"
+    ),
     "video_download.resolution": ConfigurationValue(
         type="select",
         options=[360, 480, 720, "best"],
@@ -32,7 +38,7 @@ CONFIGURATION_SCHEMA = {
     ),
     "translation.model": ConfigurationValue(
         type="select",
-        options=["gpt-3.5-turbo", "gpt-4", "gpt-4o", "Assistant", "Multiagent"],
+        options=["gpt-4", "gpt-4o-mini", "gpt-4o", "gpt-5", "gpt-5-mini"],
         default="gpt-4o",
         description="LLM model for translation"
     ),
@@ -42,16 +48,27 @@ CONFIGURATION_SCHEMA = {
         default=2000,
         description="Text chunk size for translation"
     ),
+    "translation.use_history": ConfigurationValue(
+        type="boolean",
+        default=True,
+        description="Include recent translation history in each request (may reduce throughput)"
+    ),
+    "translation.max_retries": ConfigurationValue(
+        type="number",
+        range=[0, 5],
+        default=1,
+        description="Max retries per chunk for transient API errors"
+    ),
     "audio.audio_agent": ConfigurationValue(
         type="select",
-        options=["GeminiAudioAgent"],
-        default="GeminiAudioAgent",
+        options=["GeminiAudioAgent", "WhisperAudioAgent", "QwenAudioAgent", "GPT4oAudioAgent"],
+        default="WhisperAudioAgent",
         description="Audio processing agent for transcription"
     ),
     "audio.VAD_model": ConfigurationValue(
         type="select",
         options=["pyannote/speaker-diarization-3.1", "API"],
-        default="pyannote/speaker-diarization-3.1",
+        default="API",
         description="Voice Activity Detection model"
     ),
     "audio.src_lang": ConfigurationValue(
@@ -68,7 +85,7 @@ CONFIGURATION_SCHEMA = {
     ),
     "vision.vision_model": ConfigurationValue(
         type="select",
-        options=["CLIP", "gpt-4o"],
+        options=["CLIP", "gpt-4o", "gpt-4o-mini"],
         default="gpt-4o",
         description="Vision model for visual content analysis"
     ),
@@ -160,7 +177,7 @@ CONFIGURATION_SCHEMA = {
     ),
     "MEMEORY.enable_local_knowledge": ConfigurationValue(
         type="boolean",
-        default=False,
+        default=True,
         description="Enable local knowledge base"
     ),
     "MEMEORY.enable_web_search": ConfigurationValue(
@@ -170,7 +187,7 @@ CONFIGURATION_SCHEMA = {
     ),
     "MEMEORY.enable_vision_knowledge": ConfigurationValue(
         type="boolean",
-        default=True,
+        default=False,
         description="Enable vision-based knowledge extraction"
     ),
     "output_type.video": ConfigurationValue(

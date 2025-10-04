@@ -48,14 +48,20 @@ app.add_middleware(
 )
 
 # Thread pool for task execution
-executor = ThreadPoolExecutor(max_workers=4)
+executor = ThreadPoolExecutor(max_workers=8)
 
 
-# Health check endpoint
+# Health check endpoints
 @app.get("/", response_model=Dict[str, str])
 async def root() -> Dict[str, str]:
-    """Health check endpoint"""
+    """Root endpoint"""
     return {"message": "ViDove Translation Assistant API", "version": "1.0.0"}
+
+
+@app.get("/health", response_model=Dict[str, str])
+async def health_check() -> Dict[str, str]:
+    """Health check endpoint for Docker healthcheck"""
+    return {"status": "healthy", "service": "vidove-backend"}
 
 
 # Chat and Configuration endpoints

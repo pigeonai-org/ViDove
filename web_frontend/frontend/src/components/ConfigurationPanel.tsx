@@ -81,12 +81,10 @@ const CONFIG_FIELDS: ConfigField[] = [
     description: 'LLM model for translation',
     category: 'Translation',
     options: [
-      { value: 'gpt-4', label: 'GPT-4' },
       { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
       { value: 'gpt-4o', label: 'GPT-4o' },
-      { value: 'Assistant', label: 'Assistant' },
-      { value: 'Multiagent', label: 'Multi-agent' },
-      { value: 'RAG', label: 'RAG' }
+      { value: 'gpt-5', label: 'GPT-5' },
+      { value: 'gpt-5-mini', label: 'GPT-5 Mini' }
     ]
   },
   {
@@ -146,9 +144,7 @@ const CONFIG_FIELDS: ConfigField[] = [
     description: 'Voice Activity Detection model',
     category: 'Audio',
     options: [
-      { value: 'pyannote/speaker-diarization-3.1', label: 'Pyannote Speaker Diarization 3.1' },
-      { value: 'silero', label: 'Silero VAD' },
-      { value: 'API', label: 'API' }
+      { value: 'API', label: 'Pyannote Speaker Diarization 3.1 API' },
     ]
   },
   {
@@ -204,7 +200,8 @@ const CONFIG_FIELDS: ConfigField[] = [
     category: 'Vision',
     options: [
       { value: 'CLIP', label: 'CLIP' },
-      { value: 'gpt-4o', label: 'GPT-4o Vision' }
+      { value: 'gpt-4o', label: 'GPT-4o Vision' },
+      { value: 'gpt-4o-mini', label: 'GPT-4o Mini Vision' }
     ]
   },
   {
