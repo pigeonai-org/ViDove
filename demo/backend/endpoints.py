@@ -145,7 +145,7 @@ async def update_config(session_id: str, config_updates: Dict[str, Any]) -> Conf
         'uploaded_file_name', 
         'youtube_url',
         'input_type',
-        'audio.audio_agent',  # System-managed
+        'audio.audio_agent',  # System-managed, always WhisperAudioAgent
         # Add more restricted fields as needed
     }
     

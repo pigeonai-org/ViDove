@@ -231,9 +231,11 @@ class Task:
                 # Whisper audio agent that delegates to Whisper ASR and uses VAD when configured
                 self.audio_agent = WhisperAudioAgent(model_name="whisper-api", audio_config=audio_config)
                 self.task_logger.info(f"Using WhisperAudioAgent with model: {self.audio_setting['audio_agent']}")
+                self.audio_agent.set_agent_history_logger(self.agent_history_logger)
             elif agent_choice == "GPT4oAudioAgent":
                 self.audio_agent = GPT4oAudioAgent(model_name="gpt-4o", audio_config=audio_config)
                 self.task_logger.info(f"Using GPT4oAudioAgent with model: {self.audio_setting['audio_agent']}")
+                self.audio_agent.set_agent_history_logger(self.agent_history_logger)
             else:
                 raise ValueError(f"Unsupported audio model: {agent_choice}")
             

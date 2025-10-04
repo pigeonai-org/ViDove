@@ -24,6 +24,8 @@ class AudioAgent(ABC):
         # usage recording context
         self.task_id = (self.audio_config or {}).get("task_id")
         self.usage_log_path = (self.audio_config or {}).get("usage_log_path")
+        # agent conversation logger
+        self.agent_history_logger = None
         self.load_model()
         # Initialize VAD only if configured
         self.VAD_model = None
@@ -46,6 +48,10 @@ class AudioAgent(ABC):
 
     def set_task_id(self, task_id: str | None):
         self.task_id = task_id
+
+    def set_agent_history_logger(self, logger):
+        """Set the agent history logger for conversation logging"""
+        self.agent_history_logger = logger
 
     def _record_usage(
         self,
@@ -166,6 +172,11 @@ class GPT4oAudioAgent(AudioAgent):
         Transcribe a single (VAD-split) audio chunk via OpenAI gpt-4o(-mini)-transcribe.
         API returns plain text. We wrap it in one SRT-timed segment covering the clip.
         """
+        if self.agent_history_logger:
+            self.agent_history_logger.info(
+                '{"role": "audio_agent", "message": "🎧 GPT-4o Audio is processing... hang tight!"}'
+            )
+        
         try:
             with open(audio_path, "rb") as audio_file:
                 response = self.client.audio.transcriptions.create(
@@ -317,6 +328,11 @@ class WhisperAudioAgent(AudioAgent):
     def transcribe(self, audio_path, visual_cues=None):
         # Transcribe the given (per-VAD) audio clip with Whisper ASR.
         # Return SRT-like segments with HH:MM:SS,mmm timestamps relative to this clip.
+        if self.agent_history_logger:
+            self.agent_history_logger.info(
+                '{"role": "audio_agent", "message": "🎤 Whisper is listening... processing audio clip"}'
+            )
+        
         src_lang = (self.audio_config or {}).get("src_lang")
         result = self.ASR_model.get_transcript(audio_path, source_lang=src_lang)
         # If this path uses OpenAI Whisper API under the hood, record per-minute usage
@@ -461,12 +477,6 @@ class QwenAudioAgent(AudioAgent):
 class GeminiAudioAgent(AudioAgent):
     def __init__(self, model_name="gemini-2.5-flash", audio_config: dict = None):
         super().__init__(model_name, audio_config)
-        # Initialize agent history logger - will be set by task
-        self.agent_history_logger = None
-
-    def set_agent_history_logger(self, logger):
-        """Set the agent history logger from task"""
-        self.agent_history_logger = logger
     
     def _seconds_to_srt_time(self, secs: float) -> str:
         """Convert seconds to SRT timestamp format HH:MM:SS,mmm"""

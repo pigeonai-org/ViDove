@@ -42,8 +42,8 @@ class SessionConfig(BaseModel):
     translation_chunk_size: int = Field(default=2000, alias="translation.chunk_size")
     translation_use_history: bool = Field(default=True, alias="translation.use_history", description="Include recent translation history in each request")
     translation_max_retries: int = Field(default=1, alias="translation.max_retries", description="Max retries per chunk for transient API errors")
-    audio_enable_audio: bool = Field(default=True, alias="audio.enable_audio")
-    audio_audio_agent: Literal["GeminiAudioAgent", "WhisperAudioAgent", "QwenAudioAgent", "GPT4oAudioAgent"] = Field(default="GeminiAudioAgent", alias="audio.audio_agent")
+    # Audio is always enabled, agent selection is required
+    audio_audio_agent: Literal["GeminiAudioAgent", "WhisperAudioAgent", "QwenAudioAgent", "GPT4oAudioAgent"] = Field(default="WhisperAudioAgent", alias="audio.audio_agent", description="Audio agent for transcription (always enabled)")
     audio_model_path: Optional[str] = Field(default=None, alias="audio.model_path")
     audio_VAD_model: Literal["pyannote/speaker-diarization-3.1", "API"] = Field(default="API", alias="audio.VAD_model")
     audio_src_lang: str = Field(default="en", alias="audio.src_lang")

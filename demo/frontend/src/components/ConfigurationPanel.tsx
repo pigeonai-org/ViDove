@@ -113,19 +113,12 @@ const CONFIG_FIELDS: ConfigField[] = [
     ]
   },
   
-  // Audio settings
-  {
-    key: 'audio.enable_audio',
-    label: 'Enable Audio',
-    type: 'boolean',
-    description: 'Enable audio processing',
-    category: 'Audio'
-  },
+  // Audio settings (audio is always enabled with Whisper agent)
   {
     key: 'audio.audio_agent',
     label: 'Audio Agent',
     type: 'readonly',
-    description: 'Audio processing agent',
+    description: 'Audio processing agent (WhisperAudioAgent - system managed)',
     category: 'Audio',
     readonly: true
   },

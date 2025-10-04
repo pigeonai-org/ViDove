@@ -83,6 +83,11 @@ CONFIGURATION_SCHEMA = {
         default="zh",
         description="Target language code for audio processing"
     ),
+    "vision.enable_vision": ConfigurationValue(
+        type="boolean",
+        default=False,
+        description="Enable vision processing for visual content analysis"
+    ),
     "vision.vision_model": ConfigurationValue(
         type="select",
         options=["CLIP", "gpt-4o", "gpt-4o-mini"],
