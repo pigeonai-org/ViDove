@@ -3,11 +3,13 @@ FastAPI route handlers for the ViDove web backend.
 """
 import uuid
 import threading
+import time
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Literal
-from datetime import datetime
+from datetime import datetime, timedelta
+from collections import OrderedDict
 
-from fastapi import HTTPException, UploadFile, File, BackgroundTasks
+from fastapi import HTTPException, UploadFile, File, BackgroundTasks, Request
 from fastapi.responses import FileResponse
 
 from models import (
@@ -43,13 +45,58 @@ def get_task_with_access_control(task_id: str, session_id: str) -> TaskStatus:
 
 
 # Global storage - in production, use proper database
-sessions: Dict[str, ConfigurationSession] = {}
-tasks: Dict[str, TaskStatus] = {}
+# Using OrderedDict for LRU-style cleanup
+sessions: Dict[str, ConfigurationSession] = OrderedDict()
+tasks: Dict[str, TaskStatus] = OrderedDict()
 running_tasks: Dict[str, threading.Thread] = {}
 
+# Cleanup management
+cleanup_lock = threading.Lock()
+last_cleanup_time = time.time()
 
-async def start_chat_session() -> StartSessionResponse:
-    """Start a new configuration chat session"""
+# Task concurrency limiting
+MAX_CONCURRENT_TASKS = 3
+task_semaphore = threading.Semaphore(MAX_CONCURRENT_TASKS)
+
+# Rate limiting and bot protection
+ip_request_tracking: Dict[str, List[float]] = {}  # IP -> [timestamps]
+ip_session_tracking: Dict[str, List[str]] = {}  # IP -> [session_ids]
+ip_action_tracking: Dict[str, Dict[str, List[float]]] = {}  # IP -> {action -> [timestamps]}
+session_task_count: Dict[str, int] = {}  # session_id -> task_count
+rate_limit_lock = threading.Lock()
+emergency_mode = False
+
+
+async def start_chat_session(request: Request) -> StartSessionResponse:
+    """Start a new configuration chat session with rate limiting"""
+    from config import RATE_LIMIT_SESSION_CREATE_PER_HOUR
+    
+    # Get client IP
+    client_ip = get_client_ip(request)
+    
+    # Check memory pressure
+    memory_ok, memory_percent = check_memory_pressure()
+    if not memory_ok:
+        emergency_cleanup()
+        raise HTTPException(
+            status_code=503,
+            detail=f"Service temporarily unavailable due to high memory usage ({memory_percent:.1f}%). Please try again in a few minutes."
+        )
+    
+    # Check rate limit for session creation
+    if not check_rate_limit(client_ip, "session_create", RATE_LIMIT_SESSION_CREATE_PER_HOUR, 3600):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many session creation requests. Please try again later."
+        )
+    
+    # Check session limit per IP
+    if not check_session_limit_per_ip(client_ip):
+        raise HTTPException(
+            status_code=429,
+            detail="Maximum number of sessions reached for your IP. Please close existing sessions first."
+        )
+    
     session_id = str(uuid.uuid4())
     config = SessionConfig()
     
@@ -61,6 +108,7 @@ async def start_chat_session() -> StartSessionResponse:
     )
     
     sessions[session_id] = session
+    register_session_for_ip(client_ip, session_id)
     
     return StartSessionResponse(
         session_id=session_id,
@@ -145,7 +193,7 @@ async def update_config(session_id: str, config_updates: Dict[str, Any]) -> Conf
         'uploaded_file_name', 
         'youtube_url',
         'input_type',
-        'audio.audio_agent',  # System-managed
+        'audio.audio_agent',  # System-managed, always WhisperAudioAgent
         # Add more restricted fields as needed
     }
     
@@ -270,9 +318,9 @@ async def create_task(task_request: TaskRequest, background_tasks: BackgroundTas
     # Convert web config to ViDove task config
     task_config = convert_web_config_to_task_config(session.current_config)
     
-    # Start task execution in background
+    # Start task execution in background with concurrency limiting
     thread = threading.Thread(
-        target=run_vidove_task,
+        target=run_task_with_semaphore,
         args=(task_id, task_config, input_type, input_data, tasks, running_tasks)
     )
     thread.daemon = True  # Make thread a daemon so it doesn't prevent process shutdown
@@ -286,10 +334,36 @@ async def create_task(task_request: TaskRequest, background_tasks: BackgroundTas
     )
 
 
-async def launch_task_from_session(session_id: str) -> CreateTaskResponse:
+async def launch_task_from_session(session_id: str, request: Request) -> CreateTaskResponse:
     """Launch a translation task from a completed configuration session"""
+    from config import RATE_LIMIT_TASK_CREATE_PER_HOUR
+    
     if session_id not in sessions:
         raise HTTPException(status_code=404, detail="Session not found")
+    
+    # Get client IP and check rate limit
+    client_ip = get_client_ip(request)
+    if not check_rate_limit(client_ip, "task_create", RATE_LIMIT_TASK_CREATE_PER_HOUR, 3600):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many task creation requests. Please try again later."
+        )
+    
+    # Check task limit per session
+    if not check_task_limit_per_session(session_id):
+        raise HTTPException(
+            status_code=429,
+            detail="Maximum number of tasks reached for this session. Please create a new session."
+        )
+    
+    # Check memory pressure
+    memory_ok, memory_percent = check_memory_pressure()
+    if not memory_ok:
+        emergency_cleanup()
+        raise HTTPException(
+            status_code=503,
+            detail=f"Service temporarily unavailable due to high memory usage ({memory_percent:.1f}%). Please try again in a few minutes."
+        )
     
     session = sessions[session_id]
     
@@ -331,14 +405,17 @@ async def launch_task_from_session(session_id: str) -> CreateTaskResponse:
     # Convert web config to ViDove task config
     task_config = convert_web_config_to_task_config(session.current_config)
     
-    # Start task execution in background
+    # Start task execution in background with concurrency limiting
     thread = threading.Thread(
-        target=run_vidove_task,
+        target=run_task_with_semaphore,
         args=(task_id, task_config, input_type, input_data, tasks, running_tasks)
     )
     thread.daemon = True  # Make thread a daemon so it doesn't prevent process shutdown
     thread.start()
     running_tasks[task_id] = thread
+    
+    # Increment task count for session
+    increment_session_task_count(session_id)
     
     return CreateTaskResponse(
         task_id=task_id,
@@ -390,10 +467,29 @@ async def cancel_task(task_id: str, session_id: str) -> Dict[str, str]:
     return {"message": f"Task {task_id} cancellation requested"}
 
 
-async def upload_file(session_id: str, file: UploadFile = File(...)) -> UploadFileResponse:
+async def upload_file(session_id: str, file: UploadFile = File(...), request: Request = None) -> UploadFileResponse:
     """Upload a file for translation and associate it with a session"""
+    from config import RATE_LIMIT_FILE_UPLOAD_PER_HOUR
+    
     if session_id not in sessions:
         raise HTTPException(status_code=404, detail="Session not found")
+    
+    # Get client IP and check rate limit
+    if request:
+        client_ip = get_client_ip(request)
+        if not check_rate_limit(client_ip, "file_upload", RATE_LIMIT_FILE_UPLOAD_PER_HOUR, 3600):
+            raise HTTPException(
+                status_code=429,
+                detail="Too many file upload requests. Please try again later."
+            )
+    
+    # Check memory pressure
+    memory_ok, memory_percent = check_memory_pressure()
+    if not memory_ok:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Service temporarily unavailable due to high memory usage ({memory_percent:.1f}%). Please try again later."
+        )
     
     # Create uploads directory relative to current working directory
     upload_dir = Path("./uploads")
@@ -665,6 +761,296 @@ def save_conversation_on_completion(task_id: str) -> None:
             tasks[task_id].agent_conversation = conversation
 
 
+def get_client_ip(request) -> str:
+    """Extract client IP from request, handling proxies"""
+    # Check X-Forwarded-For header (for proxied requests)
+    forwarded = request.headers.get('X-Forwarded-For')
+    if forwarded:
+        return forwarded.split(',')[0].strip()
+    
+    # Check X-Real-IP header
+    real_ip = request.headers.get('X-Real-IP')
+    if real_ip:
+        return real_ip
+    
+    # Fall back to direct client
+    return request.client.host if request.client else "unknown"
+
+
+def check_rate_limit(ip: str, action: str, limit: int, window_seconds: int) -> bool:
+    """Check if IP has exceeded rate limit for an action"""
+    from config import ENABLE_EMERGENCY_PROTECTION
+    
+    if not ENABLE_EMERGENCY_PROTECTION:
+        return True
+    
+    current_time = time.time()
+    cutoff_time = current_time - window_seconds
+    
+    with rate_limit_lock:
+        # Initialize tracking for this IP and action
+        if ip not in ip_action_tracking:
+            ip_action_tracking[ip] = {}
+        if action not in ip_action_tracking[ip]:
+            ip_action_tracking[ip][action] = []
+        
+        # Remove old timestamps
+        ip_action_tracking[ip][action] = [
+            ts for ts in ip_action_tracking[ip][action] if ts > cutoff_time
+        ]
+        
+        # Check if limit exceeded
+        if len(ip_action_tracking[ip][action]) >= limit:
+            return False
+        
+        # Record this action
+        ip_action_tracking[ip][action].append(current_time)
+        return True
+
+
+def check_session_limit_per_ip(ip: str) -> bool:
+    """Check if IP has exceeded maximum sessions"""
+    from config import MAX_SESSIONS_PER_IP, ENABLE_EMERGENCY_PROTECTION
+    
+    if not ENABLE_EMERGENCY_PROTECTION:
+        return True
+    
+    with rate_limit_lock:
+        if ip not in ip_session_tracking:
+            ip_session_tracking[ip] = []
+        
+        # Remove sessions that no longer exist
+        ip_session_tracking[ip] = [
+            sid for sid in ip_session_tracking[ip] if sid in sessions
+        ]
+        
+        return len(ip_session_tracking[ip]) < MAX_SESSIONS_PER_IP
+
+
+def register_session_for_ip(ip: str, session_id: str):
+    """Register a new session for an IP"""
+    with rate_limit_lock:
+        if ip not in ip_session_tracking:
+            ip_session_tracking[ip] = []
+        ip_session_tracking[ip].append(session_id)
+
+
+def check_task_limit_per_session(session_id: str) -> bool:
+    """Check if session has exceeded maximum tasks"""
+    from config import MAX_TASKS_PER_SESSION, ENABLE_EMERGENCY_PROTECTION
+    
+    if not ENABLE_EMERGENCY_PROTECTION:
+        return True
+    
+    task_count = session_task_count.get(session_id, 0)
+    return task_count < MAX_TASKS_PER_SESSION
+
+
+def increment_session_task_count(session_id: str):
+    """Increment task count for a session"""
+    session_task_count[session_id] = session_task_count.get(session_id, 0) + 1
+
+
+def check_memory_pressure() -> tuple[bool, float]:
+    """Check if system is under memory pressure"""
+    from config import (MEMORY_EMERGENCY_THRESHOLD_PERCENT, 
+                       MEMORY_WARNING_THRESHOLD_PERCENT,
+                       ENABLE_EMERGENCY_PROTECTION)
+    
+    if not ENABLE_EMERGENCY_PROTECTION:
+        return True, 0.0
+    
+    try:
+        import psutil
+        memory_percent = psutil.virtual_memory().percent
+        
+        if memory_percent >= MEMORY_EMERGENCY_THRESHOLD_PERCENT:
+            return False, memory_percent  # Emergency - reject requests
+        
+        return True, memory_percent
+    except ImportError:
+        return True, 0.0
+
+
+def emergency_cleanup():
+    """Perform aggressive cleanup when memory pressure is high"""
+    print("⚠️ EMERGENCY CLEANUP TRIGGERED - High memory pressure detected")
+    
+    # More aggressive cleanup - remove half of oldest sessions
+    sessions_to_remove = len(sessions) // 2
+    cleaned_sessions = 0
+    
+    with cleanup_lock:
+        for _ in range(sessions_to_remove):
+            if len(sessions) > 0:
+                session_id, _ = sessions.popitem(last=False)
+                cleaned_sessions += 1
+    
+    # Remove half of completed tasks
+    completed_tasks = [(tid, t) for tid, t in tasks.items() 
+                      if t.status in ["COMPLETED", "FAILED"]]
+    tasks_to_remove = len(completed_tasks) // 2
+    cleaned_tasks = 0
+    
+    with cleanup_lock:
+        for task_id, _ in completed_tasks[:tasks_to_remove]:
+            if task_id in tasks:
+                tasks[task_id].agent_conversation = None
+                del tasks[task_id]
+                cleaned_tasks += 1
+    
+    print(f"Emergency cleanup completed: {cleaned_sessions} sessions, {cleaned_tasks} tasks removed")
+    print(f"Remaining: {len(sessions)} sessions, {len(tasks)} tasks")
+
+
+def cleanup_old_sessions(max_age_hours: int = 24, max_sessions: int = 1000) -> int:
+    """Remove sessions older than max_age_hours or keep only max_sessions most recent"""
+    cleaned = 0
+    current_time = datetime.now()
+    cutoff_time = current_time - timedelta(hours=max_age_hours)
+    
+    with cleanup_lock:
+        # Remove old sessions
+        sessions_to_remove = []
+        for session_id, session in list(sessions.items()):
+            if session.created_at < cutoff_time:
+                sessions_to_remove.append(session_id)
+        
+        for session_id in sessions_to_remove:
+            del sessions[session_id]
+            cleaned += 1
+            print(f"Cleaned up old session: {session_id}")
+        
+        # If still too many, remove oldest
+        while len(sessions) > max_sessions:
+            session_id, _ = sessions.popitem(last=False)  # Remove oldest
+            cleaned += 1
+            print(f"Cleaned up excess session: {session_id}")
+    
+    return cleaned
+
+
+def cleanup_old_tasks(max_age_hours: int = 48, max_tasks: int = 500) -> int:
+    """Remove completed/failed tasks older than max_age_hours"""
+    cleaned = 0
+    current_time = datetime.now()
+    cutoff_time = current_time - timedelta(hours=max_age_hours)
+    
+    with cleanup_lock:
+        tasks_to_remove = []
+        for task_id, task in list(tasks.items()):
+            # Only clean up completed or failed tasks
+            if task.status in ["COMPLETED", "FAILED"]:
+                if task.created_at < cutoff_time:
+                    # Clear agent conversation to free memory
+                    task.agent_conversation = None
+                    tasks_to_remove.append(task_id)
+        
+        for task_id in tasks_to_remove:
+            del tasks[task_id]
+            # Also remove from running_tasks if present
+            if task_id in running_tasks:
+                del running_tasks[task_id]
+            cleaned += 1
+            print(f"Cleaned up old task: {task_id}")
+        
+        # If still too many completed tasks, remove oldest completed ones
+        completed_tasks = [(tid, t) for tid, t in tasks.items() 
+                          if t.status in ["COMPLETED", "FAILED"]]
+        if len(completed_tasks) > max_tasks:
+            # Sort by creation time
+            completed_tasks.sort(key=lambda x: x[1].created_at)
+            excess_count = len(completed_tasks) - max_tasks
+            for task_id, _ in completed_tasks[:excess_count]:
+                del tasks[task_id]
+                if task_id in running_tasks:
+                    del running_tasks[task_id]
+                cleaned += 1
+                print(f"Cleaned up excess task: {task_id}")
+    
+    return cleaned
+
+
+def periodic_cleanup():
+    """Perform periodic cleanup - called from background thread"""
+    global last_cleanup_time
+    
+    from config import (SESSION_CLEANUP_INTERVAL_SECONDS, SESSION_MAX_AGE_HOURS,
+                       TASK_MAX_AGE_HOURS, MAX_SESSIONS_IN_MEMORY, MAX_TASKS_IN_MEMORY)
+    
+    current_time = time.time()
+    if current_time - last_cleanup_time < SESSION_CLEANUP_INTERVAL_SECONDS:
+        return
+    
+    last_cleanup_time = current_time
+    
+    print("Starting periodic cleanup...")
+    sessions_cleaned = cleanup_old_sessions(
+        max_age_hours=SESSION_MAX_AGE_HOURS,
+        max_sessions=MAX_SESSIONS_IN_MEMORY
+    )
+    tasks_cleaned = cleanup_old_tasks(
+        max_age_hours=TASK_MAX_AGE_HOURS,
+        max_tasks=MAX_TASKS_IN_MEMORY
+    )
+    
+    # Call the existing cleanup function for result files
+    from services import cleanup_old_result_files
+    cleanup_old_result_files(max_age_hours=TASK_MAX_AGE_HOURS)
+    
+    print(f"Cleanup completed: {sessions_cleaned} sessions, {tasks_cleaned} tasks")
+    print(f"Current state: {len(sessions)} sessions, {len(tasks)} tasks in memory")
+
+
+cleanup_thread = None
+
+def start_cleanup_thread():
+    """Start background cleanup thread"""
+    global cleanup_thread
+    
+    from config import SESSION_CLEANUP_INTERVAL_SECONDS
+    
+    def cleanup_loop():
+        while True:
+            try:
+                time.sleep(SESSION_CLEANUP_INTERVAL_SECONDS)
+                periodic_cleanup()
+            except Exception as e:
+                print(f"Error in cleanup thread: {e}")
+    
+    cleanup_thread = threading.Thread(target=cleanup_loop, daemon=True)
+    cleanup_thread.start()
+    print("Started cleanup thread")
+
+
+def cleanup_orphaned_temp_dirs():
+    """Clean up temporary directories left from crashed processes"""
+    import tempfile
+    import shutil
+    import glob
+    
+    temp_dir = Path(tempfile.gettempdir())
+    pattern = str(temp_dir / "vidove_task_*")
+    
+    cleaned = 0
+    for temp_path in glob.glob(pattern):
+        try:
+            shutil.rmtree(temp_path)
+            cleaned += 1
+            print(f"Cleaned orphaned temp directory: {temp_path}")
+        except Exception as e:
+            print(f"Failed to clean {temp_path}: {e}")
+    
+    print(f"Startup cleanup: removed {cleaned} orphaned temp directories")
+
+
+def run_task_with_semaphore(task_id, task_config, input_type, input_data, tasks, running_tasks):
+    """Wrapper to run task with semaphore for concurrency limiting"""
+    with task_semaphore:
+        from services import run_vidove_task
+        run_vidove_task(task_id, task_config, input_type, input_data, tasks, running_tasks)
+
+
 def cleanup_resources():
     """Cleanup function for application shutdown"""
     
@@ -676,7 +1062,6 @@ def cleanup_resources():
                 tasks[task_id].error = "Application shutdown"
     
     # Wait for threads to complete (with timeout)
-    import time
     start_time = time.time()
     timeout = 10  # 10 seconds timeout
     

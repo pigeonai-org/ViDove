@@ -1,0 +1,32 @@
+# Development Docker Compose Override
+# Use with: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  backend:
+    # Mount source code for hot reload (if using --reload flag)
+    volumes:
+      - ./src:/app/src
+      - ./entries:/app/entries
+      - ./demo/backend:/app/demo/backend
+      - ./demo/backend/uploads:/app/demo/backend/uploads
+      - ./demo/backend/results:/app/demo/backend/results
+    environment:
+      - LOG_LEVEL=DEBUG
+      - PYTHONUNBUFFERED=1
+    # Override command to enable reload
+    # Note: We use bash -c to cd into the correct directory first
+    command: >
+      bash -c "cd /app/demo/backend &&
+      /app/backend-venv/bin/python -m uvicorn main:app
+      --host 0.0.0.0
+      --port 8000
+      --reload
+      --limit-max-requests 1000
+      --limit-concurrency 1000
+      --h11-max-incomplete-event-size 536870912"
+    
+  frontend:
+    # For frontend dev, you might prefer to run npm start locally
+    # This configuration serves the built version
+    environment:
+      - NODE_ENV=development

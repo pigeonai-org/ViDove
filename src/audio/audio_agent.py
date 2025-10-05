@@ -24,6 +24,8 @@ class AudioAgent(ABC):
         # usage recording context
         self.task_id = (self.audio_config or {}).get("task_id")
         self.usage_log_path = (self.audio_config or {}).get("usage_log_path")
+        # agent conversation logger
+        self.agent_history_logger = None
         self.load_model()
         # Initialize VAD only if configured
         self.VAD_model = None
@@ -46,6 +48,10 @@ class AudioAgent(ABC):
 
     def set_task_id(self, task_id: str | None):
         self.task_id = task_id
+
+    def set_agent_history_logger(self, logger):
+        """Set the agent history logger for conversation logging"""
+        self.agent_history_logger = logger
 
     def _record_usage(
         self,
@@ -166,6 +172,11 @@ class GPT4oAudioAgent(AudioAgent):
         Transcribe a single (VAD-split) audio chunk via OpenAI gpt-4o(-mini)-transcribe.
         API returns plain text. We wrap it in one SRT-timed segment covering the clip.
         """
+        if self.agent_history_logger:
+            self.agent_history_logger.info(
+                '{"role": "audio_agent", "message": "🎧 GPT-4o Audio is processing... hang tight!"}'
+            )
+        
         try:
             with open(audio_path, "rb") as audio_file:
                 response = self.client.audio.transcriptions.create(
@@ -317,6 +328,11 @@ class WhisperAudioAgent(AudioAgent):
     def transcribe(self, audio_path, visual_cues=None):
         # Transcribe the given (per-VAD) audio clip with Whisper ASR.
         # Return SRT-like segments with HH:MM:SS,mmm timestamps relative to this clip.
+        if self.agent_history_logger:
+            self.agent_history_logger.info(
+                '{"role": "audio_agent", "message": "🎤 Whisper is listening... processing audio clip"}'
+            )
+        
         src_lang = (self.audio_config or {}).get("src_lang")
         result = self.ASR_model.get_transcript(audio_path, source_lang=src_lang)
         # If this path uses OpenAI Whisper API under the hood, record per-minute usage
@@ -461,12 +477,21 @@ class QwenAudioAgent(AudioAgent):
 class GeminiAudioAgent(AudioAgent):
     def __init__(self, model_name="gemini-2.5-flash", audio_config: dict = None):
         super().__init__(model_name, audio_config)
-        # Initialize agent history logger - will be set by task
-        self.agent_history_logger = None
-
-    def set_agent_history_logger(self, logger):
-        """Set the agent history logger from task"""
-        self.agent_history_logger = logger
+    
+    def _seconds_to_srt_time(self, secs: float) -> str:
+        """Convert seconds to SRT timestamp format HH:MM:SS,mmm"""
+        if secs is None:
+            secs = 0.0
+        if secs < 0:
+            secs = 0.0
+        total_ms = int(round(float(secs) * 1000))
+        ms = total_ms % 1000
+        total_s = total_ms // 1000
+        s = total_s % 60
+        total_m = total_s // 60
+        m = total_m % 60
+        h = total_m // 60
+        return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
     def load_model(self):
         from google import genai
@@ -505,6 +530,75 @@ class GeminiAudioAgent(AudioAgent):
                     print(f"Failed to parse response after {parsing_retries} attempts")
                     return None
 
+    def _normalize_timestamp(self, time_str, audio_duration_secs):
+        """
+        Normalize timestamp from Gemini response to HH:MM:SS,mmm format.
+        
+        Gemini may return timestamps in various problematic formats:
+        - Plain seconds: "1.250", "65.500" ✓ (correct, relative to clip start)
+        - MM:SS:mmm: "01:05:129" where this should be 65.129 seconds
+        - HH:MM:SS,mmm: "00:01:05,129" (65.129 seconds) ✓
+        
+        The key issue: When Gemini returns "00:00:805", it likely means either:
+        1. 0.805 seconds (805 milliseconds) - CORRECT interpretation
+        2. But if consecutive segments are only 80ms apart, that's wrong for speech
+        
+        This function converts to proper SRT format with validation.
+        """
+        import re
+        
+        if not time_str:
+            return "00:00:00,000"
+        
+        time_str = str(time_str).strip()
+        
+        # Case 1: Plain decimal seconds (e.g., "1.250", "65.5")
+        try:
+            secs = float(time_str)
+            secs = max(0.0, min(secs, audio_duration_secs))
+            return self._seconds_to_srt_time(secs)
+        except ValueError:
+            pass
+        
+        # Case 2: Time format with separators - parse carefully
+        normalized = re.sub(r'[^0-9]', ':', time_str)
+        parts = [p for p in normalized.split(':') if p]
+        
+        if not parts:
+            return "00:00:00,000"
+        
+        # Pad with zeros from the left to get [HH, MM, SS, mmm]
+        while len(parts) < 4:
+            parts.insert(0, '0')
+        
+        try:
+            hh = int(parts[0])
+            mm = int(parts[1])
+            ss = int(parts[2])
+            ms = int(parts[3])
+            
+            # Standard interpretation: HH:MM:SS,mmm
+            total_secs = hh * 3600 + mm * 60 + ss + ms / 1000.0
+            
+            # Sanity check: does this exceed clip duration significantly?
+            if total_secs > audio_duration_secs * 1.2:
+                # Format might be MM:SS:mmm (no hours)
+                # Reinterpret: [0, MM, SS, mmm] -> MM*60 + SS.mmm
+                total_secs = mm * 60 + ss + ms / 1000.0
+                
+                # Still too large? Maybe it's MM:fracSS:subfrac format
+                if total_secs > audio_duration_secs * 1.2:
+                    # Last resort: treat as milliseconds encoding
+                    # "00:00:805" could mean 0*60000 + 0*1000 + 805 = 805ms = 0.805s
+                    total_secs = (mm * 60000 + ss * 1000 + ms) / 1000.0
+            
+            # Clamp to valid range [0, audio_duration]
+            total_secs = max(0.0, min(total_secs, audio_duration_secs))
+            return self._seconds_to_srt_time(total_secs)
+            
+        except (ValueError, IndexError):
+            return "00:00:00,000"
+
     def transcribe(self, audio_path, visual_cues=None):
         if self.agent_history_logger:
             self.agent_history_logger.info(
@@ -513,6 +607,15 @@ class GeminiAudioAgent(AudioAgent):
 
         with open(audio_path, "rb") as audio:
             audio_data = audio.read()
+
+        # Get audio duration for timestamp validation
+        audio_duration_secs = 0.0
+        try:
+            from pydub import AudioSegment
+            seg_audio = AudioSegment.from_file(audio_path)
+            audio_duration_secs = len(seg_audio) / 1000.0
+        except Exception:
+            audio_duration_secs = 10.0  # fallback duration
 
         from google.genai import types
 
@@ -540,21 +643,24 @@ class GeminiAudioAgent(AudioAgent):
                     contents=contents,
                 )
                 # Parse content
-                resp = self.parse_response(response.text)
+                raw_resp = self.parse_response(response.text)
+                
+                # Normalize timestamps in the response
+                if raw_resp and isinstance(raw_resp, list):
+                    for seg in raw_resp:
+                        if isinstance(seg, dict):
+                            if 'start' in seg:
+                                seg['start'] = self._normalize_timestamp(seg['start'], audio_duration_secs)
+                            if 'end' in seg:
+                                seg['end'] = self._normalize_timestamp(seg['end'], audio_duration_secs)
+                resp = raw_resp
+                
                 # Best-effort usage logging via base
                 try:
                     meta = getattr(response, "usage_metadata", None)
                     pt = getattr(meta, "prompt_token_count", None) if meta else None
                     ct = getattr(meta, "candidates_token_count", None) if meta else None
                     tt = getattr(meta, "total_token_count", None) if meta else None
-                    # Also add clip duration for consistency
-                    try:
-                        from pydub import AudioSegment
-
-                        seg_audio = AudioSegment.from_file(audio_path)
-                        duration_secs = len(seg_audio) / 1000.0
-                    except Exception:
-                        duration_secs = None
                     self._record_usage(
                         provider="gemini",
                         model=self.model_name,
@@ -562,7 +668,7 @@ class GeminiAudioAgent(AudioAgent):
                         prompt_tokens=pt,
                         completion_tokens=ct,
                         total_tokens=tt,
-                        extra=({"duration_secs": duration_secs, "agent": "audio"} if duration_secs is not None else {"agent": "audio"}),
+                        extra=({"duration_secs": audio_duration_secs, "agent": "audio"} if audio_duration_secs is not None else {"agent": "audio"}),
                     )
                 except Exception:
                     pass

@@ -3,6 +3,27 @@ Configuration schema and constants for the ViDove web backend.
 """
 from models import ConfigurationValue
 
+# Memory management settings
+SESSION_CLEANUP_INTERVAL_SECONDS = 3600  # 1 hour
+SESSION_MAX_AGE_HOURS = 24
+TASK_MAX_AGE_HOURS = 48
+MAX_SESSIONS_IN_MEMORY = 1000
+MAX_TASKS_IN_MEMORY = 500
+MAX_CONCURRENT_TASKS = 3
+
+# Rate limiting and bot protection
+MAX_SESSIONS_PER_IP = 10  # Maximum sessions per IP address
+MAX_TASKS_PER_SESSION = 20  # Maximum tasks per session
+RATE_LIMIT_REQUESTS_PER_MINUTE = 60  # Max requests per IP per minute
+RATE_LIMIT_SESSION_CREATE_PER_HOUR = 20  # Max session creations per IP per hour
+RATE_LIMIT_TASK_CREATE_PER_HOUR = 10  # Max task creations per IP per hour
+RATE_LIMIT_FILE_UPLOAD_PER_HOUR = 10  # Max file uploads per IP per hour
+
+# Emergency memory protection
+MEMORY_EMERGENCY_THRESHOLD_PERCENT = 90  # Stop accepting new requests at 90% memory
+MEMORY_WARNING_THRESHOLD_PERCENT = 80  # Start aggressive cleanup at 80% memory
+ENABLE_EMERGENCY_PROTECTION = True  # Enable emergency memory protection
+
 
 # Configuration schema with proper typing
 CONFIGURATION_SCHEMA = {
@@ -24,6 +45,12 @@ CONFIGURATION_SCHEMA = {
         default="General",
         description="Domain/field of the content for specialized translation"
     ),
+    "num_workers": ConfigurationValue(
+        type="number",
+        range=[1, 16],
+        default=8,
+        description="Global number of worker threads for parallel processing"
+    ),
     "video_download.resolution": ConfigurationValue(
         type="select",
         options=[360, 480, 720, "best"],
@@ -32,7 +59,7 @@ CONFIGURATION_SCHEMA = {
     ),
     "translation.model": ConfigurationValue(
         type="select",
-        options=["gpt-3.5-turbo", "gpt-4", "gpt-4o", "Assistant", "Multiagent"],
+        options=["gpt-4", "gpt-4o-mini", "gpt-4o", "gpt-5", "gpt-5-mini"],
         default="gpt-4o",
         description="LLM model for translation"
     ),
@@ -42,16 +69,27 @@ CONFIGURATION_SCHEMA = {
         default=2000,
         description="Text chunk size for translation"
     ),
+    "translation.use_history": ConfigurationValue(
+        type="boolean",
+        default=True,
+        description="Include recent translation history in each request (may reduce throughput)"
+    ),
+    "translation.max_retries": ConfigurationValue(
+        type="number",
+        range=[0, 5],
+        default=1,
+        description="Max retries per chunk for transient API errors"
+    ),
     "audio.audio_agent": ConfigurationValue(
         type="select",
-        options=["GeminiAudioAgent"],
-        default="GeminiAudioAgent",
+        options=["GeminiAudioAgent", "WhisperAudioAgent", "QwenAudioAgent", "GPT4oAudioAgent"],
+        default="WhisperAudioAgent",
         description="Audio processing agent for transcription"
     ),
     "audio.VAD_model": ConfigurationValue(
         type="select",
         options=["pyannote/speaker-diarization-3.1", "API"],
-        default="pyannote/speaker-diarization-3.1",
+        default="API",
         description="Voice Activity Detection model"
     ),
     "audio.src_lang": ConfigurationValue(
@@ -66,9 +104,14 @@ CONFIGURATION_SCHEMA = {
         default="zh",
         description="Target language code for audio processing"
     ),
+    "vision.enable_vision": ConfigurationValue(
+        type="boolean",
+        default=False,
+        description="Enable vision processing for visual content analysis"
+    ),
     "vision.vision_model": ConfigurationValue(
         type="select",
-        options=["CLIP", "gpt-4o"],
+        options=["CLIP", "gpt-4o", "gpt-4o-mini"],
         default="gpt-4o",
         description="Vision model for visual content analysis"
     ),
@@ -160,7 +203,7 @@ CONFIGURATION_SCHEMA = {
     ),
     "MEMEORY.enable_local_knowledge": ConfigurationValue(
         type="boolean",
-        default=False,
+        default=True,
         description="Enable local knowledge base"
     ),
     "MEMEORY.enable_web_search": ConfigurationValue(
@@ -170,7 +213,7 @@ CONFIGURATION_SCHEMA = {
     ),
     "MEMEORY.enable_vision_knowledge": ConfigurationValue(
         type="boolean",
-        default=True,
+        default=False,
         description="Enable vision-based knowledge extraction"
     ),
     "output_type.video": ConfigurationValue(
@@ -197,7 +240,6 @@ WELCOME_MESSAGE = """Hello! I'm your ViDove translation assistant. I'll help you
 
 To get started, you can:
 📁 **Upload a file**: Drag and drop a video, audio, or SRT file into the chat, or use the upload button. Here's a [demo video](https://drive.google.com/file/d/1gyaAg2jMRfo8L5zg6FpvBzOHIJIV_r7U/view?usp=sharing) you can try out.
-🎬 **Share a YouTube URL**: Just paste any YouTube link directly in the chat
 💬 **Tell me your preferences**: What languages do you want to translate between?
 
 You can also ask me about:

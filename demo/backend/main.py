@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from typing import Dict, List, AsyncGenerator, Any
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, BackgroundTasks
+from fastapi import FastAPI, HTTPException, UploadFile, File, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
@@ -24,8 +24,13 @@ import endpoints
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan manager"""
-    # Startup code (if any) goes here
+    # Startup code
+    endpoints.start_cleanup_thread()
+    endpoints.cleanup_orphaned_temp_dirs()
+    print("ViDove backend started with memory management enabled")
+    
     yield
+    
     # Shutdown code
     endpoints.cleanup_resources()
 
@@ -48,21 +53,61 @@ app.add_middleware(
 )
 
 # Thread pool for task execution
-executor = ThreadPoolExecutor(max_workers=4)
+executor = ThreadPoolExecutor(max_workers=8)
 
 
-# Health check endpoint
+# Health check endpoints
 @app.get("/", response_model=Dict[str, str])
 async def root() -> Dict[str, str]:
-    """Health check endpoint"""
+    """Root endpoint"""
     return {"message": "ViDove Translation Assistant API", "version": "1.0.0"}
+
+
+@app.get("/health", response_model=Dict[str, str])
+async def health_check() -> Dict[str, str]:
+    """Health check endpoint for Docker healthcheck"""
+    return {"status": "healthy", "service": "vidove-backend"}
+
+
+@app.get("/api/system/memory")
+async def get_memory_stats() -> Dict[str, Any]:
+    """Get current memory statistics for monitoring"""
+    try:
+        import psutil
+        import os
+        
+        process = psutil.Process(os.getpid())
+        memory_info = process.memory_info()
+        
+        # Count running tasks
+        running_task_count = len([t for t in endpoints.tasks.values() if t.status == "RUNNING"])
+        
+        return {
+            "process_memory_mb": round(memory_info.rss / 1024 / 1024, 2),
+            "process_memory_percent": round(process.memory_percent(), 2),
+            "system_memory_total_mb": round(psutil.virtual_memory().total / 1024 / 1024, 2),
+            "system_memory_available_mb": round(psutil.virtual_memory().available / 1024 / 1024, 2),
+            "system_memory_percent": psutil.virtual_memory().percent,
+            "active_sessions": len(endpoints.sessions),
+            "active_tasks": running_task_count,
+            "total_tasks": len(endpoints.tasks),
+            "max_concurrent_tasks": endpoints.MAX_CONCURRENT_TASKS,
+            "available_task_slots": endpoints.MAX_CONCURRENT_TASKS - running_task_count
+        }
+    except ImportError:
+        return {
+            "error": "psutil not installed",
+            "active_sessions": len(endpoints.sessions),
+            "active_tasks": len([t for t in endpoints.tasks.values() if t.status == "RUNNING"]),
+            "total_tasks": len(endpoints.tasks)
+        }
 
 
 # Chat and Configuration endpoints
 @app.post("/api/chat/start", response_model=StartSessionResponse)
-async def start_chat_session() -> StartSessionResponse:
+async def start_chat_session(request: Request) -> StartSessionResponse:
     """Start a new configuration chat session"""
-    return await endpoints.start_chat_session()
+    return await endpoints.start_chat_session(request)
 
 
 @app.post("/api/chat/{session_id}/message", response_model=SendMessageResponse)
@@ -91,9 +136,9 @@ async def create_task(task_request: TaskRequest, background_tasks: BackgroundTas
 
 
 @app.post("/api/sessions/{session_id}/launch", response_model=CreateTaskResponse)
-async def launch_task_from_session(session_id: str) -> CreateTaskResponse:
+async def launch_task_from_session(session_id: str, request: Request) -> CreateTaskResponse:
     """Launch a translation task from a completed configuration session"""
-    return await endpoints.launch_task_from_session(session_id)
+    return await endpoints.launch_task_from_session(session_id, request)
 
 
 @app.get("/api/tasks/{task_id}/status", response_model=TaskStatus)
@@ -141,9 +186,9 @@ async def download_task_file(task_id: str, filename: str, session_id: str) -> Fi
 
 # File Upload endpoint
 @app.post("/api/upload/{session_id}", response_model=UploadFileResponse)
-async def upload_file(session_id: str, file: UploadFile = File(...)) -> UploadFileResponse:
+async def upload_file(session_id: str, file: UploadFile = File(...), request: Request = None) -> UploadFileResponse:
     """Upload a file for translation and associate it with a session"""
-    return await endpoints.upload_file(session_id, file)
+    return await endpoints.upload_file(session_id, file, request)
 
 
 # YouTube URL submission endpoint
@@ -164,9 +209,9 @@ if __name__ == "__main__":
             port=8000,
             limit_max_requests=1000,
             limit_concurrency=1000,
-            # Set request body size limit to 1GB (1024 * 1024 * 1024 bytes)
-            # This allows large video files to be uploaded
-            h11_max_incomplete_event_size= 2* 1024 * 1024 * 1024
+            # Set request body size limit to 512MB (reduced from 2GB for better memory management)
+            # This allows file uploads while leaving more memory for processing
+            h11_max_incomplete_event_size= 512 * 1024 * 1024
         )
     except KeyboardInterrupt:
         print("\nReceived interrupt signal, shutting down...")
