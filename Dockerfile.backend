@@ -71,4 +71,4 @@ CMD ["/app/backend-venv/bin/python", "-m", "uvicorn", "main:app", \
      "--port", "8000", \
      "--limit-max-requests", "1000", \
      "--limit-concurrency", "1000", \
-     "--h11-max-incomplete-event-size", "1073741824"]
+     "--h11-max-incomplete-event-size", "536870912"]

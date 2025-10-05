@@ -23,7 +23,7 @@ services:
       --reload
       --limit-max-requests 1000
       --limit-concurrency 1000
-      --h11-max-incomplete-event-size 1073741824"
+      --h11-max-incomplete-event-size 536870912"
     
   frontend:
     # For frontend dev, you might prefer to run npm start locally

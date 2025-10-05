@@ -3,6 +3,27 @@ Configuration schema and constants for the ViDove web backend.
 """
 from models import ConfigurationValue
 
+# Memory management settings
+SESSION_CLEANUP_INTERVAL_SECONDS = 3600  # 1 hour
+SESSION_MAX_AGE_HOURS = 24
+TASK_MAX_AGE_HOURS = 48
+MAX_SESSIONS_IN_MEMORY = 1000
+MAX_TASKS_IN_MEMORY = 500
+MAX_CONCURRENT_TASKS = 3
+
+# Rate limiting and bot protection
+MAX_SESSIONS_PER_IP = 10  # Maximum sessions per IP address
+MAX_TASKS_PER_SESSION = 20  # Maximum tasks per session
+RATE_LIMIT_REQUESTS_PER_MINUTE = 60  # Max requests per IP per minute
+RATE_LIMIT_SESSION_CREATE_PER_HOUR = 20  # Max session creations per IP per hour
+RATE_LIMIT_TASK_CREATE_PER_HOUR = 10  # Max task creations per IP per hour
+RATE_LIMIT_FILE_UPLOAD_PER_HOUR = 10  # Max file uploads per IP per hour
+
+# Emergency memory protection
+MEMORY_EMERGENCY_THRESHOLD_PERCENT = 90  # Stop accepting new requests at 90% memory
+MEMORY_WARNING_THRESHOLD_PERCENT = 80  # Start aggressive cleanup at 80% memory
+ENABLE_EMERGENCY_PROTECTION = True  # Enable emergency memory protection
+
 
 # Configuration schema with proper typing
 CONFIGURATION_SCHEMA = {
