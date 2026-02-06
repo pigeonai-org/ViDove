@@ -1,0 +1,75 @@
+# configuration for each task
+source_lang: EN
+target_lang: ZH
+domain: General
+
+# Global parallelism control
+num_workers: 8
+
+# Customize User Instruction
+instructions:
+  - "Keep the translation natural and fluent"
+  - "Use appropriate terminology for the domain"
+  - "Maintain the original tone and style"
+
+# YouTube Download Option
+video_download:
+  resolution: 480 # 360, 480, 720, best(best we can find)
+
+MEMEORY: 
+  enable_local_knowledge: False
+  enable_vision_knowledge: True
+  enable_web_search: False
+  local_knowledge_path: "./domain_dict"
+
+audio:
+  enable_audio: True
+  audio_agent: WhisperAudioAgent # clip or other vLLMs
+  model_path:  # replace it with your own model path
+  VAD_model: API # pyannote/speaker-diarization-3.1
+  src_lang: en
+  tgt_lang: zh
+
+vision:
+  enable_vision: True
+  vision_model: gpt-4o-mini # clip or other vLLMs
+  model_path: ./ViDove/vision_model/clip-vit-base-patch16 # replace it with your own model path
+  frame_cache_dir: ./cache #should be cleared after task finished
+  frame_per_seg: 4 # number of frame extracted from segment
+  
+# pre-process module config
+pre_process: 
+  sentence_form: True
+  spell_check: False
+  term_correct: True
+
+# Translation module config
+translation:
+  model: gpt-5 
+  chunk_size: 2000
+  use_history: True     # include recent translation history per request
+  max_retries: 1        # retries per chunk for transient API errors
+
+# post-process module config
+post_process:
+  enable_post_process: True
+
+proofreader: 
+  enable_proofreading: True
+  window_size: 5 # number of sentences per proofreading chunk
+  short_term_memory_len: 5 # maximum number of sentences stored in short term memory
+  enable_short_term_memory: False # whether to use short term memory for proofreading
+  verbose: True # whether to print the proofreading process
+
+editor:
+  enable_editor: True
+  editor_context_window: 10 # number of sentences to be provided as context for the editor(previous and next {n} sentences)
+  history_length: 5 # number of sentences to be provided as history for the editor(previous {n} sentences)
+
+# output type that user receive
+output_type: 
+  subtitle: srt
+  video: False
+  bilingual: False
+
+

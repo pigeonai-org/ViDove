@@ -1,0 +1,9 @@
+torch==2.7.0 # 2.6.0
+torchvision==0.22.0
+transformers
+torchaudio # ==2.0.1 ? ==2.7.0?
+numpy>=1.23.5
+qwen_omni_utils
+accelerate
+soundfile
+llvmlite

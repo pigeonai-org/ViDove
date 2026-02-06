@@ -1,0 +1,77 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: vidove-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONPATH=/app
+      - PIPELINE_VENV=/app/venv
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - CO_API_KEY=${CO_API_KEY}
+      - TAVILY_API_KEY=${TAVILY_API_KEY}
+      - PYANNOTE_API_KEY=${PYANNOTE_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - BACKEND_PORT=${BACKEND_PORT:-8000}
+      - MAX_UPLOAD_SIZE=${MAX_UPLOAD_SIZE:-1073741824}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - DEFAULT_SOURCE_LANG=${DEFAULT_SOURCE_LANG:-EN}
+      - DEFAULT_TARGET_LANG=${DEFAULT_TARGET_LANG:-ZH}
+      - DEFAULT_TRANSLATION_MODEL=${DEFAULT_TRANSLATION_MODEL:-gpt-5}
+    volumes:
+      # Mount results and uploads for persistence
+      - ./demo/backend/uploads:/app/demo/backend/uploads
+      - ./demo/backend/results:/app/demo/backend/results
+      # Optional: Mount domain_dict for custom dictionaries
+      - ./domain_dict:/app/domain_dict
+      # Optional: Mount local config if needed
+      - ./configs:/app/configs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+          cpus: '4'
+        reservations:
+          memory: 4G
+          cpus: '2'
+
+  frontend:
+    build:
+      context: ./demo/frontend
+      dockerfile: Dockerfile
+      args:
+        - REACT_APP_API_URL=http://localhost:8000
+    container_name: vidove-frontend
+    ports:
+      - "3000:80"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+networks:
+  default:
+    name: vidove-network

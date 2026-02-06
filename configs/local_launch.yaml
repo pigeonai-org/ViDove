@@ -1,0 +1,5 @@
+# launch config for local environment
+local_dump: ./local_dump
+# dictionary_path: ./domain_dict
+environ: local # demo or local
+api_source: openai

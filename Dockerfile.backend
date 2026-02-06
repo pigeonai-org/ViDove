@@ -1,0 +1,74 @@
+# ViDove Backend Container - FastAPI Backend + ViDove Pipeline
+FROM python:3.10-slim
+
+# Install system dependencies including git for pip VCS installs
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    fontconfig \
+    curl \
+    git \
+    build-essential \
+    gcc \
+    g++ \
+    python3-dev \
+    libssl-dev \
+    libffi-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv for fast Python package management
+RUN pip install --no-cache-dir uv
+
+# Set working directory
+WORKDIR /app
+
+# Copy Python project configuration files
+COPY pyproject.toml uv.lock ./
+
+# Install pipeline dependencies using uv in separate venv
+RUN uv venv /app/venv
+ENV UV_PROJECT_ENVIRONMENT=/app/venv
+RUN uv sync --no-dev --python /app/venv/bin/python
+
+# Install web backend dependencies in separate venv
+COPY demo/backend/requirements.txt ./backend_requirements.txt
+RUN uv venv /app/backend-venv
+RUN uv pip install --python /app/backend-venv/bin/python --no-cache-dir -r backend_requirements.txt
+
+# Install fonts (handle missing files gracefully)
+RUN mkdir -p /usr/local/share/fonts/truetype
+COPY fonts/ /tmp/fonts/
+RUN if [ -d "/tmp/fonts" ]; then \
+        find /tmp/fonts -name "*.otf" -exec cp {} /usr/local/share/fonts/truetype/ \; 2>/dev/null || true; \
+        find /tmp/fonts -name "*.ttc" -exec cp {} /usr/local/share/fonts/truetype/ \; 2>/dev/null || true; \
+        fc-cache -f -v; \
+        rm -rf /tmp/fonts; \
+    fi
+
+# Copy the entire project (excluding node_modules via .dockerignore)
+COPY . .
+
+# Create necessary directories
+RUN mkdir -p /app/local_dump /app/demo/backend/uploads /app/demo/backend/results
+
+# Set environment variables
+ENV PYTHONPATH=/app
+ENV PIPELINE_VENV=/app/venv
+ENV BACKEND_VENV=/app/backend-venv
+
+# Expose backend port
+EXPOSE 8000
+
+# Health check endpoint
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+  CMD curl -f http://localhost:8000/health || exit 1
+
+# Change to backend directory
+WORKDIR /app/demo/backend
+
+# Start FastAPI backend with increased request body size limit
+CMD ["/app/backend-venv/bin/python", "-m", "uvicorn", "main:app", \
+     "--host", "0.0.0.0", \
+     "--port", "8000", \
+     "--limit-max-requests", "1000", \
+     "--limit-concurrency", "1000", \
+     "--h11-max-incomplete-event-size", "536870912"]
