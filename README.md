@@ -9,7 +9,7 @@
 
 <br />
 <div align="center">
-  <a href="https://github.com/project-kxkg/ViDove">
+  <a href="https://github.com/pigeonai-org/ViDove">
     <img src="images/logo_draft.png" alt="Logo" width="80" height="80">
   </a>
 
@@ -25,9 +25,9 @@
     <!-- ·
     <a href="https://pigeonai.club/">🌐 Demo</a> -->
     ·
-    <a href="https://github.com/project-kxkg/ViDove/issues">🐛 Report Bug</a>
+    <a href="https://github.com/pigeonai-org/ViDove/issues">🐛 Report Bug</a>
     ·
-    <a href="https://github.com/project-kxkg/ViDove/issues">💡 Request Feature</a>
+    <a href="https://github.com/pigeonai-org/ViDove/issues">💡 Request Feature</a>
   </p>
 </div>
 
@@ -110,7 +110,7 @@ The easiest way to run ViDove is using Docker to host our web-demos:
 
 ```sh
 # 1. Clone the repository
-git clone https://github.com/project-kxkg/ViDove.git
+git clone https://github.com/pigeonai-org/ViDove.git
 cd ViDove
 
 # 2. Set up environment variables
@@ -132,7 +132,7 @@ For detailed Docker deployment guide, see the [Docker Deployment Doc](doc/DOCKER
 1. Get a OpenAI API Key at [https://platform.openai.com/api-keys](https://platform.openai.com/api-keys)
 2. Clone the repo
    ```sh
-   git clone https://github.com/project-kxkg/ViDove.git
+   git clone https://github.com/pigeonai-org/ViDove.git
    cd ViDove
    ```
 3. Install Requirements. We use `uv` for fast, reliable package management.
@@ -436,7 +436,7 @@ If you find ViDove useful for your research or applications, please cite our pap
     - [ ] Chinese
     - [ ] Spanish
 
-See the [open issues](https://github.com/project-kxkg/ViDove/issues) for a full list of proposed features (and known issues).
+See the [open issues](https://github.com/pigeonai-org/ViDove/issues) for a full list of proposed features (and known issues).
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
  -->
@@ -503,15 +503,15 @@ Use this space to list resources you find helpful and would like to give credit 
 
 <!-- MARKDOWN LINKS & IMAGES -->
 <!-- https://www.markdownguide.org/basic-syntax/#reference-style-links -->
-[contributors-shield]: https://img.shields.io/github/contributors/project-kxkg/ViDove.svg?style=for-the-badge
-[contributors-url]: https://github.com/project-kxkg/ViDove/graphs/contributors
-[forks-shield]: https://img.shields.io/github/forks/project-kxkg/ViDove.svg?style=for-the-badge
-[forks-url]: https://github.com/project-kxkg/ViDove/forks
-[stars-shield]: https://img.shields.io/github/stars/project-kxkg/ViDove.svg?style=for-the-badge
-[stars-url]: https://github.com/project-kxkg/ViDove/stargazers
-[issues-shield]: https://img.shields.io/github/issues/project-kxkg/ViDove.svg?style=for-the-badge
-[issues-url]: https://github.com/project-kxkg/ViDove/issues
-[license-shield]: https://img.shields.io/github/license/project-kxkg/ViDove.svg?style=for-the-badge
-[license-url]: https://github.com/project-kxkg/ViDove/blob/main/LICENSE
+[contributors-shield]: https://img.shields.io/github/contributors/pigeonai-org/ViDove.svg?style=for-the-badge
+[contributors-url]: https://github.com/pigeonai-org/ViDove/graphs/contributors
+[forks-shield]: https://img.shields.io/github/forks/pigeonai-org/ViDove.svg?style=for-the-badge
+[forks-url]: https://github.com/pigeonai-org/ViDove/forks
+[stars-shield]: https://img.shields.io/github/stars/pigeonai-org/ViDove.svg?style=for-the-badge
+[stars-url]: https://github.com/pigeonai-org/ViDove/stargazers
+[issues-shield]: https://img.shields.io/github/issues/pigeonai-org/ViDove.svg?style=for-the-badge
+[issues-url]: https://github.com/pigeonai-org/ViDove/issues
+[license-shield]: https://img.shields.io/github/license/pigeonai-org/ViDove.svg?style=for-the-badge
+[license-url]: https://github.com/pigeonai-org/ViDove/blob/main/LICENSE
 
 
