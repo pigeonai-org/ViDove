@@ -5,9 +5,9 @@ downloads/
 results/
 logs/
 test/
+data/
 .vscode/
 test.py
-data/
 test.srt
 test.txt
 log_*.csv
@@ -35,3 +35,4 @@ webvenv/
 build/
 node_modules/
 .env
+tools/

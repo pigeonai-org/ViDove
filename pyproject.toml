@@ -5,15 +5,12 @@ requires-python = ">=3.10, <3.11"
 dependencies = [
     # Core YAML/Config
     "PyYAML>=6.0.2",
-    
     # Media Processing
     "pydub>=0.25.1",
     "yt-dlp>=2023.0.0",
     "ffmpeg-python>=0.2.0",
-    
     # Audio/Speech Recognition (Core - API-based)
     "librosa>=0.11.0",
-    
     # ML/AI Core
     "torch>=2.2.0",
     "torchaudio>=2.2.0",
@@ -22,19 +19,16 @@ dependencies = [
     "pandas>=1.5.0",
     "numba>=0.56.0",
     "llvmlite>=0.40.0",
-    
     # HTTP/API Clients
     "aiohttp>=3.8.4, <4.0.0",
     "httpx>=0.27.0, <0.28.0",
     "requests>=2.28.0",
     "openai>=1.35.0,<2.0.0",
-    
     # Knowledge/RAG (Core)
     "llama-index>=0.8.42",
     "llama-index-embeddings-cohere>=0.5.0",
     "llama-index-llms-azure-openai>=0.1.10",
     "tavily-python>=0.1.9",
-    
     # Utilities
     "cryptography>=45.0.3",
     "pydantic>=2.0.0",
@@ -42,6 +36,7 @@ dependencies = [
     "typing-extensions>=4.8.0",
     "google-genai>=1.1.0",
     "opencv-python>=4.8.1.78",
+    "streamlit>=1.51.0",
 ]
 
 [project.optional-dependencies]

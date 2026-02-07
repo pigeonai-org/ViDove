@@ -1,6 +1,10 @@
+import json
 import logging
+import os
 import traceback
 import warnings
+from collections import deque
+from datetime import datetime
 from time import sleep
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import random
@@ -8,6 +12,11 @@ import random
 import openai
 from llama_index.core import PromptTemplate
 from tqdm import tqdm
+
+try:  # Optional dependency for memory telemetry
+    import psutil  # type: ignore
+except ImportError:  # pragma: no cover - optional dependency
+    psutil = None
 
 from src.memory.basic_rag import BasicRAG
 from src.memory.direct_search_RAG import TavilySearchRAG
@@ -56,6 +65,17 @@ class Translator:
         self.translation_history = []
         self.srt = None
         self.usage_log_path = usage_log_path
+
+        self.summary_interval = self._resolve_summary_interval()
+        self._processed_chunks = 0
+        self._recent_translations = deque(maxlen=3)
+
+        if self.summary_interval > 0:
+            self.task_logger.info(
+                f"Live translation summaries enabled every {self.summary_interval} chunks"
+            )
+        else:
+            self.task_logger.info("Live translation summaries disabled")
 
         if self.model_name == "Assistant":
             self.translator = Assistant(
@@ -201,6 +221,7 @@ class Translator:
             self.task_logger.info(f"source text: {sentence}")
             self.task_logger.info(f"translate text: {translation}")
             self.srt.set_translation(translation, range_, self.model_name, self.task_id)
+            self._log_progress_snapshot(range_, translation)
         
         self.agent_history_logger.info('{"role": "translator", "message": "Whew, translation marathon complete! If you spot a typo, it was totally intentional..."}')
 
@@ -337,5 +358,91 @@ class Translator:
             self.task_logger.info(f"source text: {sentence}")
             self.task_logger.info(f"translate text: {translation}")
             self.srt.set_translation(translation, abs_range, self.model_name, self.task_id)
+            self._log_progress_snapshot(abs_range, translation)
 
         self.agent_history_logger.info('{"role": "translator", "message": "Parallel translation complete. All chunks processed."}')
+
+    def _resolve_summary_interval(self) -> int:
+        """Determine how frequently to emit live translation summaries."""
+        default_interval = 5
+        env_value = os.getenv("VIDOVE_LIVE_SUMMARY_INTERVAL")
+        if env_value:
+            try:
+                interval = int(env_value)
+                if interval > 0:
+                    return interval
+                self.task_logger.warning(
+                    "VIDOVE_LIVE_SUMMARY_INTERVAL must be a positive integer; using default"
+                )
+            except ValueError:
+                self.task_logger.warning(
+                    "Invalid VIDOVE_LIVE_SUMMARY_INTERVAL value; using default"
+                )
+        return default_interval
+
+    def _log_progress_snapshot(self, abs_range, translation: str | None) -> None:
+        """Emit a progress message into the agent history at configured intervals."""
+        self._processed_chunks += 1
+
+        if translation:
+            self._recent_translations.append(translation.strip())
+
+        if self.summary_interval <= 0 or self._processed_chunks % self.summary_interval != 0:
+            return
+
+        memory_meta = {}
+        memory_message = "Memory stats unavailable"
+        if psutil is not None:
+            try:
+                process = psutil.Process(os.getpid())
+                rss_mb = round(process.memory_info().rss / (1024 * 1024), 2)
+                process_percent = round(process.memory_percent(), 2)
+                system_info = psutil.virtual_memory()
+                system_percent = round(system_info.percent, 2)
+                memory_meta = {
+                    "process_rss_mb": rss_mb,
+                    "process_percent": process_percent,
+                    "system_percent": system_percent,
+                }
+                memory_message = (
+                    f"Memory usage: {rss_mb} MB RSS (process {process_percent}% / system {system_percent}%)"
+                )
+            except Exception:
+                # Memory inspection is best-effort; keep UI responsive even if psutil is missing.
+                pass
+
+        recent_preview = [self._truncate_text(t) for t in self._recent_translations if t]
+        if recent_preview:
+            summary_preview = " | ".join(recent_preview)
+        else:
+            summary_preview = "No translations recorded yet."
+
+        range_text = "unknown lines"
+        if isinstance(abs_range, tuple) and len(abs_range) == 2:
+            range_text = f"lines {abs_range[0]}-{abs_range[1]}"
+
+        payload = {
+            "role": "translation_monitor",
+            "timestamp": f"{datetime.utcnow().isoformat(timespec='seconds')}Z",
+            "message": (
+                f"Progress checkpoint after {self._processed_chunks} chunks ({range_text}). "
+                f"{memory_message} Recent output: {summary_preview}"
+            ),
+            "processed_chunks": self._processed_chunks,
+        }
+
+        if memory_meta:
+            payload["memory"] = memory_meta
+
+        if recent_preview:
+            payload["recent_translations"] = recent_preview
+
+        self.agent_history_logger.info(json.dumps(payload, ensure_ascii=False))
+
+    @staticmethod
+    def _truncate_text(text: str, limit: int = 120) -> str:
+        """Trim translation text for compact status summaries."""
+        clean_text = text.replace("\n", " ").strip()
+        if len(clean_text) <= limit:
+            return clean_text
+        return f"{clean_text[:limit-3]}..."
