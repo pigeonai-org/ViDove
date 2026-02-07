@@ -478,7 +478,7 @@ class QwenAudioAgent(AudioAgent):
 
 
 class GeminiAudioAgent(AudioAgent):
-    def __init__(self, model_name="gemini-2.5-flash", audio_config: dict = None):
+    def __init__(self, model_name="gemini-3-flash-preview", audio_config: dict = None):
         super().__init__(model_name, audio_config)
 
     def _seconds_to_srt_time(self, secs: float) -> str:
