@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 import math
 import os
+from pathlib import Path
 import re
 import tempfile
 import torch
@@ -14,6 +15,7 @@ stable_whisper = None
 whisper = None
 WhisperForConditionalGeneration = None
 WhisperProcessor = None
+dashscope = None
 
 
 class ASR(ABC):
@@ -56,16 +58,24 @@ class ASR(ABC):
     @staticmethod
     def create(method, **kwargs):
         """Factory method to create appropriate ASR instance"""
-        if method == "whisper-api":
+        raw_method = method or ""
+        method_name = (
+            raw_method.lower() if isinstance(raw_method, str) else str(raw_method).lower()
+        )
+
+        if method_name == "whisper-api":
             return WhisperAPIASR(**kwargs)
-        elif "stable" in method:
-            whisper_model = method.split("-")[2]
+        elif method_name in {"qwen-asr-flash", "qwen3-asr-flash", "qwen-asr"}:
+            model_name = kwargs.pop("model_name", "qwen3-asr-flash")
+            return Qwen3ASRFlashASR(model_name=model_name, **kwargs)
+        elif "stable" in method_name:
+            whisper_model = raw_method.split("-")[2]
             return StableWhisperASR(whisper_model=whisper_model, **kwargs)
-        elif "oai" in method:
-            model_id = method.split("-")[2] if "-" in method else "large-v3"
+        elif "oai" in method_name:
+            model_id = raw_method.split("-")[2] if "-" in raw_method else "large-v3"
             return OAIWhisperASR(model_id=model_id, **kwargs)
         else:
-            return HuggingfaceWhisperASR(model_id=method, **kwargs)
+            return HuggingfaceWhisperASR(model_id=raw_method, **kwargs)
 
 
 class WhisperAPIASR(ASR):
@@ -226,6 +236,186 @@ class WhisperAPIASR(ASR):
             lines.append(e.get("text", ""))
             lines.append("")
         return "\n".join(lines).strip() + "\n"
+
+
+class Qwen3ASRFlashASR(ASR):
+    """Implementation of ASR using DashScope qwen3-asr-flash."""
+
+    def __init__(
+        self,
+        model_name="qwen3-asr-flash",
+        api_key=None,
+        asr_options=None,
+        system_prompt="",
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        global dashscope
+        if dashscope is None:
+            try:
+                import dashscope as _dashscope
+
+                dashscope = _dashscope
+            except ImportError:
+                raise ImportError("Please install dashscope: pip install dashscope")
+
+        self.model_name = model_name or "qwen3-asr-flash"
+        self.api_key = api_key or os.getenv("DASHSCOPE_API_KEY")
+        self.system_prompt = system_prompt or ""
+        self.asr_options = {"enable_lid": True, "enable_itn": False}
+        if isinstance(asr_options, dict):
+            self.asr_options.update(asr_options)
+        self.last_usage = None
+
+    def get_transcript(self, audio_path, source_lang=None, init_prompt=None):
+        try:
+            if not self.api_key:
+                raise ValueError(
+                    "DASHSCOPE_API_KEY is required for qwen3-asr-flash transcription."
+                )
+
+            messages = [
+                {
+                    "role": "system",
+                    "content": [{"text": (init_prompt or self.system_prompt or "").strip()}],
+                },
+                {
+                    "role": "user",
+                    "content": [{"audio": self._to_audio_uri(audio_path)}],
+                },
+            ]
+
+            opts = dict(self.asr_options)
+            if source_lang:
+                opts.setdefault("language", str(source_lang).lower())
+
+            response = dashscope.MultiModalConversation.call(
+                api_key=self.api_key,
+                model=self.model_name,
+                messages=messages,
+                result_format="message",
+                asr_options=opts,
+            )
+
+            self.last_usage = self._extract_usage(response)
+            return self._extract_text(response)
+        except Exception as e:
+            self.log(f"Qwen3ASRFlashASR error: {e}")
+            traceback.print_exc()
+            self.last_usage = None
+            return None
+
+    def _to_audio_uri(self, audio_path: str) -> str:
+        if re.match(r"^https?://", str(audio_path), flags=re.IGNORECASE):
+            return str(audio_path)
+        local_file = Path(audio_path).expanduser()
+        if not local_file.exists():
+            raise FileNotFoundError(f"Audio file not found: {audio_path}")
+        return local_file.resolve().as_uri()
+
+    def _extract_text(self, response) -> str | None:
+        status_code = getattr(response, "status_code", None)
+        if status_code is not None and int(status_code) >= 400:
+            err = getattr(response, "message", None) or getattr(response, "code", None)
+            raise RuntimeError(f"DashScope request failed ({status_code}): {err}")
+
+        output = getattr(response, "output", None)
+        if output is None and isinstance(response, dict):
+            output = response.get("output")
+
+        text_items = []
+
+        choices = None
+        if output is not None:
+            choices = getattr(output, "choices", None)
+            if choices is None and isinstance(output, dict):
+                choices = output.get("choices")
+
+        for choice in choices or []:
+            if isinstance(choice, dict):
+                message = choice.get("message")
+            else:
+                message = getattr(choice, "message", None)
+            if not message:
+                continue
+
+            if isinstance(message, dict):
+                content = message.get("content")
+            else:
+                content = getattr(message, "content", None)
+
+            text_items.extend(self._extract_text_items(content))
+
+        if not text_items:
+            if output is not None:
+                text_items.extend(self._extract_text_items(output))
+            text_items.extend(self._extract_text_items(response))
+
+        merged_text = "\n".join(t for t in text_items if t).strip()
+        return merged_text or None
+
+    def _extract_text_items(self, payload) -> list[str]:
+        if payload is None:
+            return []
+        if isinstance(payload, str):
+            return [payload.strip()] if payload.strip() else []
+        if isinstance(payload, list):
+            texts = []
+            for item in payload:
+                texts.extend(self._extract_text_items(item))
+            return texts
+        if isinstance(payload, dict):
+            texts = []
+            for key in ("text", "transcript", "asr_text", "value"):
+                value = payload.get(key)
+                if isinstance(value, str) and value.strip():
+                    texts.append(value.strip())
+            if not texts:
+                for value in payload.values():
+                    texts.extend(self._extract_text_items(value))
+            return texts
+        if hasattr(payload, "text") and isinstance(payload.text, str):
+            return [payload.text.strip()] if payload.text.strip() else []
+        return []
+
+    def _extract_usage(self, response) -> dict:
+        usage = {}
+
+        candidates = [
+            getattr(response, "usage", None),
+            getattr(getattr(response, "output", None), "usage", None),
+        ]
+        if isinstance(response, dict):
+            candidates.append(response.get("usage"))
+            if isinstance(response.get("output"), dict):
+                candidates.append(response["output"].get("usage"))
+
+        parsed = None
+        for item in candidates:
+            if not item:
+                continue
+            if isinstance(item, dict):
+                parsed = item
+                break
+            parsed = {
+                "prompt_tokens": getattr(item, "prompt_tokens", None)
+                or getattr(item, "input_tokens", None),
+                "completion_tokens": getattr(item, "completion_tokens", None)
+                or getattr(item, "output_tokens", None),
+                "total_tokens": getattr(item, "total_tokens", None),
+            }
+            break
+
+        if isinstance(parsed, dict):
+            usage["prompt_tokens"] = parsed.get("prompt_tokens") or parsed.get(
+                "input_tokens"
+            )
+            usage["completion_tokens"] = parsed.get("completion_tokens") or parsed.get(
+                "output_tokens"
+            )
+            usage["total_tokens"] = parsed.get("total_tokens")
+
+        return usage
 
 
 class StableWhisperASR(ASR):

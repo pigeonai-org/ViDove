@@ -11,11 +11,14 @@ from logging import getLogger
 from pydub import AudioSegment
 
 # Add the project root directory to the Python path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 from src.SRT.srt import SrtScript
 
 logger = getLogger(__name__)
+
 
 class VAD(ABC):
     def __init__(self, src_lang: str, tgt_lang: str, min_segment_seconds: float = 1.0):
@@ -26,7 +29,9 @@ class VAD(ABC):
         self.min_segment_seconds = max(0.0, float(min_segment_seconds))
 
     @abstractmethod
-    def get_speaker_segments(self, audio_path: str, webhook_url: str | None = None) -> SrtScript:
+    def get_speaker_segments(
+        self, audio_path: str, webhook_url: str | None = None
+    ) -> SrtScript:
         """Return an ``SrtScript`` describing speaker segments for ``audio_path``."""
         raise NotImplementedError
 
@@ -68,7 +73,18 @@ class VAD(ABC):
         m = total_m % 60
         h = total_m // 60
         return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
-    
+
+    @staticmethod
+    def _ms_to_filename_time(ms: int) -> str:
+        """Convert milliseconds to HH-MM-SS-mmm for filenames."""
+        total_s = ms // 1000
+        rem_ms = ms % 1000
+        s = total_s % 60
+        total_m = total_s // 60
+        m = total_m % 60
+        h = total_m // 60
+        return f"{h:02d}-{m:02d}-{s:02d}-{rem_ms:03d}"
+
     @staticmethod
     def clip_audio_and_save(srt: SrtScript, audio_path: str, output_dir: str):
         """Cut audio segments quickly.
@@ -86,9 +102,7 @@ class VAD(ABC):
             raise
 
         normalized = (
-            base_audio.set_channels(1)
-            .set_frame_rate(16000)
-            .set_sample_width(2)
+            base_audio.set_channels(1).set_frame_rate(16000).set_sample_width(2)
         )
 
         tasks = []
@@ -96,7 +110,11 @@ class VAD(ABC):
         # Optional throttling to avoid overloading backend when many segments
         sample_rate = max(
             1,
-            int(os.getenv("VAD_AUDIO_SAMPLE_RATE", os.getenv("VAD_VIDEO_SAMPLE_RATE", "1"))),
+            int(
+                os.getenv(
+                    "VAD_AUDIO_SAMPLE_RATE", os.getenv("VAD_VIDEO_SAMPLE_RATE", "1")
+                )
+            ),
         )
         max_clips_env = os.getenv(
             "VAD_AUDIO_MAX_CLIPS",
@@ -123,12 +141,17 @@ class VAD(ABC):
             end_ms = min(end_ms, full_duration_ms)
             if end_ms <= start_ms:
                 continue
-            output_filename = os.path.join(output_dir, f"segment_{start_ms}_{end_ms}.wav")
+            output_filename = os.path.join(
+                output_dir,
+                f"segment_{VAD._ms_to_filename_time(start_ms)}_{VAD._ms_to_filename_time(end_ms)}.wav",
+            )
             segment.audio_path = output_filename
 
             tasks.append((start_ms, end_ms, output_filename))
 
-        max_workers = int(os.getenv("VAD_FFMPEG_WORKERS", str(min(32, (os.cpu_count() or 4)))))
+        max_workers = int(
+            os.getenv("VAD_FFMPEG_WORKERS", str(min(32, (os.cpu_count() or 4))))
+        )
         errors = []
 
         def write_segment(start_ms: int, end_ms: int, output_filename: str):
@@ -139,7 +162,10 @@ class VAD(ABC):
 
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             futures = {
-                pool.submit(write_segment, start_ms, end_ms, output_filename): (start_ms, end_ms)
+                pool.submit(write_segment, start_ms, end_ms, output_filename): (
+                    start_ms,
+                    end_ms,
+                )
                 for (start_ms, end_ms, output_filename) in tasks
             }
             for fut in as_completed(futures):
@@ -150,7 +176,7 @@ class VAD(ABC):
                     errors.append((s_ms, e_ms, str(e)))
         for s_ms, e_ms, msg in errors:
             logger.error("Error processing audio segment %s-%s: %s", s_ms, e_ms, msg)
-    
+
     @staticmethod
     def clip_video_and_save(srt: SrtScript, video_path: str, output_dir: str):
         """Cut video segments efficiently for vision cues.
@@ -192,37 +218,69 @@ class VAD(ABC):
             start_time_str = str(datetime.timedelta(milliseconds=start_ms))
             duration_str = str(datetime.timedelta(milliseconds=duration_ms))
 
-            output_filename = os.path.join(output_dir, f"segment_{start_ms}_{end_ms}.mp4")
+            output_filename = os.path.join(
+                output_dir,
+                f"segment_{VAD._ms_to_filename_time(start_ms)}_{VAD._ms_to_filename_time(end_ms)}.mp4",
+            )
             segment.video_path = output_filename
 
-            tasks.append((start_ms, end_ms, start_time_str, duration_str, output_filename))
+            tasks.append(
+                (start_ms, end_ms, start_time_str, duration_str, output_filename)
+            )
 
         try:
             affinity = len(os.sched_getaffinity(0))  # type: ignore[attr-defined]
         except AttributeError:  # pragma: no cover - platform specific
             affinity = os.cpu_count() or 1
-        logger.info("Preparing %s video segments for clipping with %s CPU cores", len(tasks), affinity)
+        logger.info(
+            "Preparing %s video segments for clipping with %s CPU cores",
+            len(tasks),
+            affinity,
+        )
 
-        max_workers = int(os.getenv("VAD_FFMPEG_WORKERS", str(min(16, (os.cpu_count() or 4)))))
+        max_workers = int(
+            os.getenv("VAD_FFMPEG_WORKERS", str(min(16, (os.cpu_count() or 4))))
+        )
         errors = []
 
-        def process_segment(start_ms: int, end_ms: int, start_time_str: str, duration_str: str, output_filename: str):
+        def process_segment(
+            start_ms: int,
+            end_ms: int,
+            start_time_str: str,
+            duration_str: str,
+            output_filename: str,
+        ):
             audio_clip = video_audio[start_ms:end_ms]
             if len(audio_clip) == 0:
                 return None
             audio_bytes = VAD._audiosegment_to_wav_bytes(audio_clip)
             cmd = [
-                "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-                "-ss", start_time_str, "-i", video_path,
-                "-i", "pipe:0",
-                "-t", duration_str,
-                "-map", "0:v:0",
-                "-map", "1:a:0",
-                "-c:v", "copy",
-                "-c:a", "pcm_s16le",
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-ss",
+                start_time_str,
+                "-i",
+                video_path,
+                "-i",
+                "pipe:0",
+                "-t",
+                duration_str,
+                "-map",
+                "0:v:0",
+                "-map",
+                "1:a:0",
+                "-c:v",
+                "copy",
+                "-c:a",
+                "pcm_s16le",
                 "-shortest",
-                "-avoid_negative_ts", "1",
-                "-movflags", "+faststart",
+                "-avoid_negative_ts",
+                "1",
+                "-movflags",
+                "+faststart",
                 output_filename,
             ]
             try:
@@ -235,12 +293,23 @@ class VAD(ABC):
                 )
                 return None
             except subprocess.CalledProcessError as exc:
-                stderr = exc.stderr.decode("utf-8", errors="ignore") if exc.stderr else str(exc)
+                stderr = (
+                    exc.stderr.decode("utf-8", errors="ignore")
+                    if exc.stderr
+                    else str(exc)
+                )
                 return stderr
 
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             futures = {
-                pool.submit(process_segment, s_ms, e_ms, start_str, duration_str, output_filename): (s_ms, e_ms)
+                pool.submit(
+                    process_segment,
+                    s_ms,
+                    e_ms,
+                    start_str,
+                    duration_str,
+                    output_filename,
+                ): (s_ms, e_ms)
                 for (s_ms, e_ms, start_str, duration_str, output_filename) in tasks
             }
             for fut in as_completed(futures):

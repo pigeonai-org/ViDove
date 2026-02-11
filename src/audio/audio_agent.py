@@ -380,6 +380,115 @@ class WhisperAudioAgent(AudioAgent):
         return norm
 
 
+class Qwen3ASRAudioAgent(AudioAgent):
+    def __init__(
+        self, model_name="qwen3-asr-flash", audio_config: dict | None = None
+    ):
+        super().__init__(model_name, audio_config=audio_config or {})
+
+    def load_model(self):
+        cfg = self.audio_config or {}
+        asr_options = cfg.get("asr_options") if isinstance(cfg.get("asr_options"), dict) else {}
+        api_key = cfg.get("dashscope_api_key") or cfg.get("DASHSCOPE_API_KEY")
+        system_prompt = cfg.get("qwen_asr_system_prompt", "")
+        self.ASR_model = ASR.create(
+            "qwen3-asr-flash",
+            model_name=self.model_name,
+            api_key=api_key,
+            asr_options=asr_options,
+            system_prompt=system_prompt,
+        )
+
+    def analyze_audio(self, audio_path):
+        # ASR-only agent; no separate audio analysis endpoint.
+        return None
+
+    def _seconds_to_srt_time(self, secs: float) -> str:
+        if secs is None:
+            secs = 0.0
+        if secs < 0:
+            secs = 0.0
+        total_ms = int(round(float(secs) * 1000))
+        ms = total_ms % 1000
+        total_s = total_ms // 1000
+        s = total_s % 60
+        total_m = total_s // 60
+        m = total_m % 60
+        h = total_m // 60
+        return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+    def _build_init_prompt(self, visual_cues=None):
+        base_prompt = (self.audio_config or {}).get("qwen_asr_system_prompt", "").strip()
+        if visual_cues:
+            visual_prompt = f"Visual context for disambiguation: {visual_cues}"
+            return f"{base_prompt}\n{visual_prompt}".strip() if base_prompt else visual_prompt
+        return base_prompt or None
+
+    def _normalize_segments(self, transcript, duration_secs):
+        if isinstance(transcript, str):
+            return [
+                {
+                    "start": self._seconds_to_srt_time(0.0),
+                    "end": self._seconds_to_srt_time(duration_secs),
+                    "text": transcript.strip(),
+                }
+            ]
+
+        normalized = []
+        for seg in transcript or []:
+            start = seg.get("start", 0.0)
+            end = seg.get("end", duration_secs)
+            text = (seg.get("text", "") or "").strip()
+            if isinstance(start, str):
+                start_srt = start
+            else:
+                start_srt = self._seconds_to_srt_time(start)
+            if isinstance(end, str):
+                end_srt = end
+            else:
+                end_srt = self._seconds_to_srt_time(end)
+            if text:
+                normalized.append({"start": start_srt, "end": end_srt, "text": text})
+
+        return normalized
+
+    def transcribe(self, audio_path, visual_cues=None):
+        if self.agent_history_logger:
+            self.agent_history_logger.info(
+                '{"role": "audio_agent", "message": "🎙️ Qwen3 ASR is transcribing this audio clip..."}'
+            )
+
+        src_lang = (self.audio_config or {}).get("src_lang")
+        init_prompt = self._build_init_prompt(visual_cues=visual_cues)
+        transcript = self.ASR_model.get_transcript(
+            audio_path, source_lang=src_lang, init_prompt=init_prompt
+        )
+        if not transcript:
+            return []
+
+        duration_secs = 0.0
+        try:
+            from pydub import AudioSegment
+
+            seg_audio = AudioSegment.from_file(audio_path)
+            duration_secs = len(seg_audio) / 1000.0
+        except Exception:
+            duration_secs = 10.0
+
+        usage = getattr(self.ASR_model, "last_usage", {}) or {}
+        self._record_usage(
+            provider="dashscope",
+            model=self.model_name,
+            category="audio",
+            prompt_tokens=usage.get("prompt_tokens"),
+            completion_tokens=usage.get("completion_tokens"),
+            total_tokens=usage.get("total_tokens"),
+            extra={"duration_secs": duration_secs, "agent": "audio"},
+        )
+
+        return self._normalize_segments(transcript, duration_secs)
+
+
 class QwenAudioAgent(AudioAgent):
     def __init__(self, model_name="Qwen/Qwen2-Audio-7B-Instruct"):
         super().__init__(model_name)

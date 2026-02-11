@@ -37,6 +37,8 @@ dependencies = [
     "google-genai>=1.1.0",
     "opencv-python>=4.8.1.78",
     "streamlit>=1.51.0",
+    "pyannote-audio>=4.0.1",
+    "dashscope>=1.25.12",
 ]
 
 [project.optional-dependencies]

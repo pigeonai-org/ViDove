@@ -24,7 +24,7 @@ MEMEORY:
 
 audio:
   enable_audio: True
-  audio_agent: GeminiAudioAgent # clip or other vLLMs
+  audio_agent: WhisperAudioAgent # clip or other vLLMs
   model_path:  # replace it with your own model path
   VAD_model: API # pyannote/speaker-diarization-3.1 or pyannote/speaker-diarization-precision-2
   src_lang: en

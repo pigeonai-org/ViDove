@@ -21,8 +21,15 @@ from src.memory.basic_rag import BasicRAG
 from src.memory.direct_search_RAG import TavilySearchRAG
 from src.translators.translator import Translator
 from src.vision.gpt_vision_agent import GptVisionAgent, CLIPVisionAgent
-from src.audio.audio_agent import GeminiAudioAgent, WhisperAudioAgent, GPT4oAudioAgent
+from src.audio.audio_agent import (
+    GeminiAudioAgent,
+    WhisperAudioAgent,
+    GPT4oAudioAgent,
+    Qwen3ASRAudioAgent,
+)
 from src.editorial.editor import EditorAgent
+
+
 class TaskStatus(str, Enum):
     """
     An enumeration class representing the different statuses a task can have in the translation pipeline.
@@ -86,7 +93,7 @@ class Task:
         self.post_setting = task_cfg["post_process"]
         self.chunk_size = task_cfg["translation"]["chunk_size"]
         self.api_source = task_cfg["api_source"]
-        
+
         self.proofreader_setting = task_cfg["proofreader"]
         self.editor_setting = task_cfg["editor"]
 
@@ -114,11 +121,13 @@ class Task:
         # log agent conversation history
         self.agent_history_logger = logging.getLogger(f"agent_history_{task_id}")
         self.agent_history_logger.setLevel(logging.INFO)
-        agent_history_file_handler = logging.FileHandler(f"{self.task_local_dir}/agent_history.jsonl", "w", encoding="utf-8")
+        agent_history_file_handler = logging.FileHandler(
+            f"{self.task_local_dir}/agent_history.jsonl", "w", encoding="utf-8"
+        )
         self.agent_history_logger.addHandler(agent_history_file_handler)
         # usage log path for per-request token usage events
         self.usage_log_path = f"{self.task_local_dir}/usage.jsonl"
-        
+
         print(f"Task ID: {self.task_id}")
         self.task_logger.info(f"Task ID: {self.task_id}")
 
@@ -133,10 +142,14 @@ class Task:
         elif self.api_source == "azure":
             self.task_logger.info("Using Azure OpenAI API")
             if "AZURE_OPENAI_API_KEY" in task_cfg:
-                self.task_logger.info("Using AZURE_OPENAI_API_KEY from gradio interface.")
+                self.task_logger.info(
+                    "Using AZURE_OPENAI_API_KEY from gradio interface."
+                )
                 self.oai_api_key = task_cfg["AZURE_OPENAI_API_KEY"]
             else:
-                self.task_logger.info("Using AZURE_OPENAI_API_KEY from environment variable.")
+                self.task_logger.info(
+                    "Using AZURE_OPENAI_API_KEY from environment variable."
+                )
                 self.oai_api_key = getenv("AZURE_OPENAI_API_KEY")
         self.task_logger.info(
             f"{self.source_lang} -> {self.target_lang} task in {self.domain}"
@@ -157,18 +170,24 @@ class Task:
         if self.api_source == "openai":
             self.client = OpenAI(api_key=self.oai_api_key)
         elif self.api_source == "azure":
-            self.client = AzureOpenAI(api_key=self.oai_api_key, azure_endpoint=getenv("AZURE_OPENAI_ENDPOINT"),api_version="2024-05-01-preview")
-        
+            self.client = AzureOpenAI(
+                api_key=self.oai_api_key,
+                azure_endpoint=getenv("AZURE_OPENAI_ENDPOINT"),
+                api_version="2024-05-01-preview",
+            )
+
         # init memory module
         if self.memory_setting["enable_local_knowledge"] and self.domain != "General":
             self.local_knowledge = BasicRAG(self.task_logger, self.domain)
             data_dir = f"{self.memory_setting['local_knowledge_path']}/{self.domain}"
-            self.local_knowledge.load_knowledge_base(data_dir=data_dir, num_retrievals = 10)
-        
+            self.local_knowledge.load_knowledge_base(
+                data_dir=data_dir, num_retrievals=10
+            )
+
         if self.memory_setting["enable_web_search"]:
-            #TODO: init web search
+            # TODO: init web search
             self.web_search = TavilySearchRAG(self.task_logger, self.domain)
-        
+
         if self.memory_setting["enable_vision_knowledge"]:
             self.vision_knowledge = BasicRAG(self.task_logger, "vision")
             self.vision_knowledge.load_knowledge_base(data_dir=None)
@@ -193,30 +212,36 @@ class Task:
         if self.vision_setting["enable_vision"]:
             if self.vision_setting["vision_model"] == "CLIP":
                 self.vision_agent = CLIPVisionAgent(
-                    model_name = self.vision_setting["vision_model"],
-                    model_path = self.vision_setting["model_path"] if self.vision_setting["model_path"] else None,
-                    frame_per_seg = self.vision_setting["frame_per_seg"],
-                    cache_dir = self.vision_setting["frame_cache_dir"],
+                    model_name=self.vision_setting["vision_model"],
+                    model_path=self.vision_setting["model_path"]
+                    if self.vision_setting["model_path"]
+                    else None,
+                    frame_per_seg=self.vision_setting["frame_per_seg"],
+                    cache_dir=self.vision_setting["frame_cache_dir"],
                 )
             elif self.vision_setting["vision_model"] in ("gpt-4o", "gpt-4o-mini"):
                 self.vision_agent = GptVisionAgent(
-                    model_name = self.vision_setting["vision_model"],
-                    model_path = None,
-                    frame_per_seg = self.vision_setting["frame_per_seg"],
-                    cache_dir = self.vision_setting["frame_cache_dir"],
+                    model_name=self.vision_setting["vision_model"],
+                    model_path=None,
+                    frame_per_seg=self.vision_setting["frame_per_seg"],
+                    cache_dir=self.vision_setting["frame_cache_dir"],
                 )
                 # Set agent history logger for vision agent
-                if hasattr(self.vision_agent, 'set_agent_history_logger'):
-                    self.vision_agent.set_agent_history_logger(self.agent_history_logger)
+                if hasattr(self.vision_agent, "set_agent_history_logger"):
+                    self.vision_agent.set_agent_history_logger(
+                        self.agent_history_logger
+                    )
                 # Wire usage tracking context
-                if hasattr(self.vision_agent, 'set_task_id'):
+                if hasattr(self.vision_agent, "set_task_id"):
                     self.vision_agent.set_task_id(self.task_id)
-                if hasattr(self.vision_agent, 'set_usage_log_path'):
+                if hasattr(self.vision_agent, "set_usage_log_path"):
                     self.vision_agent.set_usage_log_path(self.usage_log_path)
             else:
-                raise ValueError(f"Unsupported vision model: {self.vision_setting['vision_model']}")
-        
-        self.audio_agent = None   
+                raise ValueError(
+                    f"Unsupported vision model: {self.vision_setting['vision_model']}"
+                )
+
+        self.audio_agent = None
         if self.audio_setting["enable_audio"]:
             agent_choice = self.audio_setting.get("audio_agent")
             audio_config = self.audio_setting.copy()
@@ -225,43 +250,67 @@ class Task:
             if agent_choice == "GeminiAudioAgent":
                 # Add task_id to audio_config for logger
                 self.audio_agent = GeminiAudioAgent(audio_config=audio_config)
-                self.task_logger.info(f"Using GeminiAudioAgent with model: {self.audio_setting['audio_agent']}")
+                self.task_logger.info(
+                    f"Using GeminiAudioAgent with model: {self.audio_setting['audio_agent']}"
+                )
                 self.audio_agent.set_agent_history_logger(self.agent_history_logger)
             elif agent_choice == "WhisperAudioAgent":
                 # Whisper audio agent that delegates to Whisper ASR and uses VAD when configured
-                self.audio_agent = WhisperAudioAgent(model_name="whisper-api", audio_config=audio_config)
-                self.task_logger.info(f"Using WhisperAudioAgent with model: {self.audio_setting['audio_agent']}")
+                self.audio_agent = WhisperAudioAgent(
+                    model_name="whisper-api", audio_config=audio_config
+                )
+                self.task_logger.info(
+                    f"Using WhisperAudioAgent with model: {self.audio_setting['audio_agent']}"
+                )
                 self.audio_agent.set_agent_history_logger(self.agent_history_logger)
             elif agent_choice == "GPT4oAudioAgent":
-                self.audio_agent = GPT4oAudioAgent(model_name="gpt-4o", audio_config=audio_config)
-                self.task_logger.info(f"Using GPT4oAudioAgent with model: {self.audio_setting['audio_agent']}")
+                self.audio_agent = GPT4oAudioAgent(
+                    model_name="gpt-4o", audio_config=audio_config
+                )
+                self.task_logger.info(
+                    f"Using GPT4oAudioAgent with model: {self.audio_setting['audio_agent']}"
+                )
+                self.audio_agent.set_agent_history_logger(self.agent_history_logger)
+            elif agent_choice == "Qwen3ASRAudioAgent":
+                model_name = self.audio_setting.get("model_name", "qwen3-asr-flash")
+                self.audio_agent = Qwen3ASRAudioAgent(
+                    model_name=model_name, audio_config=audio_config
+                )
+                self.task_logger.info(
+                    f"Using Qwen3ASRAudioAgent with model: {model_name}"
+                )
                 self.audio_agent.set_agent_history_logger(self.agent_history_logger)
             else:
                 raise ValueError(f"Unsupported audio model: {agent_choice}")
-            
+
         self.proofreader = None
         if self.proofreader_setting["enable_proofreading"]:
             from src.editorial.proofreader import ProofreaderAgent
+
             self.proofreader = ProofreaderAgent(
-                client = self.client,
-                srt = None,  # Will be set later
-                local_knowledge = self.local_knowledge,
-                web_search = self.web_search,
-                logger = self.task_logger,
-                batch_size = self.proofreader_setting["window_size"],
-                stm_len = self.proofreader_setting["short_term_memory_len"],
-                use_short_term_memory = self.proofreader_setting["enable_short_term_memory"],
-                num_workers = self.num_workers,
-                usage_log_path = self.usage_log_path,
-                task_id = self.task_id,
+                client=self.client,
+                srt=None,  # Will be set later
+                local_knowledge=self.local_knowledge,
+                web_search=self.web_search,
+                logger=self.task_logger,
+                batch_size=self.proofreader_setting["window_size"],
+                stm_len=self.proofreader_setting["short_term_memory_len"],
+                use_short_term_memory=self.proofreader_setting[
+                    "enable_short_term_memory"
+                ],
+                num_workers=self.num_workers,
+                usage_log_path=self.usage_log_path,
+                task_id=self.task_id,
             )
             # Set agent history logger for proofreader
-            if hasattr(self.proofreader, 'set_agent_history_logger'):
+            if hasattr(self.proofreader, "set_agent_history_logger"):
                 self.proofreader.set_agent_history_logger(self.agent_history_logger)
             self.task_logger.info("Proofreader initialized.")
-        
-        self.agent_history_logger.info("{\"role\": \"pipeline_coordinator\", \"message\": \"All modules initialized successfully. Task ready for execution.\"}")
-        
+
+        self.agent_history_logger.info(
+            '{"role": "pipeline_coordinator", "message": "All modules initialized successfully. Task ready for execution."}'
+        )
+
     @staticmethod
     def fromYoutubeLink(youtube_url, task_id, task_dir, task_cfg):
         """
@@ -289,51 +338,73 @@ class Task:
         Creates a SRTTask instance from a srt file path.
         """
         return SRTTask(task_id, task_dir, task_cfg, srt_path)
-    
+
     # Module 0: VAD: audio --> speaker segments
     def get_speaker_segments(self):
         """
         Handles the VAD module to convert audio to speaker segments.
         """
-        self.SRT_Script = self.audio_agent.segment_audio(self.audio_path, f"{self.task_local_dir}/.cache/audio")
-        self.task_logger.info(f"Speaker segments created with {self.audio_agent.model_name} for audio: {self.audio_path}")
+        self.SRT_Script = self.audio_agent.segment_audio(
+            self.audio_path, f"{self.task_local_dir}/.cache/audio"
+        )
+        self.task_logger.info(
+            f"Speaker segments created with {self.audio_agent.model_name} for audio: {self.audio_path}"
+        )
         if self.video_path is not None and self.vision_agent is not None:
-            self.audio_agent.clip_video_and_save(self.video_path, f"{self.task_local_dir}/.cache/video")
+            self.audio_agent.clip_video_and_save(
+                self.video_path, f"{self.task_local_dir}/.cache/video"
+            )
 
     def get_visual_cues(self):
         """
         Handles the vision agent to convert video to visual cues.
         """
         if self.vision_agent is None:
-            self.task_logger.info("No vision agent found, skipping visual cues extraction")
-            return 
+            self.task_logger.info(
+                "No vision agent found, skipping visual cues extraction"
+            )
+            return
         cache_dir = f"{self.task_local_dir}/.cache/video"
         if not os.path.isdir(cache_dir):
-            self.task_logger.info("No video segments found; skipping visual cues extraction")
+            self.task_logger.info(
+                "No video segments found; skipping visual cues extraction"
+            )
             return
         files = sorted(os.listdir(cache_dir))
         if not files:
-            self.task_logger.info("Video segments directory is empty; skipping visual cues extraction")
+            self.task_logger.info(
+                "Video segments directory is empty; skipping visual cues extraction"
+            )
             return
-        self.task_logger.info(f"Extracting visual cues from video using {self.vision_agent.model_name}")
+        self.task_logger.info(
+            f"Extracting visual cues from video using {self.vision_agent.model_name}"
+        )
 
         # Prepare jobs
-        jobs = [(idx, f"{cache_dir}/{segment_file}") for idx, segment_file in enumerate(files)]
+        jobs = [
+            (idx, f"{cache_dir}/{segment_file}")
+            for idx, segment_file in enumerate(files)
+        ]
         results = {}
 
         # Run in parallel across segments, controlled by global num_workers
-        max_workers = self.num_workers if isinstance(self.num_workers, int) and self.num_workers > 0 else 1
+        max_workers = (
+            self.num_workers
+            if isinstance(self.num_workers, int) and self.num_workers > 0
+            else 1
+        )
 
         def analyze_one(idx, path):
             # simple retry for robustness
             import random
+
             for attempt in range(3):
                 try:
                     return self.vision_agent.analyze_video(path)
                 except Exception as e:
                     backoff = min(10, 1 + attempt * 2) + random.random()
                     self.task_logger.warning(
-                        f"Vision analysis failed for segment {idx} (attempt {attempt+1}/3): {e}. Retrying in {backoff:.1f}s"
+                        f"Vision analysis failed for segment {idx} (attempt {attempt + 1}/3): {e}. Retrying in {backoff:.1f}s"
                     )
                     sleep(backoff)
             self.task_logger.error(
@@ -343,7 +414,9 @@ class Task:
 
         if max_workers > 1:
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                future_map = {executor.submit(analyze_one, idx, path): idx for idx, path in jobs}
+                future_map = {
+                    executor.submit(analyze_one, idx, path): idx for idx, path in jobs
+                }
                 for future in as_completed(future_map):
                     idx = future_map[future]
                     try:
@@ -360,7 +433,9 @@ class Task:
         for idx in range(len(files)):
             visual_cues = results.get(idx, "")
             if self.vision_knowledge and visual_cues:
-                self.vision_knowledge.add_to_index(visual_cues, chunk_size=100, chunk_overlap=5)
+                self.vision_knowledge.add_to_index(
+                    visual_cues, chunk_size=100, chunk_overlap=5
+                )
             if idx < len(self.SRT_Script.segments):
                 self.SRT_Script.segments[idx].visual_cues = visual_cues
             # print(self.vision_knowledge.retrieve_relevant_nodes("Protoss"))
@@ -377,12 +452,14 @@ class Task:
         items = []
         idx_to_segment = {}
         for idx, segment in enumerate(self.SRT_Script.segments):
-            if getattr(segment, 'audio_path', None):
-                items.append({
-                    "idx": idx,
-                    "audio_path": segment.audio_path,
-                    "visual_cues": getattr(segment, 'visual_cues', None),
-                })
+            if getattr(segment, "audio_path", None):
+                items.append(
+                    {
+                        "idx": idx,
+                        "audio_path": segment.audio_path,
+                        "visual_cues": getattr(segment, "visual_cues", None),
+                    }
+                )
                 idx_to_segment[idx] = segment
             else:
                 self.task_logger.info("No audio file found for this segment.")
@@ -400,53 +477,79 @@ class Task:
         self.task_logger.info(f"Number of audio segments to transcribe: {len(items)}")
 
         # Execute concurrently if supported
-        if hasattr(self.audio_agent, 'transcribe_batch'):
-            batch_results = self.audio_agent.transcribe_batch(items, max_workers=max_workers) or {}
+        if hasattr(self.audio_agent, "transcribe_batch"):
+            batch_results = (
+                self.audio_agent.transcribe_batch(items, max_workers=max_workers) or {}
+            )
         else:
             batch_results = {}
             for it in items:
-                batch_results[it["idx"]] = self.audio_agent.transcribe(it["audio_path"], it.get("visual_cues")) or []
+                batch_results[it["idx"]] = (
+                    self.audio_agent.transcribe(it["audio_path"], it.get("visual_cues"))
+                    or []
+                )
 
         # Normalize and offset per the original logic
         for idx, segment in idx_to_segment.items():
             temp_segment = batch_results.get(idx)
             if not temp_segment:
-                self.task_logger.warning(f"No transcription found for segment {idx}, skipping.")
+                self.task_logger.warning(
+                    f"No transcription found for segment {idx}, skipping."
+                )
                 continue
 
             for idx_, seg in enumerate(temp_segment):
-                if segment.timestr_to_seconds(seg['start']) >= segment.timestr_to_seconds(seg['end']):
+                if segment.timestr_to_seconds(
+                    seg["start"]
+                ) >= segment.timestr_to_seconds(seg["end"]):
                     if idx_ > 0:
-                        self.task_logger.warning(f"Segment {idx_} start time is >= end time, adjusting.")
-                        seg['start'] = temp_segment[idx_ - 1]['end']
+                        self.task_logger.warning(
+                            f"Segment {idx_} start time is >= end time, adjusting."
+                        )
+                        seg["start"] = temp_segment[idx_ - 1]["end"]
                     else:
-                        self.task_logger.warning(f"Segment {idx_} start time is >= end time, setting start=0.")
-                        seg['start'] = segment.format_time(0)
+                        self.task_logger.warning(
+                            f"Segment {idx_} start time is >= end time, setting start=0."
+                        )
+                        seg["start"] = segment.format_time(0)
 
                 if idx_ < len(temp_segment) - 1:
-                    if segment.timestr_to_seconds(seg['end']) > segment.timestr_to_seconds(temp_segment[idx_ + 1]['start']):
-                        self.task_logger.warning(f"Segment {idx_} end time > next start time, adjusting.")
-                        seg['end'] = temp_segment[idx_ + 1]['start']
+                    if segment.timestr_to_seconds(
+                        seg["end"]
+                    ) > segment.timestr_to_seconds(temp_segment[idx_ + 1]["start"]):
+                        self.task_logger.warning(
+                            f"Segment {idx_} end time > next start time, adjusting."
+                        )
+                        seg["end"] = temp_segment[idx_ + 1]["start"]
 
             for idx_, seg in enumerate(temp_segment):
-                seg['start'] = segment.timestr_to_seconds(seg['start']) + segment.start_time
-                seg['end'] = segment.timestr_to_seconds(seg['end']) + segment.start_time
+                seg["start"] = (
+                    segment.timestr_to_seconds(seg["start"]) + segment.start_time
+                )
+                seg["end"] = segment.timestr_to_seconds(seg["end"]) + segment.start_time
 
             new_segments = self.SRT_Script.convert_transcribed_segments(temp_segment)
 
-            self.temp_segments_info.append({
-                "orig_idx": idx,
-                "orig_segment": segment,
-                "new_segments": new_segments
-            })
+            self.temp_segments_info.append(
+                {"orig_idx": idx, "orig_segment": segment, "new_segments": new_segments}
+            )
 
-            self.task_logger.info(f"Transcribed Length: {len(new_segments)} for segment {idx}")
+            self.task_logger.info(
+                f"Transcribed Length: {len(new_segments)} for segment {idx}"
+            )
 
         self.task_logger.info("Transcription completed, updating SRT script.")
 
         self.SRT_Script.replace_seg(self.temp_segments_info)
 
+        # Save the transcribed SRT file
+        results_dir = f"{self.task_local_dir}/results"
+        if not os.path.exists(results_dir):
+            os.makedirs(results_dir, exist_ok=True)
 
+        transcribed_srt_path = f"{results_dir}/{self.task_id}_transcribed.srt"
+        self.SRT_Script.write_srt_file_src(transcribed_srt_path)
+        self.task_logger.info(f"Transcribed SRT saved to: {transcribed_srt_path}")
 
     # Module 2: SRT preprocess: perform preprocess steps
     def preprocess(self):
@@ -474,7 +577,6 @@ class Task:
             self.task_logger.info("ASS subtitle saved as: " + assSub_src)
         self.script_input = self.SRT_Script.get_source_only()
         pass
-        
 
     def update_translation_progress(self, new_progress):
         """
@@ -540,7 +642,9 @@ class Task:
             self.proofreader.proofread_all()
             self.SRT_Script = self.proofreader.srt
         else:
-            self.task_logger.warning("Proofreader is not initialized, skipping proofreading.")
+            self.task_logger.warning(
+                "Proofreader is not initialized, skipping proofreading."
+            )
 
     def editor(self):
         """
@@ -550,28 +654,30 @@ class Task:
         if self.editor_setting["enable_editor"]:
             # Combine user instructions from config
             user_instructions = []
-            if hasattr(self, 'instructions') and self.instructions:
+            if hasattr(self, "instructions") and self.instructions:
                 user_instructions.extend(self.instructions)
             if self.editor_setting.get("user_instruction"):
                 user_instructions.append(self.editor_setting["user_instruction"])
-            
-            combined_instruction = "\n".join(user_instructions) if user_instructions else None
-            
+
+            combined_instruction = (
+                "\n".join(user_instructions) if user_instructions else None
+            )
+
             editor = EditorAgent(
-                client = self.client,
-                srt = self.SRT_Script,
-                memory = self.local_knowledge,
-                logger = self.task_logger,
-                history_len = self.editor_setting["history_length"],
-                user_instruction = combined_instruction,
-                num_workers = self.num_workers,
-                usage_log_path = self.usage_log_path,
-                task_id = self.task_id,
+                client=self.client,
+                srt=self.SRT_Script,
+                memory=self.local_knowledge,
+                logger=self.task_logger,
+                history_len=self.editor_setting["history_length"],
+                user_instruction=combined_instruction,
+                num_workers=self.num_workers,
+                usage_log_path=self.usage_log_path,
+                task_id=self.task_id,
             )
             # Set agent history logger for editor
-            if hasattr(editor, 'set_agent_history_logger'):
+            if hasattr(editor, "set_agent_history_logger"):
                 editor.set_agent_history_logger(self.agent_history_logger)
-        if editor is None: 
+        if editor is None:
             return
         editor.edit_all()
 
@@ -602,19 +708,21 @@ class Task:
         # Output video if needed
         if video_out and self.video_path is not None:
             video_output_path = f"{results_dir}/{self.task_id}.mp4"
-            
+
             # Check if fonts directory exists
             fonts_dir = f"{self.base_dir}/fonts"
             if not os.path.exists(fonts_dir):
                 # Create fonts directory if it doesn't exist
                 os.makedirs(fonts_dir, exist_ok=True)
-                self.task_logger.warning(f"Fonts directory {fonts_dir} does not exist, created it.")
-            
+                self.task_logger.warning(
+                    f"Fonts directory {fonts_dir} does not exist, created it."
+                )
+
             # Use proper ffmpeg subtitles filter syntax with fallback font
             try:
                 # Try with custom font first
                 subtitle_filter = f"subtitles='{final_res}':force_style='FontName=SourceHanSansCN-Normal,FontSize=24,PrimaryColour=&Hffffff,OutlineColour=&H000000,Bold=1'"
-                
+
                 result = subprocess.run(
                     [
                         "ffmpeg",
@@ -627,14 +735,16 @@ class Task:
                         video_output_path,
                     ],
                     capture_output=True,
-                    text=True
+                    text=True,
                 )
-                
+
                 if result.returncode != 0:
-                    self.task_logger.warning(f"FFmpeg with custom font failed: {result.stderr}")
+                    self.task_logger.warning(
+                        f"FFmpeg with custom font failed: {result.stderr}"
+                    )
                     # Fallback to default font
                     subtitle_filter = f"subtitles='{final_res}':force_style='FontSize=24,PrimaryColour=&Hffffff,OutlineColour=&H000000,Bold=1'"
-                    
+
                     result = subprocess.run(
                         [
                             "ffmpeg",
@@ -647,21 +757,25 @@ class Task:
                             video_output_path,
                         ],
                         capture_output=True,
-                        text=True
+                        text=True,
                     )
-                    
+
                     if result.returncode != 0:
-                        self.task_logger.error(f"FFmpeg video generation failed: {result.stderr}")
-                        raise RuntimeError(f"Failed to generate video with subtitles: {result.stderr}")
+                        self.task_logger.error(
+                            f"FFmpeg video generation failed: {result.stderr}"
+                        )
+                        raise RuntimeError(
+                            f"Failed to generate video with subtitles: {result.stderr}"
+                        )
                     else:
                         self.task_logger.info("Video generated with default font")
                 else:
                     self.task_logger.info("Video generated with custom font")
-                    
+
             except Exception as e:
                 self.task_logger.error(f"Error during video generation: {str(e)}")
                 raise RuntimeError(f"Video generation failed: {str(e)}")
-                
+
             final_res = subtitle_path_trans
 
         self.t_e = time()
@@ -672,12 +786,13 @@ class Task:
         )
         return final_res
 
-
     def run_pipeline(self, pre_load_asr_model=None):
         """
         Executes the entire pipeline process for the task.
         """
-        self.agent_history_logger.info("{\"role\": \"pipeline_coordinator\", \"message\": \"Starting ViDove translation pipeline...\"}")
+        self.agent_history_logger.info(
+            '{"role": "pipeline_coordinator", "message": "Starting ViDove translation pipeline..."}'
+        )
         self.get_speaker_segments()
         self.get_visual_cues()
         self.transcribe()
@@ -687,8 +802,10 @@ class Task:
         # self.postprocess()
         self.proofread()
         self.editor()
-        self.result = self.output_render()  
-        self.agent_history_logger.info("{\"role\": \"pipeline_coordinator\", \"message\": \"ViDove pipeline execution completed successfully!\"}")
+        self.result = self.output_render()
+        self.agent_history_logger.info(
+            '{"role": "pipeline_coordinator", "message": "ViDove pipeline execution completed successfully!"}'
+        )
 
 
 class YoutubeTask(Task):
@@ -697,7 +814,6 @@ class YoutubeTask(Task):
         self.task_logger.info("Task Creation method: Youtube Link")
         self.youtube_url = youtube_url
         self.video_resolution = task_cfg["video_download"]["resolution"]
-
 
         # self.model = model
 
@@ -716,10 +832,12 @@ class YoutubeTask(Task):
         video_opts = {
             "format": video_format,
             "outtmpl": video_download_path,
-            "postprocessors": [{
-                "key": "FFmpegVideoConvertor",
-                "preferedformat": "mp4",
-            }],
+            "postprocessors": [
+                {
+                    "key": "FFmpegVideoConvertor",
+                    "preferedformat": "mp4",
+                }
+            ],
             "prefer_ffmpeg": True,
         }
 
@@ -739,13 +857,22 @@ class YoutubeTask(Task):
         self.task_logger.info("using ffmpeg to extract audio from downloaded video")
         result = subprocess.run(
             [
-                "ffmpeg", "-hide_banner", "-loglevel", "error",
-                "-i", str(self.video_path),
-                "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                str(self.video_path),
+                "-acodec",
+                "pcm_s16le",
+                "-ar",
+                "16000",
+                "-ac",
+                "1",
                 str(audio_path),
             ],
             capture_output=True,
-            text=True
+            text=True,
         )
 
         if result.returncode != 0:
@@ -796,9 +923,18 @@ class VideoTask(Task):
         self.task_logger.info("using ffmpeg to extract audio (16k mono WAV)")
         subprocess.run(
             [
-                "ffmpeg", "-hide_banner", "-loglevel", "error",
-                "-i", self.video_path,
-                "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                self.video_path,
+                "-acodec",
+                "pcm_s16le",
+                "-ar",
+                "16000",
+                "-ac",
+                "1",
                 self.task_local_dir.joinpath(f"task_{self.task_id}.wav"),
             ]
         )

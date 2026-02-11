@@ -23,10 +23,12 @@ class APIPyannoteVAD(VAD):
         tgt_lang: str,
         min_segment_seconds: float = 1.0,
         *,
+        model: str = "precision-2",
         api_token: str | None = None,
     ) -> None:
         super().__init__(src_lang, tgt_lang, min_segment_seconds)
         self.api_token = api_token or os.getenv("PYANNOTE_API_KEY")
+        self.model = model
         if not self.api_token:
             raise ValueError("Set PYANNOTE_API_KEY or pass api_token to use API mode")
 
@@ -39,7 +41,11 @@ class APIPyannoteVAD(VAD):
     @staticmethod
     def _is_url(path: str) -> bool:
         s = str(path)
-        return s.startswith("http://") or s.startswith("https://") or s.startswith("media://")
+        return (
+            s.startswith("http://")
+            or s.startswith("https://")
+            or s.startswith("media://")
+        )
 
     def upload_media(self, audio_path: str) -> str:
         """Upload a local file to pyannote temporary media storage and return the media:// URL.
@@ -53,7 +59,9 @@ class APIPyannoteVAD(VAD):
 
             presign_endpoint = "https://api.pyannote.ai/v1/media/input"
             body = {"url": media_input_url}
-            resp = requests.post(presign_endpoint, json=body, headers=self._auth_headers_json())
+            resp = requests.post(
+                presign_endpoint, json=body, headers=self._auth_headers_json()
+            )
             try:
                 resp.raise_for_status()
             except requests.HTTPError as exc:
@@ -79,13 +87,19 @@ class APIPyannoteVAD(VAD):
             return media_input_url
         return audio_path
 
-    def create_diarization_job(self, media_url: str, webhook_url: str | None = None) -> str:
+    def create_diarization_job(
+        self, media_url: str, webhook_url: str | None = None
+    ) -> str:
         """Create a diarization job for the given media:// or http(s) URL and return the job id."""
         jobs_endpoint = "https://api.pyannote.ai/v1/diarize"
         job_body: dict[str, str] = {"url": media_url}
+        if self.model:
+            job_body["model"] = self.model
         if webhook_url:
             job_body["webhook"] = webhook_url
-        response = requests.post(jobs_endpoint, json=job_body, headers=self._auth_headers_json())
+        response = requests.post(
+            jobs_endpoint, json=job_body, headers=self._auth_headers_json()
+        )
         response.raise_for_status()
         job_data = response.json()
         job_id = job_data.get("jobId") or job_data.get("id")
@@ -169,7 +183,9 @@ class APIPyannoteVAD(VAD):
                 break
 
             if status == "failed":
-                raise Exception(f"Job failed: {status_data.get('error') or status_data}")
+                raise Exception(
+                    f"Job failed: {status_data.get('error') or status_data}"
+                )
 
             if time.time() >= deadline:
                 raise TimeoutError("Diarization job polling timed out")
@@ -178,7 +194,9 @@ class APIPyannoteVAD(VAD):
         self.srt = srt
         return srt
 
-    def get_speaker_segments(self, audio_path: str, webhook_url: str | None = None) -> SrtScript:
+    def get_speaker_segments(
+        self, audio_path: str, webhook_url: str | None = None
+    ) -> SrtScript:
         logger.info("Processing audio file via API: %s", audio_path)
         media_url = self.upload_media(audio_path)
         job_id = self.create_diarization_job(media_url, webhook_url)
@@ -207,7 +225,9 @@ class LocalPyannoteVAD(VAD):
             **pipeline_kwargs,
         )
 
-    def get_speaker_segments(self, audio_path: str, webhook_url: str | None = None) -> SrtScript:  # noqa: ARG002
+    def get_speaker_segments(
+        self, audio_path: str, webhook_url: str | None = None
+    ) -> SrtScript:  # noqa: ARG002
         logger.info("Processing audio file locally: %s", audio_path)
         diarization = self.pipeline(audio_path)
         srt = SrtScript(src_lang=self.src_lang, tgt_lang=self.tgt_lang)
