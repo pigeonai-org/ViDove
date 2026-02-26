@@ -58,7 +58,7 @@
 </details>
 
 ## News
-- [10/09/25] Our paper has been accepted by EMNLP 2025 Demo!
+- [10/09/25] Our paper has been accepted by [EMNLP 2025 Demo](https://aclanthology.org/2025.emnlp-demos.17/)!
 - [09/07/25] 🔥**ViDove V1.0.0:** We are happy to release ViDove V1.0.0 and our paper on arXiv： [ViDove: A Translation Agent System with Multimodal Context and Memory-Augmented Reasoning](https://arxiv.org/abs/2507.07306)
 - [03/03/24]  We are happy to tell you that you could try to use RAG-boosted translation by selecting specific domain assistant in the UI under the translation section.
 - [12/20]🔥**ViDove V0.1 Released**: We are happy to release our initial version of ViDove: End-to-end Video Translation Toolkit. 
