@@ -5,6 +5,7 @@ import datetime
 from tqdm import tqdm
 
 from .. import dict_util
+from ..openai_responses import DEFAULT_TEXT_MODEL, create_response_text
 import logging
 
 # punctuation dictionary for supported languages
@@ -421,18 +422,20 @@ class SrtScript(object):
 
         def inner_func(target, input_str):
             # handling merge sentences issue.
-
-            response = self.client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {"role": "system",
-                     "content": "Your task is to merge or split sentences into a specified number of lines as required. You need to ensure the meaning of the sentences as much as possible, but when necessary, a sentence can be divided into two lines for output"},
-                    {"role": "system", "content": "Note: You only need to output the processed {} sentences. If you need to output a sequence number, please separate it with a colon.".format(self.tgt_lang)},
-                    {"role": "user", "content": 'Please split or combine the following sentences into {} sentences:\n{}'.format(target, input_str)}
-                ],
-                temperature=0.15
+            text, _ = create_response_text(
+                self.client,
+                model=DEFAULT_TEXT_MODEL,
+                instructions=(
+                    "Your task is to merge or split sentences into a specified number of lines as required. "
+                    "You need to preserve the meaning of the sentences as much as possible, but when necessary, "
+                    "a sentence can be divided into two lines for output.\n"
+                    f"Note: You only need to output the processed {self.tgt_lang} sentences. "
+                    "If you need to output a sequence number, please separate it with a colon."
+                ),
+                input_value='Please split or combine the following sentences into {} sentences:\n{}'.format(target, input_str),
+                temperature=0.15,
             )
-            return response.choices[0].message.content.strip()
+            return text
 
         # handling merge sentences issue.
         lines = translate.split('\n\n')
@@ -812,5 +815,4 @@ def split_script(script_in, chunk_size=1000):
 
     assert len(script_arr) == len(range_arr)
     return script_arr, range_arr
-
 

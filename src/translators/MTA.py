@@ -1,15 +1,13 @@
-from openai import AzureOpenAI
+from openai import AzureOpenAI, OpenAI
 from logging import Logger
 from .abs_api_model import AbsApiModel
+from src.openai_responses import create_response_text, normalize_text_model
 
 class MTA(AbsApiModel):
-    def __init__(self, client:AzureOpenAI, model_name:str, domain:str, source_language:str, target_language:str, target_country:str, logger:Logger, max_iterations:int=5) -> None:
+    def __init__(self, client:AzureOpenAI|OpenAI, model_name:str, domain:str, source_language:str, target_language:str, target_country:str, logger:Logger, max_iterations:int=5) -> None:
         super().__init__()
         self.client = client
-        if model_name in ["gpt-4o-mini", "gpt-4o"]:
-            self.model_name = model_name
-        else:
-            raise NotImplementedError
+        self.model_name = normalize_text_model(model_name)
         self.max_iterations = max_iterations
         self.domain = domain
         self.source_language = source_language
@@ -25,16 +23,11 @@ class MTA(AbsApiModel):
         translation_prompt = f"""This is an {self.source_language} to {self.target_language} translation in the field of {self.domain}, please provide the {self.target_language} translation for this text.\
         Do not provide any explanations or text apart from the translation. {self.source_language}: {input} {self.target_language}:"""
 
-        response = self.client.chat.completions.create(
+        history, _ = create_response_text(
+            self.client,
             model=self.model_name,
-            messages=[
-                {
-                    "role": "user",
-                    "content": translation_prompt
-                    }
-                ]
-            )
-        history = response.choices[0].message.content
+            input_value=translation_prompt,
+        )
 
         while current_iteration <= self.max_iterations:
             # Suggestions Agent
@@ -49,16 +42,11 @@ class MTA(AbsApiModel):
             Each suggestion should address one specific part of the translation.
             Output only the suggestions and nothing else."""
 
-            response =self.client.chat.completions.create(
+            suggestion, _ = create_response_text(
+                self.client,
                 model=self.model_name,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": reflection_prompt
-                        }
-                    ]
-                )
-            suggestion = response.choices[0].message.content
+                input_value=reflection_prompt,
+            )
 
             self.logger.info(suggestion)
 
@@ -78,16 +66,11 @@ class MTA(AbsApiModel):
 
             Output only the new translation and nothing else."""
 
-            response = self.client.chat.completions.create(
+            reply, _ = create_response_text(
+                self.client,
                 model=self.model_name,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": prompt
-                        }
-                    ]
-                )
-            reply = response.choices[0].message.content
+                input_value=prompt,
+            )
             self.logger.info(reply)
             if history == reply:
                 return reply

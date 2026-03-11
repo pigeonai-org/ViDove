@@ -6,14 +6,19 @@ import threading
 from datetime import datetime
 from uuid import uuid4
 
+from src.openai_responses import (
+    SUPPORTED_OPENAI_TEXT_MODELS,
+    create_response_text,
+    extract_usage_tokens,
+    normalize_text_model,
+    provider_for_client,
+)
+
 class LLM(AbsApiModel):
     def __init__(self, client:AzureOpenAI|OpenAI, model_name, system_prompt:PromptTemplate, temp=0.15, enable_rag = False, task_id: str | None = None, usage_log_path: str | None = None) -> None:
         super().__init__()
         self.client = client
-        if model_name in ["gpt-4o-mini", "gpt-4o", "gpt-5", "gpt-5-mini", "gpt-5-nano"]:
-            self.model_name = model_name
-        else:
-            raise NotImplementedError
+        self.model_name = normalize_text_model(model_name)
         self.system_prompt = system_prompt
         self.history = []
         self.temp = temp
@@ -24,22 +29,17 @@ class LLM(AbsApiModel):
         self._usage_lock = threading.Lock()
 
     def send_request(self, input, ):
-        response = self.client.chat.completions.create(
+        text, response = create_response_text(
+            self.client,
             model=self.model_name,
-            messages=[
-                {"role": "system", "content": self.system_prompt},
-                {"role": "user", "content": input},
-            ],
-            temperature= 1 if self.model_name in [ "gpt-5", "gpt-5-mini", "gpt-5-nano"] else self.temp,
+            instructions=str(self.system_prompt),
+            input_value=input,
+            temperature=1 if self.model_name in SUPPORTED_OPENAI_TEXT_MODELS else self.temp,
         )
-        text = response.choices[0].message.content.strip()
         # Best-effort usage logging
         try:
-            usage = getattr(response, "usage", None)
-            pt = getattr(usage, "prompt_tokens", None) if usage else None
-            ct = getattr(usage, "completion_tokens", None) if usage else None
-            tt = getattr(usage, "total_tokens", None) if usage else None
-            provider = "azure-openai" if isinstance(self.client, AzureOpenAI) else "openai"
+            pt, ct, tt = extract_usage_tokens(response)
+            provider = provider_for_client(self.client)
             if self.usage_log_path:
                 with self._usage_lock:
                     call_idx = self._call_index

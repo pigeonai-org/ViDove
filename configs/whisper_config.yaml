@@ -56,6 +56,7 @@ post_process:
 
 proofreader: 
   enable_proofreading: True
+  model: gpt-5-mini
   window_size: 5 # number of sentences per proofreading chunk
   short_term_memory_len: 5 # maximum number of sentences stored in short term memory
   enable_short_term_memory: False # whether to use short term memory for proofreading
@@ -63,6 +64,7 @@ proofreader:
 
 editor:
   enable_editor: True
+  model: gpt-5-mini
   editor_context_window: 10 # number of sentences to be provided as context for the editor(previous and next {n} sentences)
   history_length: 5 # number of sentences to be provided as history for the editor(previous {n} sentences)
 
@@ -71,5 +73,4 @@ output_type:
   subtitle: srt
   video: False
   bilingual: False
-
 

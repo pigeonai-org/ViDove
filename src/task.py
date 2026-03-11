@@ -298,6 +298,7 @@ class Task:
                 use_short_term_memory=self.proofreader_setting[
                     "enable_short_term_memory"
                 ],
+                model_name=self.proofreader_setting.get("model", "gpt-5-mini"),
                 num_workers=self.num_workers,
                 usage_log_path=self.usage_log_path,
                 task_id=self.task_id,
@@ -656,8 +657,9 @@ class Task:
             user_instructions = []
             if hasattr(self, "instructions") and self.instructions:
                 user_instructions.extend(self.instructions)
-            if self.editor_setting.get("user_instruction"):
-                user_instructions.append(self.editor_setting["user_instruction"])
+            editor_instruction = self.editor_setting.get("user_instruction")
+            if editor_instruction and editor_instruction != "none":
+                user_instructions.append(editor_instruction)
 
             combined_instruction = (
                 "\n".join(user_instructions) if user_instructions else None
@@ -669,6 +671,7 @@ class Task:
                 memory=self.local_knowledge,
                 logger=self.task_logger,
                 history_len=self.editor_setting["history_length"],
+                model_name=self.editor_setting.get("model", "gpt-5-mini"),
                 user_instruction=combined_instruction,
                 num_workers=self.num_workers,
                 usage_log_path=self.usage_log_path,
@@ -968,5 +971,16 @@ class SRTTask(Task):
     def run(self):
         self.task_logger.info(f"Video File Dir: {self.video_path}")
         self.task_logger.info(f"Audio File Dir: {self.audio_path}")
-        self.task_logger.info("Data Prep Complete. Start pipeline")
-        super().run_pipeline()
+        self.task_logger.info("Data Prep Complete. Start SRT-only pipeline")
+        self.agent_history_logger.info(
+            '{"role": "pipeline_coordinator", "message": "Starting ViDove SRT-only translation pipeline..."}'
+        )
+        # SRT inputs already contain the source transcript, so audio/VAD and
+        # visual-cue stages must be skipped.
+        self.translation()
+        self.proofread()
+        self.editor()
+        self.result = self.output_render()
+        self.agent_history_logger.info(
+            '{"role": "pipeline_coordinator", "message": "ViDove SRT-only pipeline execution completed successfully!"}'
+        )

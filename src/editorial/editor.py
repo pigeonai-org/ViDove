@@ -1,6 +1,13 @@
 from typing import Callable, Dict, Optional, List
 from src.SRT.srt import SrtScript
 from src.memory.abs_api_RAG import AbsApiRAG
+from src.openai_responses import (
+    DEFAULT_TEXT_MODEL,
+    create_response_text,
+    extract_usage_tokens,
+    normalize_text_model,
+    provider_for_client,
+)
 import logging
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -17,6 +24,7 @@ class EditorAgent:
         memory: Optional[AbsApiRAG] = None,
         logger: Optional[logging.Logger] = None,
         history_len: int = 10,
+        model_name: str = DEFAULT_TEXT_MODEL,
         user_instruction: Optional[str] = None,
         num_workers: int = 4,
         usage_log_path: Optional[str] = None,
@@ -27,6 +35,7 @@ class EditorAgent:
         self.memory = memory
         self.logger = logger
         self.history_len = history_len
+        self.model_name = normalize_text_model(model_name)
         self.user_instruction = user_instruction
         self.num_workers = max(1, int(num_workers))
         # Initialize agent history logger - will be set by task
@@ -188,21 +197,19 @@ class EditorAgent:
                 Directly return the revised content only."""
 
     def send_request(self, prompt: str, phrase_index: Optional[int] = None) -> str:
-        resp = self.client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": prompt}],
+        text, resp = create_response_text(
+            self.client,
+            model=self.model_name,
+            input_value=prompt,
             temperature=0.0,
-            max_tokens=3000,
+            max_output_tokens=3000,
         )
         # Best-effort usage logging
         try:
-            usage = getattr(resp, "usage", None)
-            pt = getattr(usage, "prompt_tokens", None) if usage else None
-            ct = getattr(usage, "completion_tokens", None) if usage else None
-            tt = getattr(usage, "total_tokens", None) if usage else None
+            pt, ct, tt = extract_usage_tokens(resp)
             self._record_usage(
-                provider="openai",
-                model="gpt-4o",
+                provider=provider_for_client(self.client),
+                model=self.model_name,
                 category="text",
                 prompt_tokens=pt,
                 completion_tokens=ct,
@@ -212,7 +219,7 @@ class EditorAgent:
             )
         except Exception:
             pass
-        return resp.choices[0].message.content
+        return text
 
     def srt_iterator(self):
         for idx, seg in enumerate(self.srt.segments):

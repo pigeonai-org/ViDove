@@ -1,6 +1,41 @@
-from typing import Optional, Literal, Union
+from typing import Any, Optional, Literal, Union
 from pydantic import BaseModel, Field, field_validator
 from pathlib import Path
+
+
+LEGACY_OPENAI_TEXT_MODEL_MAP = {
+    "gpt-3.5-turbo": "gpt-5-mini",
+    "gpt-4": "gpt-5",
+    "gpt-4o": "gpt-5",
+    "gpt-4o-mini": "gpt-5-mini",
+    "gpt-5.2-mini": "gpt-5.2",
+    "gpt-5.2-nano": "gpt-5.2",
+    "gpt-5.3-instant": "gpt-5.3-chat-latest",
+    "gpt-5.4-thinking": "gpt-5.4",
+}
+
+SUPPORTED_OPENAI_TEXT_MODELS = (
+    "gpt-5",
+    "gpt-5-mini",
+    "gpt-5-nano",
+    "gpt-5.2",
+    "gpt-5.3-chat-latest",
+    "gpt-5.4",
+)
+
+
+def normalize_openai_text_model(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    candidate = value.strip()
+    if not candidate:
+        return value
+    lowered = candidate.lower()
+    if lowered in LEGACY_OPENAI_TEXT_MODEL_MAP:
+        return LEGACY_OPENAI_TEXT_MODEL_MAP[lowered]
+    if lowered in SUPPORTED_OPENAI_TEXT_MODELS:
+        return lowered
+    return candidate
 
 
 class VideoDownloadConfig(BaseModel):
@@ -36,10 +71,14 @@ class AudioConfig(BaseModel):
         default=True, description="Whether to enable audio processing"
     )
     audio_agent: Literal[
-        "GeminiAudioAgent", "WhisperAudioAgent", "QwenAudioAgent", "GPT4oAudioAgent"
+        "GeminiAudioAgent",
+        "WhisperAudioAgent",
+        "QwenAudioAgent",
+        "Qwen3ASRAudioAgent",
+        "GPT4oAudioAgent",
     ] = Field(
         default="GeminiAudioAgent",
-        description="Audio agent: GeminiAudioAgent, WhisperAudioAgent, QwenAudioAgent, GPT4oAudioAgent",
+        description="Audio agent: GeminiAudioAgent, WhisperAudioAgent, QwenAudioAgent, Qwen3ASRAudioAgent, GPT4oAudioAgent",
     )
     model_path: Optional[str] = Field(
         default=None, description="Model path, replace with your own model path"
@@ -98,17 +137,18 @@ class TranslationConfig(BaseModel):
     """Translation module configuration"""
 
     model: Literal[
-        "gpt-4",
-        "gpt-4o-mini",
-        "gpt-4o",
         "Assistant",
         "Multiagent",
         "RAG",
         "gpt-5",
         "gpt-5-mini",
+        "gpt-5-nano",
+        "gpt-5.2",
+        "gpt-5.3-chat-latest",
+        "gpt-5.4",
     ] = Field(
-        default="gpt-4o",
-        description="Translation model: gpt-4, gpt-4o-mini, gpt-4o, Assistant, Multiagent, RAG",
+        default="gpt-5",
+        description="Translation model: gpt-5 family, Assistant, Multiagent, RAG",
     )
     chunk_size: int = Field(default=2000, description="Translation chunk size")
     use_history: bool = Field(
@@ -120,6 +160,11 @@ class TranslationConfig(BaseModel):
     )
     # Note: Parallelism is globally controlled by TaskConfig.num_workers (>1 enables parallel).
     # The deprecated fields 'parallel' and 'workers' are intentionally removed.
+
+    @field_validator("model", mode="before")
+    @classmethod
+    def normalize_model(cls, value: Any) -> Any:
+        return normalize_openai_text_model(value)
 
 
 class PostProcessConfig(BaseModel):
@@ -142,6 +187,17 @@ class ProofreaderConfig(BaseModel):
     enable_proofreading: bool = Field(
         default=True, description="Whether to enable proofreading"
     )
+    model: Literal[
+        "gpt-5",
+        "gpt-5-mini",
+        "gpt-5-nano",
+        "gpt-5.2",
+        "gpt-5.3-chat-latest",
+        "gpt-5.4",
+    ] = Field(
+        default="gpt-5-mini",
+        description="Proofreader model: gpt-5 family",
+    )
     window_size: int = Field(
         default=5,
         description="Proofreading window size, number of sentences per proofreading chunk",
@@ -156,11 +212,27 @@ class ProofreaderConfig(BaseModel):
         default=True, description="Whether to print the proofreading process"
     )
 
+    @field_validator("model", mode="before")
+    @classmethod
+    def normalize_model(cls, value: Any) -> Any:
+        return normalize_openai_text_model(value)
+
 
 class EditorConfig(BaseModel):
     """Editor configuration"""
 
     enable_editor: bool = Field(default=True, description="Whether to enable editor")
+    model: Literal[
+        "gpt-5",
+        "gpt-5-mini",
+        "gpt-5-nano",
+        "gpt-5.2",
+        "gpt-5.3-chat-latest",
+        "gpt-5.4",
+    ] = Field(
+        default="gpt-5-mini",
+        description="Editor model: gpt-5 family",
+    )
     user_instruction: Literal["none", "formal", "casual", "technical"] = Field(
         default="none", description="User instruction style for the editor"
     )
@@ -172,6 +244,11 @@ class EditorConfig(BaseModel):
         default=5,
         description="Editor history length, number of sentences to be provided as history",
     )
+
+    @field_validator("model", mode="before")
+    @classmethod
+    def normalize_model(cls, value: Any) -> Any:
+        return normalize_openai_text_model(value)
 
 
 class OutputTypeConfig(BaseModel):

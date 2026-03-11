@@ -1,6 +1,13 @@
 from typing import Optional, List, Tuple
 from src.SRT.srt import SrtScript
 from src.memory.abs_api_RAG import AbsApiRAG
+from src.openai_responses import (
+    DEFAULT_TEXT_MODEL,
+    create_response_text,
+    extract_usage_tokens,
+    normalize_text_model,
+    provider_for_client,
+)
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
@@ -19,6 +26,7 @@ class ProofreaderAgent:
         stm_len: int = 10,
         use_short_term_memory: bool = False,
         verbose: int = 2,
+        model_name: str = DEFAULT_TEXT_MODEL,
         num_workers: int = 4,
         usage_log_path: Optional[str] = None,
         task_id: Optional[str] = None,
@@ -31,6 +39,7 @@ class ProofreaderAgent:
         self.batch_size = batch_size
         self.stm_len = stm_len
         self.verbose = verbose
+        self.model_name = normalize_text_model(model_name)
         self.use_short_term_memory = use_short_term_memory
         self.short_term_memory = ""
         self.num_workers = max(1, int(num_workers))
@@ -103,20 +112,18 @@ class ProofreaderAgent:
             self.logger.info(f"Updated STM: {self.short_term_memory}")
 
     def send_request(self, prompt: str, phrase_index: Optional[int] = None):
-        resp = self.client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": prompt}],
+        text, resp = create_response_text(
+            self.client,
+            model=self.model_name,
+            input_value=prompt,
             temperature=0.0
         )
         # Best-effort usage logging
         try:
-            usage = getattr(resp, "usage", None)
-            pt = getattr(usage, "prompt_tokens", None) if usage else None
-            ct = getattr(usage, "completion_tokens", None) if usage else None
-            tt = getattr(usage, "total_tokens", None) if usage else None
+            pt, ct, tt = extract_usage_tokens(resp)
             self._record_usage(
-                provider="openai",
-                model="gpt-4o",
+                provider=provider_for_client(self.client),
+                model=self.model_name,
                 category="text",
                 prompt_tokens=pt,
                 completion_tokens=ct,
@@ -126,7 +133,7 @@ class ProofreaderAgent:
             )
         except Exception:
             pass
-        return resp.choices[0].message.content
+        return text
 
     def build_batch_prompt(self, batch: List[Tuple[int, str, str]]) -> str:
         segment_block = []

@@ -8,6 +8,11 @@ import torch
 from PIL import Image
 import openai
 from openai import OpenAI
+from src.openai_responses import (
+    DEFAULT_TEXT_MODEL,
+    create_response_text,
+    extract_usage_tokens,
+)
 from src.vision.vision_agent import VisionAgent
 import logging
 
@@ -53,21 +58,20 @@ class GptVisionAgent(VisionAgent):
         return self.describe_image(encoded_image)
     
     def describe_image(self, base64_image):
-        response = self.client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
+        model_name = self.model_name if self.model_name in ("gpt-4o", "gpt-4o-mini") else "gpt-4o"
+        response = self.client.responses.create(
+            model=model_name,
+            input=[
                 {
                     "role": "user",
                     "content": [
                         {
-                            "type": "text",
-                            "text": "Analyze the visual cue and recongnize objects in the image:.",
+                            "type": "input_text",
+                            "text": "Analyze the visual cue and recognize objects in the image.",
                         },
                         {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64_image}"
-                            },
+                            "type": "input_image",
+                            "image_url": f"data:image/jpeg;base64,{base64_image}",
                         },
                     ],
                 }
@@ -75,14 +79,11 @@ class GptVisionAgent(VisionAgent):
         )
         # Best-effort usage logging
         try:
-            usage = getattr(response, "usage", None)
-            pt = getattr(usage, "prompt_tokens", None) if usage else None
-            ct = getattr(usage, "completion_tokens", None) if usage else None
-            tt = getattr(usage, "total_tokens", None) if usage else None
+            pt, ct, tt = extract_usage_tokens(response)
             if hasattr(self, "_record_usage"):
                 self._record_usage(
                     provider="openai",
-                    model="gpt-4o",
+                    model=model_name,
                     prompt_tokens=pt,
                     completion_tokens=ct,
                     total_tokens=tt,
@@ -91,33 +92,27 @@ class GptVisionAgent(VisionAgent):
                 )
         except Exception:
             pass
-        return response.choices[0].message.content
+        return (response.output_text or "").strip()
     
     def summarize_cue(self):
         if self.agent_history_logger:
             self.agent_history_logger.info('{"role": "vision_agent", "message": "Let me feast my eyes on these frames... Picasso mode: ON 🖼️"}')
         
         prompt = f"Summarize the following visual description: {' '.join(self.visual_cues)}"
-        response = openai.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": "You are an AI model that summarizes visual description from a video."},
-                {
-                    "role": "user", 
-                    "content": prompt
-                }
-            ],
+        model_name = self.model_name if self.model_name in ("gpt-4o", "gpt-4o-mini") else "gpt-4o"
+        summary, response = create_response_text(
+            self.client,
+            model=model_name,
+            instructions="You are an AI model that summarizes visual description from a video.",
+            input_value=prompt,
         )
         # Best-effort usage logging
         try:
-            usage = getattr(response, "usage", None)
-            pt = getattr(usage, "prompt_tokens", None) if usage else None
-            ct = getattr(usage, "completion_tokens", None) if usage else None
-            tt = getattr(usage, "total_tokens", None) if usage else None
+            pt, ct, tt = extract_usage_tokens(response)
             if hasattr(self, "_record_usage"):
                 self._record_usage(
                     provider="openai",
-                    model="gpt-4o",
+                    model=model_name,
                     prompt_tokens=pt,
                     completion_tokens=ct,
                     total_tokens=tt,
@@ -128,7 +123,7 @@ class GptVisionAgent(VisionAgent):
             pass
         if self.agent_history_logger:
             self.agent_history_logger.info('{"role": "vision_agent", "message": "Visual summary ready! I could do this all day, but I won\'t."}')
-        return response.choices[0].message.content
+        return summary
 
     def analyze_video(self, video_path):
         if self.agent_history_logger:
@@ -486,17 +481,13 @@ class HfVisionAgent:
     def summarize_cue(self):
         # Summarize the collected visual descriptions into a coherent summary
         prompt = f"Summarize the following visual description: { ' | '.join(self.visual_cues) }"
-        response = self.client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": "You are an AI model that summarizes visual description from a video."},
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
+        summary, _ = create_response_text(
+            self.client,
+            model=DEFAULT_TEXT_MODEL,
+            instructions="You are an AI model that summarizes visual description from a video.",
+            input_value=prompt,
         )
-        return response.choices[0].message.content
+        return summary
 
     def analyze_frame(self, frame):
         # Analyze a single frame and obtain its caption

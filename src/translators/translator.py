@@ -20,6 +20,7 @@ except ImportError:  # pragma: no cover - optional dependency
 
 from src.memory.basic_rag import BasicRAG
 from src.memory.direct_search_RAG import TavilySearchRAG
+from src.openai_responses import DEFAULT_TEXT_MODEL, SUPPORTED_OPENAI_TEXT_MODELS
 from src.SRT.srt import split_script
 from src.translators.assistant import Assistant
 from src.translators.LLM import LLM
@@ -81,14 +82,14 @@ class Translator:
             self.translator = Assistant(
                 self.client, system_prompt=self.system_prompt, domain=domain
             )
-        elif self.model_name in ["gpt-4o-mini", "gpt-4o", "gpt-5", "gpt-5-mini", "gpt-5-nano"]:
+        elif self.model_name in ["gpt-4o-mini", "gpt-4o", *SUPPORTED_OPENAI_TEXT_MODELS]:
             self.translator = LLM(
                 self.client, self.model_name, system_prompt=self.system_prompt, task_id=self.task_id, usage_log_path=self.usage_log_path
             )
         elif self.model_name == "Multiagent":
             self.translator = MTA(
                 self.client,
-                "gpt-4o",
+                DEFAULT_TEXT_MODEL,
                 self.domain,
                 self.src_lang,
                 self.tgt_lang,
@@ -239,7 +240,11 @@ class Translator:
             raise ValueError("SRT file not set")
 
         # Only enable parallelism for API LLM-style models we know are stateless per request
-        api_models = {"gpt-4o-mini", "gpt-4o", "gpt-5", "gpt-5-mini", "gpt-5-nano"}
+        api_models = {
+            "gpt-4o-mini",
+            "gpt-4o",
+            *SUPPORTED_OPENAI_TEXT_MODELS,
+        }
         if self.model_name not in api_models:
             self.task_logger.info(
                 f"Model {self.model_name} is not an API LLM; falling back to sequential translate()."
