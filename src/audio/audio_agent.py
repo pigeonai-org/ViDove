@@ -62,6 +62,7 @@ class AudioAgent(ABC):
         prompt_tokens: int | None,
         completion_tokens: int | None,
         total_tokens: int | None,
+        cached_prompt_tokens: int | None = None,
         phrase_index: int | None = None,
         extra: dict | None = None,
     ) -> None:
@@ -77,6 +78,7 @@ class AudioAgent(ABC):
                 "model": model,
                 "category": category,
                 "prompt_tokens": prompt_tokens,
+                "cached_prompt_tokens": cached_prompt_tokens,
                 "completion_tokens": completion_tokens,
                 "total_tokens": total_tokens,
                 "phrase_index": phrase_index,
@@ -210,6 +212,7 @@ class GPT4oAudioAgent(AudioAgent):
                 self._record_usage(
                     provider="openai",
                     model=self.model_name,
+                    category="audio",
                     prompt_tokens=pt,
                     completion_tokens=ct,
                     total_tokens=tt,

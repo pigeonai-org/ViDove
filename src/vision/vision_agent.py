@@ -50,6 +50,7 @@ class VisionAgent(ABC):
         prompt_tokens: int | None,
         completion_tokens: int | None,
         total_tokens: int | None,
+        cached_prompt_tokens: int | None = None,
         phrase_index: int | None = None,
         extra: dict | None = None,
     ) -> None:
@@ -65,6 +66,7 @@ class VisionAgent(ABC):
                 "model": model,
                 "category": "vision",
                 "prompt_tokens": int(prompt_tokens or 0),
+                "cached_prompt_tokens": int(cached_prompt_tokens or 0),
                 "completion_tokens": int(completion_tokens or 0),
                 "total_tokens": int(total_tokens or 0),
                 "phrase_index": phrase_index,

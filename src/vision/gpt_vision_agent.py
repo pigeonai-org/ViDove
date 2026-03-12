@@ -79,12 +79,13 @@ class GptVisionAgent(VisionAgent):
         )
         # Best-effort usage logging
         try:
-            pt, ct, tt = extract_usage_tokens(response)
+            pt, ct, tt, cpt = extract_usage_tokens(response)
             if hasattr(self, "_record_usage"):
                 self._record_usage(
                     provider="openai",
                     model=model_name,
                     prompt_tokens=pt,
+                    cached_prompt_tokens=cpt,
                     completion_tokens=ct,
                     total_tokens=tt,
                     phrase_index=None,
@@ -108,12 +109,13 @@ class GptVisionAgent(VisionAgent):
         )
         # Best-effort usage logging
         try:
-            pt, ct, tt = extract_usage_tokens(response)
+            pt, ct, tt, cpt = extract_usage_tokens(response)
             if hasattr(self, "_record_usage"):
                 self._record_usage(
                     provider="openai",
                     model=model_name,
                     prompt_tokens=pt,
+                    cached_prompt_tokens=cpt,
                     completion_tokens=ct,
                     total_tokens=tt,
                     phrase_index=None,

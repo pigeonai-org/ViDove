@@ -69,6 +69,7 @@ class EditorAgent:
         prompt_tokens: Optional[int],
         completion_tokens: Optional[int],
         total_tokens: Optional[int],
+        cached_prompt_tokens: Optional[int] = None,
         phrase_index: Optional[int] = None,
         extra: Optional[dict] = None,
     ) -> None:
@@ -83,6 +84,7 @@ class EditorAgent:
                 "model": model,
                 "category": category,
                 "prompt_tokens": prompt_tokens,
+                "cached_prompt_tokens": cached_prompt_tokens,
                 "completion_tokens": completion_tokens,
                 "total_tokens": total_tokens,
                 "phrase_index": phrase_index,
@@ -205,12 +207,13 @@ class EditorAgent:
         )
         # Best-effort usage logging
         try:
-            pt, ct, tt = extract_usage_tokens(resp)
+            pt, ct, tt, cpt = extract_usage_tokens(resp)
             self._record_usage(
                 provider=provider_for_client(self.client),
                 model=self.model_name,
                 category="text",
                 prompt_tokens=pt,
+                cached_prompt_tokens=cpt,
                 completion_tokens=ct,
                 total_tokens=tt,
                 phrase_index=phrase_index,

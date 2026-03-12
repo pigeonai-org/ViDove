@@ -45,14 +45,31 @@ def model_supports_temperature(model_name: Optional[str]) -> bool:
     return not normalized.startswith("gpt-5")
 
 
-def extract_usage_tokens(response: Any) -> tuple[Optional[int], Optional[int], Optional[int]]:
+def _usage_field(container: Any, key: str) -> Any:
+    if container is None:
+        return None
+    if isinstance(container, dict):
+        return container.get(key)
+    return getattr(container, key, None)
+
+
+def extract_usage_tokens(
+    response: Any,
+) -> tuple[Optional[int], Optional[int], Optional[int], Optional[int]]:
     usage = getattr(response, "usage", None)
+    if usage is None and isinstance(response, dict):
+        usage = response.get("usage")
     if usage is None:
-        return None, None, None
+        return None, None, None, None
+    input_details = _usage_field(usage, "input_tokens_details") or _usage_field(
+        usage, "prompt_tokens_details"
+    )
     return (
-        getattr(usage, "input_tokens", None),
-        getattr(usage, "output_tokens", None),
-        getattr(usage, "total_tokens", None),
+        _usage_field(usage, "input_tokens") or _usage_field(usage, "prompt_tokens"),
+        _usage_field(usage, "output_tokens")
+        or _usage_field(usage, "completion_tokens"),
+        _usage_field(usage, "total_tokens"),
+        _usage_field(input_details, "cached_tokens"),
     )
 
 

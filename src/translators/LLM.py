@@ -36,7 +36,7 @@ class LLM(AbsApiModel):
         )
         # Best-effort usage logging
         try:
-            pt, ct, tt = extract_usage_tokens(response)
+            pt, ct, tt, cpt = extract_usage_tokens(response)
             provider = provider_for_client(self.client)
             if self.usage_log_path:
                 with self._usage_lock:
@@ -50,6 +50,7 @@ class LLM(AbsApiModel):
                         "model": self.model_name,
                         "category": "text",
                         "prompt_tokens": pt,
+                        "cached_prompt_tokens": cpt,
                         "completion_tokens": ct,
                         "total_tokens": tt,
                         "phrase_index": call_idx,
