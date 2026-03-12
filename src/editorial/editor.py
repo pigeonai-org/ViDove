@@ -201,7 +201,6 @@ class EditorAgent:
             self.client,
             model=self.model_name,
             input_value=prompt,
-            temperature=0.0,
             max_output_tokens=3000,
         )
         # Best-effort usage logging

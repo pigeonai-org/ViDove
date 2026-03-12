@@ -39,6 +39,12 @@ def provider_for_client(client: Any) -> str:
     return "azure-openai" if isinstance(client, AzureOpenAI) else "openai"
 
 
+def model_supports_temperature(model_name: Optional[str]) -> bool:
+    candidate = (model_name or "").strip().lower()
+    normalized = LEGACY_OPENAI_TEXT_MODEL_MAP.get(candidate, candidate)
+    return not normalized.startswith("gpt-5")
+
+
 def extract_usage_tokens(response: Any) -> tuple[Optional[int], Optional[int], Optional[int]]:
     usage = getattr(response, "usage", None)
     if usage is None:
@@ -79,7 +85,7 @@ def create_response_text(
     }
     if instructions:
         request["instructions"] = instructions
-    if temperature is not None:
+    if temperature is not None and model_supports_temperature(model):
         request["temperature"] = temperature
     if max_output_tokens is not None:
         request["max_output_tokens"] = max_output_tokens

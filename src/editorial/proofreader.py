@@ -116,7 +116,6 @@ class ProofreaderAgent:
             self.client,
             model=self.model_name,
             input_value=prompt,
-            temperature=0.0
         )
         # Best-effort usage logging
         try:

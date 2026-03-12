@@ -12,7 +12,7 @@ import shutil
 import time
 import signal
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Literal, cast, List as ListType
+from typing import Dict, List, Any, Optional, Literal
 from uuid import uuid4
 
 from openai import AsyncOpenAI
@@ -23,6 +23,7 @@ from config import CONFIGURATION_SCHEMA
 
 # OpenAI client
 client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+ASSISTANT_CHAT_MODEL = os.getenv("ASSISTANT_CHAT_MODEL", "gpt-5-mini")
 
 
 # ViDove configuration
@@ -91,20 +92,20 @@ EXAMPLES:
 
 Remember: NO markdown, NO code blocks, ONLY the JSON object."""
 
-        # Type-safe message formatting for OpenAI API
-        message_history: ListType[Dict[str, str]] = [{"role": "system", "content": system_prompt}]
-        message_history.extend([{"role": msg.role, "content": msg.content} for msg in messages])
+        input_history: List[Dict[str, str]] = [
+            {"role": msg.role, "content": msg.content} for msg in messages
+        ]
 
-        response = await client.chat.completions.create(
-            model="gpt-4o",
-            messages=cast(ListType, message_history),
-            temperature=0.7,
-            max_tokens=1000,
+        response = await client.responses.create(
+            model=ASSISTANT_CHAT_MODEL,
+            instructions=system_prompt,
+            input=input_history,
+            max_output_tokens=1000,
         )
 
-        content = response.choices[0].message.content
+        content = (response.output_text or "").strip()
         
-        if content is None:
+        if not content:
             return {
                 "message": "I apologize, but I didn't receive a proper response. Please try again.",
                 "config_updates": {},

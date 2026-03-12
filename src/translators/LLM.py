@@ -7,7 +7,6 @@ from datetime import datetime
 from uuid import uuid4
 
 from src.openai_responses import (
-    SUPPORTED_OPENAI_TEXT_MODELS,
     create_response_text,
     extract_usage_tokens,
     normalize_text_model,
@@ -34,7 +33,6 @@ class LLM(AbsApiModel):
             model=self.model_name,
             instructions=str(self.system_prompt),
             input_value=input,
-            temperature=1 if self.model_name in SUPPORTED_OPENAI_TEXT_MODELS else self.temp,
         )
         # Best-effort usage logging
         try:

@@ -433,7 +433,6 @@ class SrtScript(object):
                     "If you need to output a sequence number, please separate it with a colon."
                 ),
                 input_value='Please split or combine the following sentences into {} sentences:\n{}'.format(target, input_str),
-                temperature=0.15,
             )
             return text
 
@@ -815,4 +814,3 @@ def split_script(script_in, chunk_size=1000):
 
     assert len(script_arr) == len(range_arr)
     return script_arr, range_arr
-
