@@ -204,10 +204,10 @@ def convert_web_config_to_task_config(session_config: SessionConfig) -> Dict[str
             "frame_cache_dir": ".cache/frames",
             "frame_per_seg": session_config.vision_frame_per_seg
         },
-        "MEMEORY": {
-            "enable_local_knowledge": session_config.MEMEORY_enable_local_knowledge,
-            "enable_web_search": session_config.MEMEORY_enable_web_search,
-            "enable_vision_knowledge": session_config.MEMEORY_enable_vision_knowledge,
+        "MEMORY": {
+            "enable_local_knowledge": session_config.MEMORY_enable_local_knowledge,
+            "enable_web_search": session_config.MEMORY_enable_web_search,
+            "enable_vision_knowledge": session_config.MEMORY_enable_vision_knowledge,
             "local_knowledge_path": "./domain_dict"
         },
         "pre_process": {

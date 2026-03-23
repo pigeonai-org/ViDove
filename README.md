@@ -286,7 +286,7 @@ For detailed Docker deployment guide, see the [Docker Deployment Doc](doc/DOCKER
     video_download:
       resolution: 480 # 360, 480, 720, best(best we can find)
 
-    MEMEORY:
+    MEMORY:
       enable_local_knowledge: False
       enable_vision_knowledge: True
       enable_web_search: False

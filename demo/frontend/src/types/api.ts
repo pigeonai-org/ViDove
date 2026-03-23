@@ -22,7 +22,7 @@ export interface SessionConfig {
   domain: "General" | "SC2" | "CS:GO";
   num_workers: number;
   'video_download.resolution': 360 | 480 | 720 | "best";
-  'translation.model': "gpt-4" | "gpt-4o-mini" | "gpt-4o" | "gpt-5" | "gpt-5-mini";
+  'translation.model': string;
   'translation.chunk_size': number;
   'translation.use_history': boolean;
   'translation.max_retries': number;
@@ -52,10 +52,10 @@ export interface SessionConfig {
   'editor.user_instruction': "none" | "formal" | "casual" | "technical";
   'editor.editor_context_window': number;
   'editor.history_length': number;
-  'MEMEORY.enable_local_knowledge': boolean;
-  'MEMEORY.enable_web_search': boolean;
-  'MEMEORY.enable_vision_knowledge': boolean;
-  'MEMEORY.local_knowledge_path': string;
+  'MEMORY.enable_local_knowledge': boolean;
+  'MEMORY.enable_web_search': boolean;
+  'MEMORY.enable_vision_knowledge': boolean;
+  'MEMORY.local_knowledge_path': string;
   'output_type.video': boolean;
   'output_type.bilingual': boolean;
   'output_type.subtitle': "srt" | "ass";

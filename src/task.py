@@ -19,6 +19,7 @@ from src.SRT.srt import SrtScript
 from src.SRT.srt2ass import srt2ass
 from src.memory.basic_rag import BasicRAG
 from src.memory.direct_search_RAG import TavilySearchRAG
+from src.output_render import DEFAULT_SUBTITLE_FONT_CANDIDATES, build_subtitle_filter
 from src.translators.translator import Translator
 from src.vision.gpt_vision_agent import GptVisionAgent, CLIPVisionAgent
 from src.audio.audio_agent import (
@@ -28,6 +29,18 @@ from src.audio.audio_agent import (
     Qwen3ASRAudioAgent,
 )
 from src.editorial.editor import EditorAgent
+
+
+def _replace_task_file_handler(logger: logging.Logger, handler: logging.Handler) -> None:
+    for existing in list(logger.handlers):
+        if getattr(existing, "_vidove_task_file_handler", False):
+            logger.removeHandler(existing)
+            try:
+                existing.close()
+            except Exception:
+                pass
+    setattr(handler, "_vidove_task_file_handler", True)
+    logger.addHandler(handler)
 
 
 class TaskStatus(str, Enum):
@@ -78,7 +91,7 @@ class Task:
         self.task_local_dir = task_local_dir
         self.vision_setting = task_cfg["vision"]
         self.audio_setting = task_cfg["audio"]
-        self.memory_setting = task_cfg["MEMEORY"]
+        self.memory_setting = task_cfg["MEMORY"]
         self.translation_setting = task_cfg["translation"]
         self.translation_model = self.translation_setting["model"]
 
@@ -116,14 +129,24 @@ class Task:
         )
         task_file_handler = logging.FileHandler(self.log_dir, "w", encoding="utf-8")
         task_file_handler.setFormatter(logging.Formatter(logfmt))
-        self.task_logger.addHandler(task_file_handler)
+        _replace_task_file_handler(self.task_logger, task_file_handler)
+        src_logger = logging.getLogger("src")
+        src_logger.setLevel(logging.INFO)
+        _replace_task_file_handler(src_logger, task_file_handler)
 
         # log agent conversation history
         self.agent_history_logger = logging.getLogger(f"agent_history_{task_id}")
         self.agent_history_logger.setLevel(logging.INFO)
+        self.agent_history_logger.propagate = False
         agent_history_file_handler = logging.FileHandler(
             f"{self.task_local_dir}/agent_history.jsonl", "w", encoding="utf-8"
         )
+        for existing in list(self.agent_history_logger.handlers):
+            self.agent_history_logger.removeHandler(existing)
+            try:
+                existing.close()
+            except Exception:
+                pass
         self.agent_history_logger.addHandler(agent_history_file_handler)
         # usage log path for per-request token usage events
         self.usage_log_path = f"{self.task_local_dir}/usage.jsonl"
@@ -692,6 +715,9 @@ class Task:
 
         results_dir = f"{self.task_local_dir}/results"
 
+        # Remove source text punctuation before writing subtitle files
+        self.SRT_Script.remove_src_punctuation()
+
         # Always first save pure translation
         subtitle_path_trans = f"{results_dir}/{self.task_id}_{self.target_lang}.srt"
         self.SRT_Script.write_srt_file_translate(subtitle_path_trans)
@@ -712,45 +738,33 @@ class Task:
         if video_out and self.video_path is not None:
             video_output_path = f"{results_dir}/{self.task_id}.mp4"
 
-            # Check if fonts directory exists
-            fonts_dir = f"{self.base_dir}/fonts"
-            if not os.path.exists(fonts_dir):
-                # Create fonts directory if it doesn't exist
-                os.makedirs(fonts_dir, exist_ok=True)
+            configured_fonts_dir = os.getenv(
+                "VIDOVE_SUBTITLE_FONTS_DIR", f"{self.base_dir}/fonts"
+            )
+            fonts_dir = (
+                configured_fonts_dir if os.path.isdir(configured_fonts_dir) else None
+            )
+            if configured_fonts_dir and fonts_dir is None:
                 self.task_logger.warning(
-                    f"Fonts directory {fonts_dir} does not exist, created it."
+                    "Configured subtitle fonts directory %s does not exist; falling back to fontconfig only.",
+                    configured_fonts_dir,
                 )
 
-            # Use proper ffmpeg subtitles filter syntax with fallback font
+            font_candidates = [*DEFAULT_SUBTITLE_FONT_CANDIDATES, None]
+            last_error = None
+
             try:
-                # Try with custom font first
-                subtitle_filter = f"subtitles='{final_res}':force_style='FontName=SourceHanSansCN-Normal,FontSize=24,PrimaryColour=&Hffffff,OutlineColour=&H000000,Bold=1'"
-
-                result = subprocess.run(
-                    [
-                        "ffmpeg",
-                        "-i",
-                        str(self.video_path),
-                        "-vf",
-                        subtitle_filter,
-                        "-c:a",
-                        "copy",
-                        video_output_path,
-                    ],
-                    capture_output=True,
-                    text=True,
-                )
-
-                if result.returncode != 0:
-                    self.task_logger.warning(
-                        f"FFmpeg with custom font failed: {result.stderr}"
+                for font_name in font_candidates:
+                    subtitle_filter = build_subtitle_filter(
+                        final_res,
+                        fonts_dir=fonts_dir,
+                        font_name=font_name,
                     )
-                    # Fallback to default font
-                    subtitle_filter = f"subtitles='{final_res}':force_style='FontSize=24,PrimaryColour=&Hffffff,OutlineColour=&H000000,Bold=1'"
 
                     result = subprocess.run(
                         [
                             "ffmpeg",
+                            "-y",
                             "-i",
                             str(self.video_path),
                             "-vf",
@@ -763,17 +777,30 @@ class Task:
                         text=True,
                     )
 
-                    if result.returncode != 0:
-                        self.task_logger.error(
-                            f"FFmpeg video generation failed: {result.stderr}"
+                    if result.returncode == 0:
+                        self.task_logger.info(
+                            "Video generated with subtitle font %s (fonts_dir=%s)",
+                            font_name or "system default",
+                            fonts_dir or "fontconfig",
                         )
-                        raise RuntimeError(
-                            f"Failed to generate video with subtitles: {result.stderr}"
-                        )
-                    else:
-                        self.task_logger.info("Video generated with default font")
-                else:
-                    self.task_logger.info("Video generated with custom font")
+                        last_error = None
+                        break
+
+                    last_error = result.stderr
+                    self.task_logger.warning(
+                        "FFmpeg subtitle burn-in failed with font %s: %s",
+                        font_name or "system default",
+                        result.stderr,
+                    )
+
+                if last_error is not None:
+                    self.task_logger.error(
+                        "FFmpeg video generation failed after trying subtitle font fallbacks: %s",
+                        last_error,
+                    )
+                    raise RuntimeError(
+                        f"Failed to generate video with subtitles: {last_error}"
+                    )
 
             except Exception as e:
                 self.task_logger.error(f"Error during video generation: {str(e)}")

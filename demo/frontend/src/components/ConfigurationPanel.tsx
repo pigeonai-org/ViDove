@@ -81,10 +81,17 @@ const CONFIG_FIELDS: ConfigField[] = [
     description: 'LLM model for translation',
     category: 'Translation',
     options: [
-      { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
-      { value: 'gpt-4o', label: 'GPT-4o' },
       { value: 'gpt-5', label: 'GPT-5' },
-      { value: 'gpt-5-mini', label: 'GPT-5 Mini' }
+      { value: 'gpt-5-mini', label: 'GPT-5 Mini' },
+      { value: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
+      { value: 'gpt-5.4-nano', label: 'GPT-5.4 Nano' },
+      { value: 'gpt-5-nano', label: 'GPT-5 Nano' },
+      { value: 'gpt-5.2', label: 'GPT-5.2' },
+      { value: 'gpt-5.3-chat-latest', label: 'GPT-5.3 Chat Latest' },
+      { value: 'gpt-5.4', label: 'GPT-5.4' },
+      { value: 'Assistant', label: 'Assistant' },
+      { value: 'Multiagent', label: 'Multiagent' },
+      { value: 'RAG', label: 'RAG' }
     ]
   },
   {
@@ -364,28 +371,28 @@ const CONFIG_FIELDS: ConfigField[] = [
   
   // Memory settings
   {
-    key: 'MEMEORY.enable_local_knowledge',
+    key: 'MEMORY.enable_local_knowledge',
     label: 'Local Knowledge',
     type: 'boolean',
     description: 'Enable local knowledge base',
     category: 'Memory'
   },
   {
-    key: 'MEMEORY.enable_web_search',
+    key: 'MEMORY.enable_web_search',
     label: 'Web Search',
     type: 'boolean',
     description: 'Enable web search for additional context',
     category: 'Memory'
   },
   {
-    key: 'MEMEORY.enable_vision_knowledge',
+    key: 'MEMORY.enable_vision_knowledge',
     label: 'Vision Knowledge',
     type: 'boolean',
     description: 'Enable vision-based knowledge extraction',
     category: 'Memory'
   },
   {
-    key: 'MEMEORY.local_knowledge_path',
+    key: 'MEMORY.local_knowledge_path',
     label: 'Local Knowledge Path',
     type: 'readonly',
     description: 'Path to local knowledge base (system managed)',

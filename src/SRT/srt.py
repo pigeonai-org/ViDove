@@ -137,6 +137,15 @@ class SrtSegment(object):
         result.merge_seg(other)
         return result
 
+    def remove_src_punc(self) -> None:
+        """
+        remove punctuations in source text
+        :return: None
+        """
+        punc_str = punctuation_dict[self.src_lang]["punc_str"]
+        for punc in punc_str:
+            self.src_text = self.src_text.replace(punc, ' ')
+
     def remove_trans_punc(self) -> None:
         """
         remove punctuations in translation text
@@ -383,6 +392,15 @@ class SrtScript(object):
 
         self.segments = segments
 
+    def remove_src_punctuation(self):
+        """
+        Remove all punctuation from source text before writing subtitle files.
+        :return: None
+        """
+        for i, seg in enumerate(self.segments):
+            seg.remove_src_punc()
+        self.task_logger.info("Removed punctuation in source text.")
+
     def remove_trans_punctuation(self):
         """
         Post-process: remove all punc after translation and split
@@ -454,7 +472,10 @@ class SrtScript(object):
                     except Exception as e:
                         print("An error has occurred during solving unmatched lines:", e)
                         print("Retrying...")
-                        self.task_logger.error("An error has occurred during solving unmatched lines:", e)
+                        self.task_logger.error(
+                            "An error has occurred during solving unmatched lines: %s",
+                            e,
+                        )
                         self.task_logger.error("Retrying...")
                         flag = True
                 lines = translate.split('\n')

@@ -1,4 +1,6 @@
 import argparse
+import logging
+import os
 import shutil
 from pathlib import Path
 from uuid import uuid4
@@ -8,7 +10,7 @@ from yaml import Loader, load
 import __init_lib_path
 
 from src.task import Task
-from config_schema import load_task_config, TaskConfig
+from config_schema import load_task_config
 
 """
     Main entry for terminal environment.
@@ -16,6 +18,21 @@ from config_schema import load_task_config, TaskConfig
     Usage: python3 entries/run.py [-h] [--link LINK] [--video_file VIDEO_FILE] [--audio_file AUDIO_FILE] [--srt_file SRT_FILE] [--continue CONTINUE]
               [--launch_cfg LAUNCH_CFG] [--task_cfg TASK_CFG]
 """
+
+
+def configure_logging() -> int:
+    level_name = (
+        os.getenv("VIDOVE_LOG_LEVEL", "")
+        or os.getenv("LOG_LEVEL", "")
+        or "INFO"
+    )
+    level = getattr(logging, level_name.upper(), logging.INFO)
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+        force=True,
+    )
+    return level
 
 
 def parse_args():
@@ -72,6 +89,7 @@ def parse_args():
 
 
 if __name__ == "__main__":
+    configure_logging()
     # read args and configs
     args = parse_args()
     
@@ -87,16 +105,13 @@ if __name__ == "__main__":
         print(f"   - Domain: {task_config.domain}")
         print(f"   - Audio processing: {'Enabled' if task_config.audio.enable_audio else 'Disabled'}")
         print(f"   - Vision processing: {'Enabled' if task_config.vision.enable_vision else 'Disabled'}")
-        
+
     except Exception as e:
         print(f"❌ Configuration loading failed: {e}")
-        # Fallback to old method
-        print("🔄 Falling back to old configuration loading method...")
-        task_cfg = load(open(args.task_cfg), Loader=Loader)
-        task_config = None
-    else:
-        # Convert to dict for compatibility
-        task_cfg = task_config.to_dict()
+        raise
+
+    # Convert to dict for compatibility
+    task_cfg = task_config.to_dict()
     
     launch_cfg = load(open(args.launch_cfg), Loader=Loader)
 

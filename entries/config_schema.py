@@ -1,5 +1,5 @@
 from typing import Any, Optional, Literal, Union
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pathlib import Path
 
 
@@ -17,6 +17,8 @@ LEGACY_OPENAI_TEXT_MODEL_MAP = {
 SUPPORTED_OPENAI_TEXT_MODELS = (
     "gpt-5",
     "gpt-5-mini",
+    "gpt-5.4-mini",
+    "gpt-5.4-nano",
     "gpt-5-nano",
     "gpt-5.2",
     "gpt-5.3-chat-latest",
@@ -36,6 +38,15 @@ def normalize_openai_text_model(value: Any) -> Any:
     if lowered in SUPPORTED_OPENAI_TEXT_MODELS:
         return lowered
     return candidate
+
+
+def validate_text_model_name(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    normalized = normalize_openai_text_model(value)
+    if isinstance(normalized, str) and normalized.strip():
+        return normalized.strip()
+    raise ValueError("Model name must be a non-empty string")
 
 
 class VideoDownloadConfig(BaseModel):
@@ -136,19 +147,9 @@ class PreProcessConfig(BaseModel):
 class TranslationConfig(BaseModel):
     """Translation module configuration"""
 
-    model: Literal[
-        "Assistant",
-        "Multiagent",
-        "RAG",
-        "gpt-5",
-        "gpt-5-mini",
-        "gpt-5-nano",
-        "gpt-5.2",
-        "gpt-5.3-chat-latest",
-        "gpt-5.4",
-    ] = Field(
+    model: str = Field(
         default="gpt-5",
-        description="Translation model: gpt-5 family, Assistant, Multiagent, RAG",
+        description="Translation model name",
     )
     chunk_size: int = Field(default=2000, description="Translation chunk size")
     use_history: bool = Field(
@@ -164,7 +165,7 @@ class TranslationConfig(BaseModel):
     @field_validator("model", mode="before")
     @classmethod
     def normalize_model(cls, value: Any) -> Any:
-        return normalize_openai_text_model(value)
+        return validate_text_model_name(value)
 
 
 class PostProcessConfig(BaseModel):
@@ -187,16 +188,9 @@ class ProofreaderConfig(BaseModel):
     enable_proofreading: bool = Field(
         default=True, description="Whether to enable proofreading"
     )
-    model: Literal[
-        "gpt-5",
-        "gpt-5-mini",
-        "gpt-5-nano",
-        "gpt-5.2",
-        "gpt-5.3-chat-latest",
-        "gpt-5.4",
-    ] = Field(
+    model: str = Field(
         default="gpt-5-mini",
-        description="Proofreader model: gpt-5 family",
+        description="Proofreader model name",
     )
     window_size: int = Field(
         default=5,
@@ -215,23 +209,16 @@ class ProofreaderConfig(BaseModel):
     @field_validator("model", mode="before")
     @classmethod
     def normalize_model(cls, value: Any) -> Any:
-        return normalize_openai_text_model(value)
+        return validate_text_model_name(value)
 
 
 class EditorConfig(BaseModel):
     """Editor configuration"""
 
     enable_editor: bool = Field(default=True, description="Whether to enable editor")
-    model: Literal[
-        "gpt-5",
-        "gpt-5-mini",
-        "gpt-5-nano",
-        "gpt-5.2",
-        "gpt-5.3-chat-latest",
-        "gpt-5.4",
-    ] = Field(
+    model: str = Field(
         default="gpt-5-mini",
-        description="Editor model: gpt-5 family",
+        description="Editor model name",
     )
     user_instruction: Literal["none", "formal", "casual", "technical"] = Field(
         default="none", description="User instruction style for the editor"
@@ -248,7 +235,7 @@ class EditorConfig(BaseModel):
     @field_validator("model", mode="before")
     @classmethod
     def normalize_model(cls, value: Any) -> Any:
-        return normalize_openai_text_model(value)
+        return validate_text_model_name(value)
 
 
 class OutputTypeConfig(BaseModel):
@@ -291,7 +278,7 @@ class TaskConfig(BaseModel):
         default_factory=VideoDownloadConfig,
         description="YouTube download configuration",
     )
-    MEMEORY: MemoryConfig = Field(
+    MEMORY: MemoryConfig = Field(
         default_factory=MemoryConfig,
         description="Memory and knowledge base configuration",
     )
@@ -331,6 +318,13 @@ class TaskConfig(BaseModel):
         default=None, description="Whether it is assistant mode"
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def reject_legacy_memory_key(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "MEMEORY" in value:
+            raise ValueError("Use 'MEMORY' instead of legacy 'MEMEORY'")
+        return value
+
     @field_validator("source_lang", "target_lang")
     def validate_language_codes(cls, v):
         """Validate language code format"""
@@ -357,18 +351,18 @@ class TaskConfig(BaseModel):
 
     def to_dict(self) -> dict:
         """Convert to dictionary format"""
-        return self.dict()
+        return self.model_dump()
 
     def to_yaml(self) -> str:
         """Convert to YAML format string"""
         import yaml
 
-        return yaml.dump(self.dict(), default_flow_style=False, allow_unicode=True)
+        return yaml.dump(self.model_dump(), default_flow_style=False, allow_unicode=True)
 
     def to_flat_dict(self) -> dict:
         """Convert to flattened dictionary format for web interface"""
         flat_dict: dict = {}
-        config_dict = self.dict()
+        config_dict = self.model_dump()
 
         # Top-level fields
         flat_dict["source_lang"] = config_dict["source_lang"]

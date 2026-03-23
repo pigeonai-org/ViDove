@@ -59,8 +59,20 @@ CONFIGURATION_SCHEMA = {
     ),
     "translation.model": ConfigurationValue(
         type="select",
-        options=["gpt-4", "gpt-4o-mini", "gpt-4o", "gpt-5", "gpt-5-mini"],
-        default="gpt-4o",
+        options=[
+            "gpt-5",
+            "gpt-5-mini",
+            "gpt-5.4-mini",
+            "gpt-5.4-nano",
+            "gpt-5-nano",
+            "gpt-5.2",
+            "gpt-5.3-chat-latest",
+            "gpt-5.4",
+            "Assistant",
+            "Multiagent",
+            "RAG",
+        ],
+        default="gpt-5",
         description="LLM model for translation"
     ),
     "translation.chunk_size": ConfigurationValue(
@@ -201,17 +213,17 @@ CONFIGURATION_SCHEMA = {
         default=5,
         description="Number of sentences to provide as history for the editor"
     ),
-    "MEMEORY.enable_local_knowledge": ConfigurationValue(
+    "MEMORY.enable_local_knowledge": ConfigurationValue(
         type="boolean",
         default=True,
         description="Enable local knowledge base"
     ),
-    "MEMEORY.enable_web_search": ConfigurationValue(
+    "MEMORY.enable_web_search": ConfigurationValue(
         type="boolean",
         default=False,
         description="Enable web search for additional context"
     ),
-    "MEMEORY.enable_vision_knowledge": ConfigurationValue(
+    "MEMORY.enable_vision_knowledge": ConfigurationValue(
         type="boolean",
         default=False,
         description="Enable vision-based knowledge extraction"

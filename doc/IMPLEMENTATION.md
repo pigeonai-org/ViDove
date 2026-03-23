@@ -676,7 +676,7 @@ vision:
 #### Memory Configuration
 
 ```yaml
-MEMEORY:
+MEMORY:
   enable_local_knowledge: False    # Domain knowledge RAG
   enable_vision_knowledge: True    # Visual cue indexing
   enable_web_search: False         # Web search RAG

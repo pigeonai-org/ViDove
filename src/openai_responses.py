@@ -17,6 +17,8 @@ LEGACY_OPENAI_TEXT_MODEL_MAP = {
 SUPPORTED_OPENAI_TEXT_MODELS = (
     "gpt-5",
     "gpt-5-mini",
+    "gpt-5.4-mini",
+    "gpt-5.4-nano",
     "gpt-5-nano",
     "gpt-5.2",
     "gpt-5.3-chat-latest",
@@ -28,11 +30,13 @@ DEFAULT_TEXT_MODEL = "gpt-5-mini"
 
 def normalize_text_model(model_name: Optional[str], default: str = DEFAULT_TEXT_MODEL) -> str:
     candidate = (model_name or default).strip()
+    if not candidate:
+        raise ValueError("OpenAI text model name must be a non-empty string")
     lowered = candidate.lower()
     normalized = LEGACY_OPENAI_TEXT_MODEL_MAP.get(lowered, lowered)
     if normalized in SUPPORTED_OPENAI_TEXT_MODELS:
         return normalized
-    raise NotImplementedError(f"Unsupported OpenAI text model: {model_name}")
+    return candidate
 
 
 def provider_for_client(client: Any) -> str:
