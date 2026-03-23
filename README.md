@@ -18,7 +18,7 @@
   <p align="center">
     Transcribe and Translate Your Video with a Single Click
     <br />
-    <a href="https://pigeonai.club/"><strong>Offical Website »</strong></a>
+    <a href="https://vidove.ai/"><strong>Offical Website »</strong></a>
     <br />
     <br />
     <a href="https://arxiv.org/abs/2507.07306">📃 Paper</a>
