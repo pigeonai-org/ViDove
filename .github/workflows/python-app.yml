@@ -23,17 +23,19 @@ jobs:
             - name: Install dependencies
               run: |
                 python -m pip install --upgrade pip
-                if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+                python -m pip install "openai>=1.35.0,<2.0.0" "pydantic>=2.0.0" "tqdm>=4.65.0"
 
             - name: Test with unittest
               run: |
-                # python tests/test_*.py
                 python tests/test_remove_punc.py
+                python tests/test_chunk_alignment.py
                 python tests/test_translation.py
+                python tests/test_output_render.py
 
     build:
 
         runs-on: ubuntu-latest
+        if: github.event_name == 'push'
 
         needs: test
 
@@ -66,4 +68,3 @@ jobs:
                   labels: ${{ steps.meta.outputs.labels }}
                   build-args: |
                       OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
-
