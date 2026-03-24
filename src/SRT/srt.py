@@ -58,6 +58,14 @@ punctuation_dict = {
 }
 
 dict_path = "./domain_dict"
+SEGMENT_SEPARATOR = "\n\n"
+
+
+def _punctuation_rules(lang_code: str) -> dict:
+    normalized = (lang_code or "").strip().lower()
+    if normalized in punctuation_dict:
+        return punctuation_dict[normalized]
+    raise KeyError(f"Unsupported punctuation language code: {lang_code}")
 
 class SrtSegment(object):
     def __init__(self, src_lang, tgt_lang, src_text = "", translation = "", speaker = "", start_time = 0.0, end_time = 0.0, timestamp_str="", idx = -1) -> None:
@@ -142,7 +150,7 @@ class SrtSegment(object):
         remove punctuations in source text
         :return: None
         """
-        punc_str = punctuation_dict[self.src_lang]["punc_str"]
+        punc_str = _punctuation_rules(self.src_lang)["punc_str"]
         for punc in punc_str:
             self.src_text = self.src_text.replace(punc, ' ')
 
@@ -151,7 +159,7 @@ class SrtSegment(object):
         remove punctuations in translation text
         :return: None
         """
-        punc_str = punctuation_dict[self.tgt_lang]["punc_str"]
+        punc_str = _punctuation_rules(self.tgt_lang)["punc_str"]
         for punc in punc_str:
             self.translation = self.translation.replace(punc, ' ')
         # translator = str.maketrans(punc, ' ' * len(punc))
@@ -196,23 +204,60 @@ class SrtScript(object):
     def parse_from_srt_file(cls, src_lang, tgt_lang, task_logger, client, domain, path = None, srt_str = None):
         if path is not None:
             with open(path, 'r', encoding="utf-8") as f:
-                script_lines = [line.rstrip() for line in f.readlines()]
+                script_text = f.read()
         elif srt_str is not None:
-            script_lines = srt_str.splitlines()
+            script_text = srt_str
         else:
             raise RuntimeError("need input Srt Path or Srt String")
 
-        bilingual = False
-        if script_lines[2] != '' and script_lines[3] != '':
-            bilingual = True
-        segments = []
-        if bilingual:
-            for i in range(0, len(script_lines), 5):
-                segments.append(list(script_lines[i:i + 5]))
-        else:
-            for i in range(0, len(script_lines), 4):
-                segments.append(list(script_lines[i:i + 4]))
-        return cls(src_lang, tgt_lang, segments, task_logger, client, domain)
+        def _time_to_seconds(value: str) -> float:
+            normalized = value.strip().replace(".", ",")
+            hh, mm, rest = normalized.split(":")
+            ss, ms = rest.split(",")
+            return int(hh) * 3600 + int(mm) * 60 + int(ss) + int(ms) / 1000.0
+
+        parsed_segments = []
+        blocks = re.split(r"\n\s*\n", script_text.strip(), flags=re.MULTILINE)
+        for block in blocks:
+            lines = [line.strip("\ufeff").rstrip() for line in block.splitlines() if line.strip() != ""]
+            if len(lines) < 3:
+                continue
+
+            timestamp_line = lines[1]
+            if "-->" not in timestamp_line:
+                continue
+
+            try:
+                start_str, end_str = [part.strip() for part in timestamp_line.split("-->", 1)]
+                text_lines = lines[2:]
+                if len(text_lines) == 1:
+                    src_text = text_lines[0]
+                    translation = ""
+                elif len(text_lines) == 2:
+                    src_text = text_lines[0]
+                    translation = text_lines[1]
+                else:
+                    src_text = " ".join(text_lines)
+                    translation = ""
+
+                parsed_segments.append(
+                    SrtSegment(
+                        src_lang,
+                        tgt_lang,
+                        src_text=src_text,
+                        translation=translation,
+                        start_time=_time_to_seconds(start_str),
+                        end_time=_time_to_seconds(end_str),
+                        timestamp_str=timestamp_line,
+                    )
+                )
+            except Exception:
+                continue
+
+        script = cls(src_lang, tgt_lang, segments=None, task_id=None, client=client, domain=domain)
+        script.task_logger = task_logger
+        script.segments = parsed_segments
+        return script
 
     def merge_segs(self, idx_list) -> SrtSegment:
         """
@@ -373,7 +418,7 @@ class SrtScript(object):
         self.task_logger.info("Forming whole sentences...")
         merge_list = []  # a list of indices that should be merged e.g. [[0], [1, 2, 3, 4], [5, 6], [7]]
         sentence = []
-        ending_puncs = punctuation_dict[self.src_lang]["sentence_end"]
+        ending_puncs = _punctuation_rules(self.src_lang)["sentence_end"]
         # Get each entire sentence of distinct segments, fill indices to merge_list
         for i, seg in enumerate(self.segments):
             if seg.src_text[-1] in ending_puncs and len(seg.src_text) > 10 and 'vs.' not in seg.src_text.lower():
@@ -411,19 +456,22 @@ class SrtScript(object):
         self.task_logger.info("Removed punctuation in translation.")
 
     def set_translation(self, translate: str, id_range: tuple, model, video_name, video_link=None):
-        segments = translate.strip().split('\n\n')
-        expected_len = id_range[1] - id_range[0] 
+        segments = _split_segment_text(translate)
+        expected_len = id_range[1] - id_range[0] + 1
+        target_segments = self.segments[id_range[0] - 1:id_range[1]]
 
         if len(segments) != expected_len:
-            print(f"[WARN] Translated segments: {len(segments)}; Expected: {expected_len} (id_range: {id_range})")
-
-        for i, seg in enumerate(self.segments[id_range[0]-1:id_range[1]]):
-            if i < len(segments):
-                seg.translation = segments[i].strip()
-                print("NO missing")
-                print(seg.translation)
+            warn_msg = (
+                f"Translated segments: {len(segments)}; Expected: {expected_len} "
+                f"(id_range: {id_range})"
+            )
+            if self.task_logger:
+                self.task_logger.warning(warn_msg)
             else:
-                pass
+                print(f"[WARN] {warn_msg}")
+
+        for i, seg in enumerate(target_segments):
+            seg.translation = segments[i].strip() if i < len(segments) else ""
 
     def _set_translation(self, translate: str, id_range: tuple, model, video_name, video_link=None):
         """
@@ -523,13 +571,13 @@ class SrtScript(object):
     def split_seg(self, seg, text_threshold, time_threshold):
         # evenly split seg to 2 parts and add new seg into self.segments
         # ignore the initial comma to solve the recursion problem
-        src_comma_str = punctuation_dict[self.src_lang]["comma"]
-        tgt_comma_str = punctuation_dict[self.tgt_lang]["comma"]
+        src_comma_str = _punctuation_rules(self.src_lang)["comma"]
+        tgt_comma_str = _punctuation_rules(self.tgt_lang)["comma"]
 
         if len(seg.src_text) > 2:
             if seg.src_text[:2] == src_comma_str:
                 seg.src_text = seg.src_text[2:]
-        if seg.translation[0] == tgt_comma_str:
+        if seg.translation and seg.translation[0] == tgt_comma_str:
             seg.translation = seg.translation[1:]
 
         src_text = seg.src_text
@@ -725,11 +773,7 @@ class SrtScript(object):
 
     def get_source_only(self):
         # return a string with pure source text
-        result = ""
-        for i, seg in enumerate(self.segments):
-            result += f'{seg.src_text}\n\n\n'  # f'SENTENCE {i+1}: {seg.src_text}\n\n\n'
-
-        return result
+        return SEGMENT_SEPARATOR.join(seg.src_text for seg in self.segments)
 
     def reform_src_str(self):
         result = ""
@@ -813,25 +857,49 @@ class SrtScript(object):
                 exit()
 
 def split_script(script_in, chunk_size=1000):
-    script_split = script_in.split('\n\n')
+    script_split = _split_segment_text(script_in)
     script_arr = []
     range_arr = []
+
+    if not script_split:
+        return script_arr, range_arr
+
     start = 1
-    end = 0
-    script = ""
-    for sentence in script_split:
-        if len(script) + len(sentence) + 1 <= chunk_size:
-            script += sentence + '\n\n'
-            end += 1
-        else:
-            range_arr.append((start, end))
-            start = end + 1
-            end += 1
-            script_arr.append(script.strip())
-            script = sentence + '\n\n'
-    if script.strip():
-        script_arr.append(script.strip())
-        range_arr.append((start, len(script_split) - 1))
+    current_chunk = []
+    current_len = 0
+    for idx, sentence in enumerate(script_split, start=1):
+        if not current_chunk:
+            current_chunk = [sentence]
+            current_len = len(sentence)
+            continue
+
+        projected_len = current_len + len(SEGMENT_SEPARATOR) + len(sentence)
+        if projected_len <= chunk_size:
+            current_chunk.append(sentence)
+            current_len = projected_len
+            continue
+
+        script_arr.append(SEGMENT_SEPARATOR.join(current_chunk))
+        range_arr.append((start, idx - 1))
+        start = idx
+        current_chunk = [sentence]
+        current_len = len(sentence)
+
+    if current_chunk:
+        script_arr.append(SEGMENT_SEPARATOR.join(current_chunk))
+        range_arr.append((start, len(script_split)))
 
     assert len(script_arr) == len(range_arr)
     return script_arr, range_arr
+
+
+def _split_segment_text(text: str) -> list[str]:
+    if not text:
+        return []
+
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not normalized:
+        return []
+
+    normalized = re.sub(r"\n{3,}", SEGMENT_SEPARATOR, normalized)
+    return normalized.split(SEGMENT_SEPARATOR)
