@@ -67,6 +67,70 @@ def _punctuation_rules(lang_code: str) -> dict:
         return punctuation_dict[normalized]
     raise KeyError(f"Unsupported punctuation language code: {lang_code}")
 
+
+def _time_to_seconds(value: str) -> float:
+    normalized = value.strip().replace(".", ",")
+    hh, mm, rest = normalized.split(":")
+    ss, ms = rest.split(",")
+    return int(hh) * 3600 + int(mm) * 60 + int(ss) + int(ms) / 1000.0
+
+
+def _parse_timestamp_line(value: str) -> tuple[float, float, str]:
+    timestamp_line = value.strip()
+    start_str, end_str = [part.strip() for part in timestamp_line.split("-->", 1)]
+    return _time_to_seconds(start_str), _time_to_seconds(end_str), timestamp_line
+
+
+def _coerce_segment(src_lang, tgt_lang, segment, idx=-1):
+    if isinstance(segment, SrtSegment):
+        result = deepcopy(segment)
+        if result.idx == -1 and idx != -1:
+            result.idx = idx
+        result.src_lang = src_lang
+        result.tgt_lang = tgt_lang
+        return result
+
+    if isinstance(segment, dict):
+        timestamp_str = str(segment.get("timestamp_str") or "")
+        start_time = segment.get("start_time", segment.get("start", 0.0))
+        end_time = segment.get("end_time", segment.get("end", 0.0))
+        if timestamp_str and "-->" in timestamp_str:
+            start_time, end_time, timestamp_str = _parse_timestamp_line(timestamp_str)
+        return SrtSegment(
+            src_lang,
+            tgt_lang,
+            src_text=str(segment.get("src_text", segment.get("source_text", segment.get("text", ""))) or ""),
+            translation=str(segment.get("translation", "") or ""),
+            speaker=str(segment.get("speaker", "") or ""),
+            start_time=float(start_time or 0.0),
+            end_time=float(end_time or 0.0),
+            timestamp_str=timestamp_str,
+            idx=int(segment.get("idx", idx if idx != -1 else -1)),
+        )
+
+    if isinstance(segment, (list, tuple)):
+        if len(segment) >= 2 and isinstance(segment[1], str) and "-->" in segment[1]:
+            start_time, end_time, timestamp_str = _parse_timestamp_line(segment[1])
+            raw_idx = segment[0] if isinstance(segment[0], int) else idx
+            return SrtSegment(
+                src_lang,
+                tgt_lang,
+                src_text=str(segment[2] if len(segment) > 2 else ""),
+                translation=str(segment[3] if len(segment) > 3 else ""),
+                speaker=str(segment[4] if len(segment) > 4 else ""),
+                start_time=start_time,
+                end_time=end_time,
+                timestamp_str=timestamp_str,
+                idx=raw_idx,
+            )
+        if len(segment) == 1:
+            return SrtSegment(src_lang, tgt_lang, src_text=str(segment[0]), idx=idx)
+
+    if segment is None:
+        return SrtSegment(src_lang, tgt_lang, idx=idx)
+
+    return SrtSegment(src_lang, tgt_lang, src_text=str(segment), idx=idx)
+
 class SrtSegment(object):
     def __init__(self, src_lang, tgt_lang, src_text = "", translation = "", speaker = "", start_time = 0.0, end_time = 0.0, timestamp_str="", idx = -1) -> None:
         self.idx = idx
@@ -88,6 +152,34 @@ class SrtSegment(object):
             self.timestamp_str = f"{self.start_time_str} --> {self.end_time_str}"
         else:
             self.timestamp_str = timestamp_str
+
+    @property
+    def source_text(self):
+        return self.src_text
+
+    @source_text.setter
+    def source_text(self, value):
+        self.src_text = value
+
+    @property
+    def start(self):
+        return self.start_time
+
+    @start.setter
+    def start(self, value):
+        self.start_time = float(value)
+        self.duration = self.end_time - self.start_time
+        self.update_timestamps()
+
+    @property
+    def end(self):
+        return self.end_time
+
+    @end.setter
+    def end(self, value):
+        self.end_time = float(value)
+        self.duration = self.end_time - self.start_time
+        self.update_timestamps()
 
     def update_timestamps(self):
         """Recompute the string timestamps from numeric start/end times."""
@@ -182,7 +274,10 @@ class SrtScript(object):
         self.src_lang = src_lang
         self.tgt_lang = tgt_lang
         if segments is not None:
-            self.segments = [SrtSegment(self.src_lang, self.tgt_lang, seg) for seg in segments]
+            self.segments = [
+                _coerce_segment(self.src_lang, self.tgt_lang, seg, idx=i)
+                for i, seg in enumerate(segments)
+            ]
         else:
             self.segments = []
         self.client = client
@@ -201,7 +296,29 @@ class SrtScript(object):
         self.asr = None
 
     @classmethod
-    def parse_from_srt_file(cls, src_lang, tgt_lang, task_logger, client, domain, path = None, srt_str = None):
+    def parse_from_srt_file(
+        cls,
+        src_lang="EN",
+        tgt_lang="ZH",
+        task_logger=None,
+        client=None,
+        domain="General",
+        path = None,
+        srt_str = None,
+    ):
+        if path is None and srt_str is None and isinstance(src_lang, os.PathLike | str):
+            candidate_path = os.fspath(src_lang)
+            if (
+                os.path.exists(candidate_path)
+                and tgt_lang == "ZH"
+                and task_logger is None
+                and client is None
+                and domain == "General"
+            ):
+                path = candidate_path
+                src_lang = "EN"
+                tgt_lang = "ZH"
+
         if path is not None:
             with open(path, 'r', encoding="utf-8") as f:
                 script_text = f.read()
@@ -209,12 +326,6 @@ class SrtScript(object):
             script_text = srt_str
         else:
             raise RuntimeError("need input Srt Path or Srt String")
-
-        def _time_to_seconds(value: str) -> float:
-            normalized = value.strip().replace(".", ",")
-            hh, mm, rest = normalized.split(":")
-            ss, ms = rest.split(",")
-            return int(hh) * 3600 + int(mm) * 60 + int(ss) + int(ms) / 1000.0
 
         parsed_segments = []
         blocks = re.split(r"\n\s*\n", script_text.strip(), flags=re.MULTILINE)
@@ -255,7 +366,7 @@ class SrtScript(object):
                 continue
 
         script = cls(src_lang, tgt_lang, segments=None, task_id=None, client=client, domain=domain)
-        script.task_logger = task_logger
+        script.task_logger = task_logger or logging.getLogger("srt")
         script.segments = parsed_segments
         return script
 
