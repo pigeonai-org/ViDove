@@ -4,6 +4,7 @@ system_prompt = (
     "Keep every '\n' in the translated text in the corresponding place, and make sure to keep the same number of lines in the translated text. \n"
     "You must break the translated sentence into multiple lines accordingly if original text breaks a complete sentence into different lines\n"
     "You should only output the translated text line by line without any other notation. \n"
+    "Do not output labels or wrappers such as 'Your translation', 'Translation:', or '你的翻译'. Output only translated subtitle text. \n"
 )
 
 input_prompt_base = "You current task is to translate the script in the domain of {domain} from {source_language} to {target_language} \n"
