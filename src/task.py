@@ -826,10 +826,10 @@ class Task:
         self.get_speaker_segments()
         self.get_visual_cues()
         self.transcribe()
-        # self.preprocess()
+        self.preprocess()
         self.translation()
 
-        # self.postprocess()
+        self.postprocess()
         self.proofread()
         self.editor()
         self.result = self.output_render()
