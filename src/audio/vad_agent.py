@@ -21,7 +21,7 @@ class APIPyannoteVAD(VAD):
         self,
         src_lang: str,
         tgt_lang: str,
-        min_segment_seconds: float = 1.0,
+        min_segment_seconds: float = 0.8,
         *,
         model: str = "precision-2",
         api_token: str | None = None,
@@ -211,7 +211,7 @@ class LocalPyannoteVAD(VAD):
         model_name_or_path: str,
         src_lang: str,
         tgt_lang: str,
-        min_segment_seconds: float = 1.0,
+        min_segment_seconds: float = 0.8,
         *,
         hf_token: str | None = None,
         **pipeline_kwargs,
@@ -255,7 +255,7 @@ def create_vad(
     model_name_or_path: str,
     src_lang: str,
     tgt_lang: str,
-    min_segment_seconds: float = 1.0,
+    min_segment_seconds: float = 0.8,
     **provider_kwargs,
 ) -> VAD:
     """Factory helper returning the appropriate VAD provider implementation."""

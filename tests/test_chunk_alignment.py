@@ -41,6 +41,44 @@ class ChunkAlignmentTests(unittest.TestCase):
 
         self.assertEqual(srt.get_source_only(), "alpha\n\nbeta\n\ngamma")
 
+    def test_set_translation_strips_label_wrappers(self):
+        srt = SrtScript("EN", "ZH", segments=["s0", "s1", "s2"], task_id="test")
+
+        translate = "Your translation:\n\n翻译0\n\n翻译1\n\n翻译2"
+        srt.set_translation(translate, (1, 3), "test-model", "video")
+
+        self.assertEqual(
+            [seg.translation for seg in srt.segments],
+            ["翻译0", "翻译1", "翻译2"],
+        )
+
+    def test_set_translation_strips_inline_and_chinese_labels(self):
+        srt = SrtScript("EN", "ZH", segments=["s0", "s1"], task_id="test")
+
+        translate = "Your translation: 翻译0\n\n你的翻译：翻译1"
+        srt.set_translation(translate, (1, 2), "test-model", "video")
+
+        self.assertEqual(
+            [seg.translation for seg in srt.segments],
+            ["翻译0", "翻译1"],
+        )
+
+    def test_split_seg_returns_two_valid_segments(self):
+        srt = SrtScript("EN", "ZH", segments=["hello world, nice to meet you"], task_id="test")
+        seg = srt.segments[0]
+        seg.start_time = 0.0
+        seg.end_time = 4.0
+        seg.duration = 4.0
+        seg.translation = "你好世界，很高兴认识你们大家"
+
+        result = srt.split_seg(seg, text_threshold=5, time_threshold=1.0)
+
+        self.assertGreaterEqual(len(result), 2)
+        for piece in result:
+            self.assertIsInstance(piece.src_text, str)
+            self.assertTrue(piece.src_text)
+            self.assertGreaterEqual(piece.end_time, piece.start_time)
+
 
 if __name__ == "__main__":
     unittest.main()

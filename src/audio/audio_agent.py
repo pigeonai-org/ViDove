@@ -38,7 +38,7 @@ class AudioAgent(ABC):
                 src_lang=self.audio_config["src_lang"],
                 tgt_lang=self.audio_config["tgt_lang"],
                 min_segment_seconds=float(
-                    self.audio_config.get("min_segment_seconds", 1.0)
+                    self.audio_config.get("min_segment_seconds", 0.8)
                 ),
                 **provider_options,
             )

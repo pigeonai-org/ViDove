@@ -566,8 +566,17 @@ class SrtScript(object):
             seg.remove_trans_punc()
         self.task_logger.info("Removed punctuation in translation.")
 
+    @staticmethod
+    def _strip_prompt_labels(text: str) -> str:
+        # Run before splitting so that label-only blocks do not become phantom segments.
+        cleaned = re.sub(r"(?im)^\s*your\s+translation\s*[:：]?\s*$", "", text)
+        cleaned = re.sub(r"(?i)\byour\s+translation\b\s*[:：]?", "", cleaned)
+        cleaned = re.sub(r"^\s*你的翻译\s*[:：]?\s*$", "", cleaned, flags=re.MULTILINE)
+        cleaned = re.sub(r"你的翻译\s*[:：]?", "", cleaned)
+        return cleaned
+
     def set_translation(self, translate: str, id_range: tuple, model, video_name, video_link=None):
-        segments = _split_segment_text(translate)
+        segments = _split_segment_text(self._strip_prompt_labels(translate))
         expected_len = id_range[1] - id_range[0] + 1
         target_segments = self.segments[id_range[0] - 1:id_range[1]]
 
@@ -729,31 +738,35 @@ class SrtScript(object):
         trans_seg1 = translation[:trans_split_idx]
         trans_seg2 = translation[trans_split_idx:]
 
-        start_seg1 = seg.start
-        end_seg1 = start_seg2 = seg.start + (seg.end_time - seg.start_time) * time_split_ratio
+        start_seg1 = seg.start_time
+        end_seg1 = start_seg2 = seg.start_time + (seg.end_time - seg.start_time) * time_split_ratio
         end_seg2 = seg.end_time
 
-        seg1_dict = {}
-        seg1_dict['text'] = src_seg1
-        seg1_dict['start'] = start_seg1
-        seg1_dict['end'] = end_seg1
-        seg1 = SrtSegment(self.src_lang, self.tgt_lang, seg1_dict)
-        seg1.translation = trans_seg1
+        seg1 = SrtSegment(
+            self.src_lang,
+            self.tgt_lang,
+            src_text=src_seg1,
+            translation=trans_seg1,
+            start_time=start_seg1,
+            end_time=end_seg1,
+        )
 
-        seg2_dict = {}
-        seg2_dict['text'] = src_seg2
-        seg2_dict['start'] = start_seg2
-        seg2_dict['end'] = end_seg2
-        seg2 = SrtSegment(self.src_lang, self.tgt_lang, seg2_dict)
-        seg2.translation = trans_seg2
+        seg2 = SrtSegment(
+            self.src_lang,
+            self.tgt_lang,
+            src_text=src_seg2,
+            translation=trans_seg2,
+            start_time=start_seg2,
+            end_time=end_seg2,
+        )
 
         result_list = []
-        if len(seg1.translation) > text_threshold and (seg1.end - seg1.start) > time_threshold:
+        if len(seg1.translation) > text_threshold and (seg1.end_time - seg1.start_time) > time_threshold:
             result_list += self.split_seg(seg1, text_threshold, time_threshold)
         else:
             result_list.append(seg1)
 
-        if len(seg2.translation) > text_threshold and (seg2.end - seg2.start) > time_threshold:
+        if len(seg2.translation) > text_threshold and (seg2.end_time - seg2.start_time) > time_threshold:
             result_list += self.split_seg(seg2, text_threshold, time_threshold)
         else:
             result_list.append(seg2)

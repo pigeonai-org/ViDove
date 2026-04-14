@@ -21,7 +21,7 @@ logger = getLogger(__name__)
 
 
 class VAD(ABC):
-    def __init__(self, src_lang: str, tgt_lang: str, min_segment_seconds: float = 1.0):
+    def __init__(self, src_lang: str, tgt_lang: str, min_segment_seconds: float = 0.8):
         self.src_lang = src_lang
         self.tgt_lang = tgt_lang
         self.srt: SrtScript | None = None
