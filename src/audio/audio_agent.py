@@ -348,7 +348,7 @@ class WhisperAudioAgent(AudioAgent):
             duration_secs = len(seg_audio) / 1000.0
             self._record_usage(
                 provider="openai",
-                model="whisper-1",
+                model="whisper-large-v3",
                 category="audio",
                 prompt_tokens=None,
                 completion_tokens=None,
