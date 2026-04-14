@@ -106,14 +106,14 @@ CONFIGURATION_SCHEMA = {
     ),
     "audio.src_lang": ConfigurationValue(
         type="select",
-        options=["en", "zh", "es", "fr", "de", "ru", "ja", "ar", "kr"],
-        default="en",
+        options=["EN", "ZH", "ES", "FR", "DE", "RU", "JA", "AR", "KR"],
+        default="EN",
         description="Source language code for audio processing"
     ),
     "audio.tgt_lang": ConfigurationValue(
         type="select",
-        options=["en", "zh", "es", "fr", "de", "ru", "ja", "ar", "kr"],
-        default="zh",
+        options=["EN", "ZH", "ES", "FR", "DE", "RU", "JA", "AR", "KR"],
+        default="ZH",
         description="Target language code for audio processing"
     ),
     "vision.enable_vision": ConfigurationValue(

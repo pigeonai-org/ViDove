@@ -27,8 +27,8 @@ audio:
   audio_agent: GeminiAudioAgent # clip or other vLLMs
   model_path:  # replace it with your own model path
   VAD_model: API # pyannote/speaker-diarization-3.1 or pyannote/speaker-diarization-precision-2
-  src_lang: en
-  tgt_lang: zh
+  src_lang: EN
+  tgt_lang: ZH
 
 vision:
   enable_vision: False

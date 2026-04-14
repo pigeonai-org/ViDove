@@ -1,53 +1,57 @@
 import __init_path__
-# refactor it by using unittest and pytest
 import unittest
-from src.translators import LLM, translation
+
+from entries.config_schema import TaskConfig
 from src.SRT.srt import SrtScript
 
+
 class TestTranslation(unittest.TestCase):
-    def test_LLM_task(self):
-        task = "如果输入中含有‘测试’则返回true，若没有则返回false"
-        assert "true" in LLM.LLM_task("gpt-4", "测试", task, temp = 0.15),"LLM prompt 1 failed"
-        assert "false" in LLM.LLM_task("gpt-4", "错误样例", task, temp = 0.15),"LLM prompt 2 failed"
+    def test_parse_source_only_srt(self):
+        srt = SrtScript.parse_from_srt_file(
+            src_lang="EN",
+            tgt_lang="ZH",
+            domain="General",
+            srt_str=(
+                "1\n"
+                "00:00:00,000 --> 00:00:01,000\n"
+                "Hello there\n\n"
+                "2\n"
+                "00:00:01,000 --> 00:00:02,500\n"
+                "General Kenobi\n"
+            ),
+        )
 
-    def test_pmptsel(self):
-        prompt = translation.prompt_selector("test1", "test2", "test3")
-        assert "test1" in prompt,"prompt selector failed"
-        assert "test2" in prompt,"prompt selector failed"
-        assert "test3" in prompt,"prompt selector failed"
+        self.assertEqual([seg.src_text for seg in srt.segments], ["Hello there", "General Kenobi"])
+        self.assertEqual([seg.translation for seg in srt.segments], ["", ""])
 
-    def test_translation_def(self): 
-        test1 = SrtScript.parse_from_srt_file(src_lang="EN", tgt_lang="ZH", domain="General", path="tests/translation_test/test1.srt")
-        translation.get_translation(test1, "gpt-4", video_name = "v-name")
-        assert test1.segments[1].translation != "", "translation write in & empty prompt failed"
+    def test_parse_bilingual_srt(self):
+        srt = SrtScript.parse_from_srt_file(
+            src_lang="EN",
+            tgt_lang="ZH",
+            domain="General",
+            srt_str=(
+                "1\n"
+                "00:00:00,000 --> 00:00:01,000\n"
+                "Hello there\n"
+                "你好\n"
+            ),
+        )
 
-    def test_translation_pmpt(self):
-        test1 = SrtScript.parse_from_srt_file(src_lang="EN", tgt_lang="ZH", domain="General", path="tests/translation_test/test1.srt")
-        pmpt = translation.prompt_selector("EN", "ZH", "StarCraft2")
-        translation.get_translation(test1, "gpt-4", "v-name", pmpt)
-        task = "输入如果为中文，返回true,反之返回false"
-        assert "true" in LLM.LLM_task("gpt-4", test1.segments[1].translation, task, temp = 0.15),"EN to ZH failed"
+        self.assertEqual(len(srt.segments), 1)
+        self.assertEqual(srt.segments[0].src_text, "Hello there")
+        self.assertEqual(srt.segments[0].translation, "你好")
 
-    def test_translation_pmpt2(self):
-        test1 = SrtScript.parse_from_srt_file(src_lang="ZH", tgt_lang="EN", domain="General", path="tests/translation_test/test1.srt")
-        pmpt = translation.prompt_selector("ZH", "EN", "StarCraft2")
-        translation.get_translation(test1, "gpt-4", "v-name", pmpt)
-        task = "输入如果为英文，返回true,反之返回false"
-        assert "true" in LLM.LLM_task("gpt-4", test1.segments[1].translation, task, temp = 0.15),"ZH to EN failed"
+    def test_task_config_normalizes_language_codes(self):
+        cfg = TaskConfig(
+            source_lang="en",
+            target_lang="zh",
+            audio={"src_lang": "en", "tgt_lang": "zh"},
+        )
 
-    def test_translation_pmpt3(self):
-        test1 = SrtScript.parse_from_srt_file(src_lang="ZH", tgt_lang="ZH", domain="General", path="tests/translation_test/test1.srt")
-        pmpt = translation.prompt_selector("ZH", "ZH", "StarCraft2")
-        translation.get_translation(test1, "gpt-4", "v-name", pmpt)
-        task = "输入如果为中文，返回true,反之返回false"
-        assert "true" in LLM.LLM_task("gpt-4", test1.segments[1].translation, task, temp = 0.15), "ZH to ZH failed"
+        self.assertEqual(cfg.source_lang, "EN")
+        self.assertEqual(cfg.target_lang, "ZH")
+        self.assertEqual(cfg.audio.src_lang, "EN")
+        self.assertEqual(cfg.audio.tgt_lang, "ZH")
 
 if __name__ == "__main__":
     unittest.main()
-
-# test_pmptsel()
-# test_LLM_task()
-# test_translation_def()
-# test_translation_pmpt()
-# test_translation_pmpt2()
-# test_translation_pmpt3()

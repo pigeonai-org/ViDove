@@ -3,6 +3,7 @@ import shutil
 import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from copy import deepcopy
 from datetime import datetime
 from enum import Enum
 from os import getenv
@@ -96,8 +97,17 @@ class Task:
         self.translation_model = self.translation_setting["model"]
 
         self.output_type = task_cfg["output_type"]
-        self.target_lang = task_cfg["target_lang"]
-        self.source_lang = task_cfg["source_lang"]
+        self.target_lang = str(task_cfg["target_lang"]).upper()
+        self.source_lang = str(task_cfg["source_lang"]).upper()
+        if isinstance(self.audio_setting, dict):
+            if self.audio_setting.get("src_lang"):
+                self.audio_setting["src_lang"] = str(self.audio_setting["src_lang"]).upper()
+            else:
+                self.audio_setting["src_lang"] = self.source_lang
+            if self.audio_setting.get("tgt_lang"):
+                self.audio_setting["tgt_lang"] = str(self.audio_setting["tgt_lang"]).upper()
+            else:
+                self.audio_setting["tgt_lang"] = self.target_lang
         self.domain = task_cfg["domain"]
         self.instructions = task_cfg.get("instructions", [])
         # Global workers control for VAD, proofreading, and editing
@@ -979,7 +989,12 @@ class VideoTask(Task):
 
 class SRTTask(Task):
     def __init__(self, task_id, task_local_dir, task_cfg, srt_path):
-        super().__init__(task_id, task_local_dir, task_cfg)
+        srt_task_cfg = deepcopy(task_cfg)
+        # SRT-only inputs already contain source text, so they should not require
+        # audio/VAD or vision agents during task initialization.
+        srt_task_cfg["audio"]["enable_audio"] = False
+        srt_task_cfg["vision"]["enable_vision"] = False
+        super().__init__(task_id, task_local_dir, srt_task_cfg)
         self.task_logger.info("Task Creation method: SRT File")
         self.audio_path = None
         self.video_path = None

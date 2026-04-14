@@ -49,6 +49,18 @@ def validate_text_model_name(value: Any) -> Any:
     raise ValueError("Model name must be a non-empty string")
 
 
+VALID_LANGUAGE_CODES = {"EN", "ZH", "ES", "FR", "DE", "RU", "JA", "AR", "KR", "IT", "PT"}
+
+
+def normalize_language_code(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    candidate = value.strip()
+    if not candidate:
+        return value
+    return candidate.upper()
+
+
 class VideoDownloadConfig(BaseModel):
     """YouTube download configuration"""
 
@@ -104,8 +116,20 @@ class AudioConfig(BaseModel):
         default=None,
         description="Voice Activity Detection model: pyannote/speaker-diarization-3.1, pyannote/speaker-diarization-precision-2 or pyannote API",
     )
-    src_lang: str = Field(default="en", description="Source language")
-    tgt_lang: str = Field(default="zh", description="Target language")
+    src_lang: str = Field(default="EN", description="Source language")
+    tgt_lang: str = Field(default="ZH", description="Target language")
+
+    @field_validator("src_lang", "tgt_lang", mode="before")
+    @classmethod
+    def normalize_audio_language_codes(cls, value: Any) -> Any:
+        return normalize_language_code(value)
+
+    @field_validator("src_lang", "tgt_lang")
+    @classmethod
+    def validate_audio_language_codes(cls, value: str) -> str:
+        if value not in VALID_LANGUAGE_CODES:
+            raise ValueError(f"Language code must be one of: {sorted(VALID_LANGUAGE_CODES)}")
+        return value
 
 
 class VisionConfig(BaseModel):
@@ -325,11 +349,16 @@ class TaskConfig(BaseModel):
             raise ValueError("Use 'MEMORY' instead of legacy 'MEMEORY'")
         return value
 
+    @field_validator("source_lang", "target_lang", mode="before")
+    @classmethod
+    def normalize_task_language_codes(cls, value: Any) -> Any:
+        return normalize_language_code(value)
+
     @field_validator("source_lang", "target_lang")
     def validate_language_codes(cls, v):
         """Validate language code format"""
-        valid_codes = ["EN", "ZH", "ES", "FR", "DE", "RU", "JA", "AR", "KR", "IT", "PT"]
-        if v not in valid_codes:
+        valid_codes = sorted(VALID_LANGUAGE_CODES)
+        if v not in VALID_LANGUAGE_CODES:
             raise ValueError(f"Language code must be one of: {valid_codes}")
         return v
 
