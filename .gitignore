@@ -36,3 +36,6 @@ build/
 node_modules/
 .env
 tools/
+dovebench/
+scripts/dovebench/
+youtubeid.json
