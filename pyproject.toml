@@ -32,6 +32,7 @@ dependencies = [
     # Utilities
     "cryptography>=45.0.3",
     "pydantic>=2.0.0",
+    "pyenchant>=3.2.0",
     "tqdm>=4.65.0",
     "typing-extensions>=4.8.0",
     "websocket-client>=1.8.0",
@@ -56,7 +57,6 @@ ui = [
 # Evaluation/Testing Tools
 evaluation = [
     "sacrebleu>=2.3.0",
-    "pyenchant>=3.2.0",
     "langchain>=0.2.3",
     "langchain-core>=0.2.43",
     "langchain-community>=0.2.4",
@@ -102,4 +102,3 @@ torchvision = [
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 explicit = true
-

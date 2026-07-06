@@ -3532,6 +3532,7 @@ dependencies = [
     { name = "pyannote-audio" },
     { name = "pydantic" },
     { name = "pydub" },
+    { name = "pyenchant" },
     { name = "pyyaml" },
     { name = "requests" },
     { name = "streamlit" },
@@ -3557,7 +3558,6 @@ all = [
     { name = "langchain-core" },
     { name = "openai-whisper" },
     { name = "pyannote-audio" },
-    { name = "pyenchant" },
     { name = "sacrebleu" },
     { name = "stable-ts" },
     { name = "starlette" },
@@ -3575,7 +3575,6 @@ evaluation = [
     { name = "langchain" },
     { name = "langchain-community" },
     { name = "langchain-core" },
-    { name = "pyenchant" },
     { name = "sacrebleu" },
 ]
 ui = [
@@ -3620,7 +3619,7 @@ requires-dist = [
     { name = "pyannote-audio", marker = "extra == 'audio-advanced'", specifier = ">=3.3.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pydub", specifier = ">=0.25.1" },
-    { name = "pyenchant", marker = "extra == 'evaluation'", specifier = ">=3.2.0" },
+    { name = "pyenchant", specifier = ">=3.2.0" },
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "requests", specifier = ">=2.28.0" },
     { name = "sacrebleu", marker = "extra == 'evaluation'", specifier = ">=2.3.0" },

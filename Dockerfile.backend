@@ -6,6 +6,8 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     fontconfig \
     curl \
+    libenchant-2-2 \
+    hunspell-en-us \
     git \
     build-essential \
     gcc \
