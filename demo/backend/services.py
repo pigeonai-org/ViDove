@@ -193,7 +193,10 @@ def convert_web_config_to_task_config(session_config: SessionConfig) -> Dict[str
             "enable_audio": True,  # Audio is always enabled
             "audio_agent": session_config.audio_audio_agent,
             "model_path": session_config.audio_model_path,  # Can be None
+            "VAD_provider": session_config.audio_VAD_provider,
             "VAD_model": session_config.audio_VAD_model,
+            "VAD_options": session_config.audio_VAD_options,
+            "min_segment_seconds": session_config.audio_min_segment_seconds,
             "src_lang": session_config.audio_src_lang,
             "tgt_lang": session_config.audio_tgt_lang
         },

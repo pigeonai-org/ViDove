@@ -106,15 +106,24 @@ class AudioConfig(BaseModel):
     model_path: Optional[str] = Field(
         default=None, description="Model path, replace with your own model path"
     )
-    VAD_model: Optional[
-        Literal[
-            "pyannote/speaker-diarization-3.1",
-            "pyannote/speaker-diarization-precision-2",
-            "API",
-        ]
+    VAD_provider: Optional[
+        Literal["assemblyai", "pyannote_api", "pyannote_local"]
     ] = Field(
         default=None,
-        description="Voice Activity Detection model: pyannote/speaker-diarization-3.1, pyannote/speaker-diarization-precision-2 or pyannote API",
+        description="VAD provider. If omitted, legacy VAD_model inference is used.",
+    )
+    VAD_model: Optional[str] = Field(
+        default=None,
+        description="Voice Activity Detection model name or path",
+    )
+    VAD_options: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Provider-specific VAD options",
+    )
+    min_segment_seconds: float = Field(
+        default=0.8,
+        ge=0.0,
+        description="Drop VAD segments shorter than this many seconds",
     )
     src_lang: str = Field(default="EN", description="Source language")
     tgt_lang: str = Field(default="ZH", description="Target language")

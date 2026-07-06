@@ -25,10 +25,10 @@ class AgentConversationResponse(BaseModel):
 
 
 class ConfigurationValue(BaseModel):
-    type: Literal["select", "boolean", "number"]
+    type: Literal["select", "boolean", "number", "object"]
     options: Optional[List[Union[str, int]]] = None
-    range: Optional[List[int]] = None
-    default: Union[str, int, bool]
+    range: Optional[List[Union[int, float]]] = None
+    default: Union[str, int, float, bool, Dict[str, Any]]
     description: str
 
 
@@ -45,7 +45,10 @@ class SessionConfig(BaseModel):
     # Audio is always enabled, agent selection is required
     audio_audio_agent: Literal["GeminiAudioAgent", "WhisperAudioAgent", "QwenAudioAgent", "GPT4oAudioAgent"] = Field(default="WhisperAudioAgent", alias="audio.audio_agent", description="Audio agent for transcription (always enabled)")
     audio_model_path: Optional[str] = Field(default=None, alias="audio.model_path")
-    audio_VAD_model: Literal["pyannote/speaker-diarization-3.1", "API"] = Field(default="API", alias="audio.VAD_model")
+    audio_VAD_provider: Literal["assemblyai", "pyannote_api", "pyannote_local"] = Field(default="assemblyai", alias="audio.VAD_provider")
+    audio_VAD_model: str = Field(default="universal-3-5-pro", alias="audio.VAD_model")
+    audio_VAD_options: Dict[str, Any] = Field(default_factory=lambda: {"speaker_labels": True}, alias="audio.VAD_options")
+    audio_min_segment_seconds: float = Field(default=0.8, alias="audio.min_segment_seconds")
     audio_src_lang: str = Field(default="EN", alias="audio.src_lang")
     audio_tgt_lang: str = Field(default="ZH", alias="audio.tgt_lang")
     vision_enable_vision: bool = Field(default=False, alias="vision.enable_vision")

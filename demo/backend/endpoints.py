@@ -238,6 +238,12 @@ async def update_config(session_id: str, config_updates: Dict[str, Any]) -> Conf
                         status_code=400,
                         detail=f"Field '{key}' must be a boolean"
                     )
+
+            if schema_field.type == "object" and not isinstance(value, dict):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Field '{key}' must be an object"
+                )
             
             if schema_field.type == "select" and schema_field.options:
                 valid_values = [opt for opt in schema_field.options]

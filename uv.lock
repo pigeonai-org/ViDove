@@ -3542,6 +3542,7 @@ dependencies = [
     { name = "tqdm" },
     { name = "transformers" },
     { name = "typing-extensions" },
+    { name = "websocket-client" },
     { name = "yt-dlp" },
 ]
 
@@ -3635,6 +3636,7 @@ requires-dist = [
     { name = "typing-extensions", specifier = ">=4.8.0" },
     { name = "uvicorn", marker = "extra == 'ui'", specifier = ">=0.27.0" },
     { name = "vidove", extras = ["ui", "evaluation", "audio-local", "audio-advanced", "vision"], marker = "extra == 'all'" },
+    { name = "websocket-client", specifier = ">=1.8.0" },
     { name = "yt-dlp", specifier = ">=2023.0.0" },
 ]
 provides-extras = ["ui", "evaluation", "audio-local", "audio-advanced", "vision", "all"]

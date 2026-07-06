@@ -40,6 +40,7 @@ class AudioAgent(ABC):
                 min_segment_seconds=float(
                     self.audio_config.get("min_segment_seconds", 0.8)
                 ),
+                provider=self.audio_config.get("VAD_provider"),
                 **provider_options,
             )
 

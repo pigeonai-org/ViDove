@@ -138,14 +138,39 @@ const CONFIG_FIELDS: ConfigField[] = [
     readonly: true
   },
   {
+    key: 'audio.VAD_provider',
+    label: 'VAD Provider',
+    type: 'select',
+    description: 'Voice Activity Detection provider',
+    category: 'Audio',
+    options: [
+      { value: 'assemblyai', label: 'AssemblyAI Universal VAD' },
+      { value: 'pyannote_api', label: 'Pyannote API' },
+      { value: 'pyannote_local', label: 'Local Pyannote' }
+    ]
+  },
+  {
     key: 'audio.VAD_model',
     label: 'VAD Model',
     type: 'select',
     description: 'Voice Activity Detection model',
     category: 'Audio',
     options: [
-      { value: 'API', label: 'Pyannote Speaker Diarization 3.1 API' },
+      { value: 'universal-3-5-pro', label: 'AssemblyAI Universal 3.5 Pro' },
+      { value: 'API', label: 'Pyannote API (legacy)' },
+      { value: 'pyannote/speaker-diarization-3.1', label: 'Pyannote Speaker Diarization 3.1' },
+      { value: 'pyannote/speaker-diarization-precision-2', label: 'Pyannote Speaker Diarization Precision 2' }
     ]
+  },
+  {
+    key: 'audio.min_segment_seconds',
+    label: 'Minimum Segment Seconds',
+    type: 'number',
+    description: 'Drop VAD segments shorter than this duration',
+    category: 'Audio',
+    min: 0,
+    max: 10,
+    step: 0.1
   },
   {
     key: 'audio.src_lang',

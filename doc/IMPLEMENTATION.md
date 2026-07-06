@@ -165,7 +165,8 @@ graph LR
 
 **Configuration:**
 - `audio.audio_agent`: Agent selection (WhisperAudioAgent, GeminiAudioAgent, GPT4oAudioAgent)
-- `audio.VAD_model`: VAD model selection (API or local model)
+- `audio.VAD_provider`: VAD provider selection (`assemblyai`, `pyannote_api`, or `pyannote_local`)
+- `audio.VAD_model`: VAD model name or local model path
 
 ---
 
@@ -658,7 +659,11 @@ num_workers: 8   # Global parallelism control
 audio:
   enable_audio: True
   audio_agent: WhisperAudioAgent  # WhisperAudioAgent | GeminiAudioAgent | GPT4oAudioAgent
-  VAD_model: API
+  VAD_provider: assemblyai
+  VAD_model: universal-3-5-pro
+  VAD_options:
+    speaker_labels: true
+  min_segment_seconds: 0.8
   src_lang: en
   tgt_lang: zh
 ```

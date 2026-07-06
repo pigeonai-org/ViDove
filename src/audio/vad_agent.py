@@ -10,6 +10,7 @@ import requests
 
 from src.SRT.srt import SrtScript, SrtSegment
 from src.audio.VAD import VAD
+from src.audio.assemblyai_vad import AssemblyAIUniversalVAD
 
 logger = getLogger(__name__)
 
@@ -256,19 +257,49 @@ def create_vad(
     src_lang: str,
     tgt_lang: str,
     min_segment_seconds: float = 0.8,
+    provider: str | None = None,
     **provider_kwargs,
 ) -> VAD:
     """Factory helper returning the appropriate VAD provider implementation."""
-    if model_name_or_path.strip().lower() == "api":
-        return APIPyannoteVAD(
+    normalized_model = (model_name_or_path or "").strip()
+    normalized_provider = (provider or "").strip().lower()
+
+    if not normalized_provider:
+        model_key = normalized_model.lower()
+        if model_key == "api":
+            normalized_provider = "pyannote_api"
+        elif model_key.startswith("pyannote/"):
+            normalized_provider = "pyannote_local"
+        else:
+            normalized_provider = "pyannote_local"
+
+    if normalized_provider == "assemblyai":
+        return AssemblyAIUniversalVAD(
+            model_name_or_path=normalized_model or "universal-3-5-pro",
             src_lang=src_lang,
             tgt_lang=tgt_lang,
             min_segment_seconds=min_segment_seconds,
             **provider_kwargs,
         )
 
+    if normalized_provider == "pyannote_api":
+        pyannote_kwargs = dict(provider_kwargs)
+        if normalized_model.lower() != "api" and normalized_model:
+            pyannote_kwargs.setdefault("model", normalized_model)
+        return APIPyannoteVAD(
+            src_lang=src_lang,
+            tgt_lang=tgt_lang,
+            min_segment_seconds=min_segment_seconds,
+            **pyannote_kwargs,
+        )
+
+    if normalized_provider != "pyannote_local":
+        raise ValueError(
+            "VAD_provider must be one of: assemblyai, pyannote_api, pyannote_local"
+        )
+
     return LocalPyannoteVAD(
-        model_name_or_path=model_name_or_path,
+        model_name_or_path=normalized_model,
         src_lang=src_lang,
         tgt_lang=tgt_lang,
         min_segment_seconds=min_segment_seconds,
@@ -278,6 +309,7 @@ def create_vad(
 
 __all__ = [
     "APIPyannoteVAD",
+    "AssemblyAIUniversalVAD",
     "LocalPyannoteVAD",
     "create_vad",
 ]

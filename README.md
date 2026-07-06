@@ -169,18 +169,20 @@ For detailed Docker deployment guide, see the [Docker Deployment Doc](doc/DOCKER
    uv sync --extra all
    ```
    
-   **Note**: Core dependencies are optimized for API-based workflows (OpenAI Whisper API, Pyannote API, GPT-4 Vision). Local model alternatives are available as optional extras.
-4. Enter your API in bash
-   
+   **Note**: Core dependencies are optimized for API-based workflows (OpenAI Whisper API, AssemblyAI Universal VAD, GPT-4 Vision). Pyannote API and local model alternatives remain available.
+4. Enter your API keys in bash
+
    UNIX Like:
 
    ```sh
-   export OPENAI_API_KEY="your_api_key" 
+   export OPENAI_API_KEY="your_api_key"
+   export ASSEMBLYAI_API_KEY="your_api_key"
    ```
 
    Windows:
    ```sh
-   set OPENAI_API_KEY="your_api_key" 
+   set OPENAI_API_KEY="your_api_key"
+   set ASSEMBLYAI_API_KEY="your_api_key"
    ```
 5. Install FFmpeg:
 
@@ -296,7 +298,11 @@ For detailed Docker deployment guide, see the [Docker Deployment Doc](doc/DOCKER
       enable_audio: True
       audio_agent: WhisperAudioAgent # GeminiAudioAgent | WhisperAudioAgent | QwenAudioAgent | GPT4oAudioAgent
       model_path:  # replace it with your own model path
-      VAD_model: API # pyannote/speaker-diarization-3.1
+      VAD_provider: assemblyai # assemblyai | pyannote_api | pyannote_local
+      VAD_model: universal-3-5-pro # use API for legacy pyannote API configs
+      VAD_options:
+        speaker_labels: true
+      min_segment_seconds: 0.8
       src_lang: en
       tgt_lang: zh
 

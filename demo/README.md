@@ -137,6 +137,8 @@ interface SessionConfig {
   target_lang: "EN" | "ZH" | "ES" | "FR" | "DE" | "RU" | "JA" | "AR" | "KR";
   domain: "General" | "SC2";
   'translation.model': "gpt-3.5-turbo" | "gpt-4" | "gpt-4o" | "Assistant" | "Multiagent";
+  'audio.VAD_provider': "assemblyai" | "pyannote_api" | "pyannote_local";
+  'audio.VAD_model': string;
   // ... other typed configuration options with ViDove-specific values
 }
 ```
@@ -198,6 +200,7 @@ The application uses **multi-stage Docker builds** optimized for TypeScript comp
 ```bash
 # Backend
 OPENAI_API_KEY=your_api_key          # Required for LLM integration
+ASSEMBLYAI_API_KEY=your_api_key      # Required for default Universal VAD
 
 # Frontend  
 REACT_APP_API_URL=http://localhost:8000  # Backend API endpoint

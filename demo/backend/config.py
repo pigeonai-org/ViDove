@@ -98,11 +98,33 @@ CONFIGURATION_SCHEMA = {
         default="WhisperAudioAgent",
         description="Audio processing agent for transcription"
     ),
+    "audio.VAD_provider": ConfigurationValue(
+        type="select",
+        options=["assemblyai", "pyannote_api", "pyannote_local"],
+        default="assemblyai",
+        description="Voice Activity Detection provider"
+    ),
     "audio.VAD_model": ConfigurationValue(
         type="select",
-        options=["pyannote/speaker-diarization-3.1", "API"],
-        default="API",
+        options=[
+            "universal-3-5-pro",
+            "pyannote/speaker-diarization-3.1",
+            "pyannote/speaker-diarization-precision-2",
+            "API",
+        ],
+        default="universal-3-5-pro",
         description="Voice Activity Detection model"
+    ),
+    "audio.VAD_options": ConfigurationValue(
+        type="object",
+        default={"speaker_labels": True},
+        description="Provider-specific Voice Activity Detection options"
+    ),
+    "audio.min_segment_seconds": ConfigurationValue(
+        type="number",
+        range=[0, 10],
+        default=0.8,
+        description="Drop VAD segments shorter than this many seconds"
     ),
     "audio.src_lang": ConfigurationValue(
         type="select",

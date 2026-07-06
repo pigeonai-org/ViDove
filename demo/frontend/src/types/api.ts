@@ -5,10 +5,10 @@ export interface ChatMessage {
 }
 
 export interface ConfigurationValue {
-  type: 'select' | 'boolean' | 'number';
+  type: 'select' | 'boolean' | 'number' | 'object';
   options?: (string | number)[];
   range?: [number, number];
-  default: string | number | boolean;
+  default: string | number | boolean | Record<string, unknown>;
   description: string;
 }
 
@@ -29,7 +29,10 @@ export interface SessionConfig {
   'audio.enable_audio': boolean;
   'audio.audio_agent': "GeminiAudioAgent" | "WhisperAudioAgent" | "QwenAudioAgent" | "GPT4oAudioAgent";
   'audio.model_path': string | null;
-  'audio.VAD_model': "pyannote/speaker-diarization-3.1" | "API";
+  'audio.VAD_provider': "assemblyai" | "pyannote_api" | "pyannote_local";
+  'audio.VAD_model': string;
+  'audio.VAD_options': Record<string, unknown>;
+  'audio.min_segment_seconds': number;
   'audio.src_lang': string;
   'audio.tgt_lang': string;
   'vision.enable_vision': boolean;
