@@ -51,6 +51,7 @@ class AssemblyAIUniversalVAD(VAD):
         chunk_ms: int = 50,
         max_audio_seconds: float = 3 * 60 * 60,
         connect_timeout: float = 30.0,
+        send_timeout: float = 30.0,
         receive_timeout: float = 60.0,
         drain_timeout: float = 0.001,
         drain_every_chunks: int = 20,
@@ -69,6 +70,7 @@ class AssemblyAIUniversalVAD(VAD):
         self.chunk_ms = int(chunk_ms)
         self.max_audio_seconds = float(max_audio_seconds)
         self.connect_timeout = float(connect_timeout)
+        self.send_timeout = float(send_timeout)
         self.receive_timeout = float(receive_timeout)
         self.drain_timeout = float(drain_timeout)
         self.drain_every_chunks = max(1, int(drain_every_chunks))
@@ -239,6 +241,7 @@ class AssemblyAIUniversalVAD(VAD):
                     audio, chunk_ms=self.chunk_ms, sample_rate=self.sample_rate
                 )
             ):
+                ws.settimeout(self.send_timeout)
                 ws.send(chunk, opcode=websocket.ABNF.OPCODE_BINARY)
                 if self.realtime:
                     time.sleep(len(chunk) / bytes_per_second)
@@ -247,6 +250,7 @@ class AssemblyAIUniversalVAD(VAD):
                         ws, websocket, messages, timeout=self.drain_timeout
                     )
 
+            ws.settimeout(self.send_timeout)
             ws.send(json.dumps({"type": "Terminate"}))
 
             deadline = time.monotonic() + self.receive_timeout
