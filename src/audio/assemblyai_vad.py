@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-import json
 import os
 import time
 import warnings
 from collections import Counter
 from logging import getLogger
 from typing import Any, Iterable
-from urllib.parse import urlencode
 
-from pydub import AudioSegment
+import requests
 
 from src.SRT.srt import SrtScript, SrtSegment
 from src.audio.VAD import VAD
@@ -31,241 +29,153 @@ ASSEMBLYAI_LANGUAGE_CODES = {
 
 
 class AssemblyAIUniversalVAD(VAD):
-    """VAD provider backed by AssemblyAI's v3 streaming endpoint."""
+    """VAD provider backed by AssemblyAI's async (pre-recorded) transcription API.
 
-    endpoint = "wss://streaming.assemblyai.com/v3/ws"
+    The engine only needs speech-segment boundaries and speaker labels for
+    downstream ASR/clipping, not AssemblyAI's transcript text. The async REST
+    API processes whole files far faster than real time (no streaming
+    rate-limit dance), returns word-level timestamps + per-word speaker labels,
+    and we rebuild fine-grained speech segments from those words by splitting on
+    silence gaps, speaker changes, and a max-length cap.
+    """
+
+    base_url = "https://api.assemblyai.com/v2"
 
     def __init__(
         self,
-        model_name_or_path: str,
-        src_lang: str,
-        tgt_lang: str,
+        model_name_or_path: str = "",
+        src_lang: str = "EN",
+        tgt_lang: str = "ZH",
         min_segment_seconds: float = 0.8,
         *,
         api_token: str | None = None,
-        mode: str = "balanced",
-        encoding: str = "pcm_s16le",
-        sample_rate: int = 16000,
-        include_partial_turns: bool = False,
+        speech_model: str | None = None,
         speaker_labels: bool = True,
-        chunk_ms: int = 50,
-        max_audio_seconds: float = 3 * 60 * 60,
-        connect_timeout: float = 30.0,
-        send_timeout: float = 30.0,
-        receive_timeout: float = 60.0,
-        drain_timeout: float = 0.001,
-        drain_every_chunks: int = 20,
-        realtime: bool = False,
         language_codes: str | list[str] | None = None,
-        **streaming_options: Any,
+        # Segment reconstruction knobs
+        max_gap_seconds: float = 0.6,
+        max_segment_seconds: float = 30.0,
+        # Networking
+        upload_timeout: float = 600.0,
+        request_timeout: float = 60.0,
+        poll_interval: float = 3.0,
+        poll_timeout: float | None = None,
+        **legacy_streaming_options: Any,
     ) -> None:
         super().__init__(src_lang, tgt_lang, min_segment_seconds)
-        self.model_name_or_path = model_name_or_path or "universal-3-5-pro"
+        # ``model_name_or_path`` used to select a streaming speech_model
+        # (e.g. "universal-3-5-pro"); those ids are not valid for the async API,
+        # so keep it only as a hint and let ``speech_model`` (a valid async
+        # value or None -> AssemblyAI default) win.
+        self.model_name_or_path = model_name_or_path or ""
+        self.speech_model = speech_model
         self.api_token = api_token or os.getenv("ASSEMBLYAI_API_KEY")
-        self.mode = mode
-        self.encoding = encoding
-        self.sample_rate = int(sample_rate)
-        self.include_partial_turns = include_partial_turns
-        self.speaker_labels = speaker_labels
-        self.chunk_ms = int(chunk_ms)
-        self.max_audio_seconds = float(max_audio_seconds)
-        self.connect_timeout = float(connect_timeout)
-        self.send_timeout = float(send_timeout)
-        self.receive_timeout = float(receive_timeout)
-        self.drain_timeout = float(drain_timeout)
-        self.drain_every_chunks = max(1, int(drain_every_chunks))
-        self.realtime = bool(realtime)
-        self.streaming_options = dict(streaming_options)
-        self.language_codes = self._normalize_language_codes(language_codes)
+        self.speaker_labels = bool(speaker_labels)
+        self.language_code = self._resolve_language_code(language_codes)
+        self.max_gap_seconds = float(max_gap_seconds)
+        self.max_segment_seconds = float(max_segment_seconds)
+        self.upload_timeout = float(upload_timeout)
+        self.request_timeout = float(request_timeout)
+        self.poll_interval = max(1.0, float(poll_interval))
+        self.poll_timeout = poll_timeout
+        # Accepted for backwards compatibility with the old streaming provider
+        # (realtime, chunk_ms, mode, ...); ignored by the async implementation.
+        self._legacy_streaming_options = dict(legacy_streaming_options)
 
         if not self.api_token:
             raise ValueError(
                 "Set ASSEMBLYAI_API_KEY or pass api_token to use AssemblyAI VAD"
             )
 
-    @staticmethod
-    def _normalize_audio(audio: AudioSegment, sample_rate: int = 16000) -> AudioSegment:
-        return audio.set_channels(1).set_frame_rate(sample_rate).set_sample_width(2)
-
-    @classmethod
-    def iter_audio_chunks(
-        cls,
-        audio: AudioSegment,
-        *,
-        chunk_ms: int = 50,
-        sample_rate: int = 16000,
-    ) -> Iterable[bytes]:
-        normalized = cls._normalize_audio(audio, sample_rate)
-        for start_ms in range(0, len(normalized), chunk_ms):
-            chunk = normalized[start_ms : start_ms + chunk_ms]
-            if len(chunk) > 0:
-                yield bytes(chunk.raw_data)
-
-    def _normalize_language_codes(
+    # ------------------------------------------------------------------ config
+    def _resolve_language_code(
         self, language_codes: str | list[str] | None
-    ) -> list[str]:
-        raw_codes: list[str]
+    ) -> str | None:
         if language_codes is None:
             mapped = ASSEMBLYAI_LANGUAGE_CODES.get((self.src_lang or "").upper())
             if not mapped:
                 warnings.warn(
-                    f"AssemblyAI language steering does not support {self.src_lang!r}; omitting language_codes",
+                    f"AssemblyAI does not map source language {self.src_lang!r}; "
+                    "falling back to automatic language detection",
                     stacklevel=2,
                 )
-                return []
-            return [mapped]
-
+                return None
+            return mapped
         if isinstance(language_codes, str):
-            raw_codes = [language_codes]
+            candidate = language_codes
         else:
-            raw_codes = list(language_codes)
+            candidate = next(iter(language_codes), "")
+        candidate = str(candidate).strip()
+        mapped = ASSEMBLYAI_LANGUAGE_CODES.get(candidate.upper(), candidate.lower())
+        return mapped or None
 
-        supported = set(ASSEMBLYAI_LANGUAGE_CODES.values())
-        normalized = []
-        for code in raw_codes:
-            candidate = str(code).strip().lower()
-            mapped = ASSEMBLYAI_LANGUAGE_CODES.get(candidate.upper(), candidate)
-            if mapped in supported:
-                normalized.append(mapped)
-            else:
-                warnings.warn(
-                    f"AssemblyAI language steering does not support {code!r}; omitting it",
-                    stacklevel=2,
-                )
-        return normalized
+    @property
+    def _headers(self) -> dict[str, str]:
+        return {"authorization": self.api_token or ""}
 
-    @staticmethod
-    def _query_value(value: Any) -> str:
-        if isinstance(value, bool):
-            return "true" if value else "false"
-        if isinstance(value, (list, dict)):
-            return json.dumps(value)
-        return str(value)
+    # ---------------------------------------------------------------- API calls
+    def _upload(self, audio_path: str) -> str:
+        with open(audio_path, "rb") as handle:
+            resp = requests.post(
+                f"{self.base_url}/upload",
+                headers=self._headers,
+                data=handle,
+                timeout=self.upload_timeout,
+            )
+        resp.raise_for_status()
+        upload_url = resp.json().get("upload_url")
+        if not upload_url:
+            raise RuntimeError(f"AssemblyAI upload returned no upload_url: {resp.text}")
+        return upload_url
 
-    def _websocket_url(self) -> str:
-        params: dict[str, Any] = {
-            "speech_model": self.model_name_or_path,
-            "sample_rate": self.sample_rate,
-            "encoding": self.encoding,
-            "mode": self.mode,
-            "include_partial_turns": self.include_partial_turns,
+    def _create_transcript(self, audio_url: str) -> str:
+        payload: dict[str, Any] = {
+            "audio_url": audio_url,
             "speaker_labels": self.speaker_labels,
+            "punctuate": True,
         }
-        if self.language_codes:
-            params["language_codes"] = self.language_codes
-        params.update(self.streaming_options)
-
-        encoded = urlencode({key: self._query_value(value) for key, value in params.items()})
-        separator = "&" if "?" in self.endpoint else "?"
-        return f"{self.endpoint}{separator}{encoded}"
-
-    @staticmethod
-    def _message_to_json(message: str | bytes) -> dict[str, Any] | None:
-        if isinstance(message, bytes):
-            message = message.decode("utf-8")
-        try:
-            data = json.loads(message)
-        except json.JSONDecodeError:
-            logger.warning("Ignoring non-JSON AssemblyAI message: %s", message)
-            return None
-        if isinstance(data, dict):
-            return data
-        return None
-
-    @staticmethod
-    def _is_termination_message(data: dict[str, Any]) -> bool:
-        message_type = data.get("type")
-        return message_type == "Termination" or (
-            "audio_duration_seconds" in data and "session_duration_seconds" in data
+        if self.speech_model:
+            payload["speech_model"] = self.speech_model
+        if self.language_code:
+            payload["language_code"] = self.language_code
+        else:
+            payload["language_detection"] = True
+        resp = requests.post(
+            f"{self.base_url}/transcript",
+            headers=self._headers,
+            json=payload,
+            timeout=self.request_timeout,
         )
+        resp.raise_for_status()
+        transcript_id = resp.json().get("id")
+        if not transcript_id:
+            raise RuntimeError(f"AssemblyAI transcript create returned no id: {resp.text}")
+        return transcript_id
 
-    def _receive_available(
-        self,
-        ws: Any,
-        websocket_module: Any,
-        messages: list[dict[str, Any]],
-        *,
-        timeout: float,
-    ) -> bool:
-        terminated = False
-        ws.settimeout(timeout)
+    def _poll(self, transcript_id: str, audio_seconds: float) -> dict[str, Any]:
+        deadline = time.monotonic() + (
+            self.poll_timeout if self.poll_timeout else max(600.0, audio_seconds * 3.0)
+        )
+        url = f"{self.base_url}/transcript/{transcript_id}"
         while True:
-            try:
-                raw_message = ws.recv()
-            except websocket_module.WebSocketTimeoutException:
-                break
-            except websocket_module.WebSocketConnectionClosedException:
-                break
-
-            data = self._message_to_json(raw_message)
-            if not data:
-                continue
-            if data.get("type") == "Error" or data.get("error"):
-                raise RuntimeError(f"AssemblyAI streaming error: {data}")
-            messages.append(data)
-            if self._is_termination_message(data):
-                terminated = True
-                break
-        return terminated
-
-    def _stream_messages(self, audio_path: str) -> list[dict[str, Any]]:
-        try:
-            import websocket  # type: ignore
-        except ImportError as exc:  # pragma: no cover - depends on environment
-            raise ImportError(
-                "Install websocket-client to use AssemblyAI VAD"
-            ) from exc
-
-        audio = self._normalize_audio(AudioSegment.from_file(audio_path), self.sample_rate)
-        duration_seconds = len(audio) / 1000.0
-        if duration_seconds > self.max_audio_seconds:
-            raise ValueError(
-                "AssemblyAI streaming sessions are limited to roughly 3 hours; "
-                f"input is {duration_seconds:.1f} seconds"
-            )
-
-        messages: list[dict[str, Any]] = []
-        ws = websocket.create_connection(
-            self._websocket_url(),
-            header=[f"Authorization: {self.api_token}"],
-            timeout=self.connect_timeout,
-        )
-        try:
-            self._receive_available(
-                ws, websocket, messages, timeout=self.drain_timeout
-            )
-
-            bytes_per_second = self.sample_rate * 2
-            for idx, chunk in enumerate(
-                self.iter_audio_chunks(
-                    audio, chunk_ms=self.chunk_ms, sample_rate=self.sample_rate
+            resp = requests.get(url, headers=self._headers, timeout=self.request_timeout)
+            resp.raise_for_status()
+            body = resp.json()
+            status = body.get("status")
+            if status == "completed":
+                return body
+            if status == "error":
+                raise RuntimeError(
+                    f"AssemblyAI transcription failed: {body.get('error')}"
                 )
-            ):
-                ws.settimeout(self.send_timeout)
-                ws.send(chunk, opcode=websocket.ABNF.OPCODE_BINARY)
-                if self.realtime:
-                    time.sleep(len(chunk) / bytes_per_second)
-                if idx % self.drain_every_chunks == 0:
-                    self._receive_available(
-                        ws, websocket, messages, timeout=self.drain_timeout
-                    )
+            if time.monotonic() > deadline:
+                raise TimeoutError(
+                    f"AssemblyAI transcription timed out (id={transcript_id}, "
+                    f"last status={status})"
+                )
+            time.sleep(self.poll_interval)
 
-            ws.settimeout(self.send_timeout)
-            ws.send(json.dumps({"type": "Terminate"}))
-
-            deadline = time.monotonic() + self.receive_timeout
-            while time.monotonic() < deadline:
-                if self._receive_available(
-                    ws, websocket, messages, timeout=min(1.0, self.receive_timeout)
-                ):
-                    break
-            else:
-                raise TimeoutError("Timed out waiting for AssemblyAI termination")
-        finally:
-            ws.close()
-
-        return messages
-
+    # ----------------------------------------------------------- segmentation
     @staticmethod
     def _ms_to_seconds(value: Any) -> float | None:
         try:
@@ -273,118 +183,99 @@ class AssemblyAIUniversalVAD(VAD):
         except (TypeError, ValueError):
             return None
 
+    def _words_to_segments(self, words: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Group word timestamps into speech segments.
+
+        Split when: the silence gap before a word exceeds ``max_gap_seconds``,
+        the speaker changes (when diarization is on), or the running segment
+        would exceed ``max_segment_seconds``.
+        """
+        segments: list[dict[str, Any]] = []
+        current: dict[str, Any] | None = None
+
+        for word in words:
+            start = self._ms_to_seconds(word.get("start"))
+            end = self._ms_to_seconds(word.get("end"))
+            if start is None or end is None or end < start:
+                continue
+            speaker = str(word.get("speaker")) if word.get("speaker") else ""
+
+            if current is None:
+                current = {"start": start, "end": end, "speakers": [speaker]}
+                continue
+
+            gap = start - current["end"]
+            too_long = (end - current["start"]) > self.max_segment_seconds
+            speaker_changed = (
+                self.speaker_labels
+                and speaker
+                and current["speakers"][-1]
+                and speaker != current["speakers"][-1]
+            )
+            if gap > self.max_gap_seconds or too_long or speaker_changed:
+                segments.append(current)
+                current = {"start": start, "end": end, "speakers": [speaker]}
+            else:
+                current["end"] = end
+                current["speakers"].append(speaker)
+
+        if current is not None:
+            segments.append(current)
+        return segments
+
     @staticmethod
-    def _speaker_from_words(words: list[dict[str, Any]]) -> str:
-        speakers = [str(word.get("speaker")) for word in words if word.get("speaker")]
-        if not speakers:
+    def _dominant_speaker(speakers: list[str]) -> str:
+        labels = [s for s in speakers if s]
+        if not labels:
             return ""
-        return Counter(speakers).most_common(1)[0][0]
+        return Counter(labels).most_common(1)[0][0]
 
-    def _speaker_from_turn(self, turn: dict[str, Any]) -> str:
-        speaker_label = turn.get("speaker_label")
-        if speaker_label:
-            return str(speaker_label)
-        words = turn.get("words") or []
-        if isinstance(words, list):
-            return self._speaker_from_words(
-                [word for word in words if isinstance(word, dict)]
-            )
-        return ""
-
-    def messages_to_srt(self, messages: Iterable[dict[str, Any]]) -> SrtScript:
+    def _build_srt(self, body: dict[str, Any]) -> SrtScript:
         srt = SrtScript(src_lang=self.src_lang, tgt_lang=self.tgt_lang)
-        pending_speech_start: float | None = None
-        turn_to_segment: dict[int, SrtSegment] = {}
-        speaker_revisions: list[dict[str, Any]] = []
+        words = body.get("words") or []
+        if not isinstance(words, list):
+            words = []
 
-        for data in messages:
-            message_type = data.get("type")
-            if message_type == "SpeechStarted":
-                pending_speech_start = self._ms_to_seconds(data.get("timestamp"))
+        for seg in self._words_to_segments(w for w in words if isinstance(w, dict)):
+            start_time = float(seg["start"])
+            end_time = float(seg["end"])
+            if end_time <= start_time:
                 continue
-
-            if message_type == "SpeakerRevision":
-                revisions = data.get("revisions") or []
-                if isinstance(revisions, list):
-                    speaker_revisions.extend(
-                        revision for revision in revisions if isinstance(revision, dict)
-                    )
+            if (end_time - start_time) < self.min_segment_seconds:
                 continue
-
-            if message_type != "Turn" or not data.get("end_of_turn"):
-                continue
-
-            words = data.get("words") or []
-            if not isinstance(words, list):
-                words = []
-            word_dicts = [word for word in words if isinstance(word, dict)]
-            final_words = [
-                word for word in word_dicts if word.get("word_is_final", True) is not False
-            ]
-            timing_words = final_words or word_dicts
-            if not timing_words:
-                pending_speech_start = None
-                continue
-
-            first_word_start = self._ms_to_seconds(timing_words[0].get("start"))
-            last_word_end = self._ms_to_seconds(timing_words[-1].get("end"))
-            if last_word_end is None:
-                pending_speech_start = None
-                continue
-
-            start_time = pending_speech_start
-            if start_time is None:
-                start_time = first_word_start
-            pending_speech_start = None
-            if start_time is None or last_word_end <= start_time:
-                continue
-            if (last_word_end - start_time) < self.min_segment_seconds:
-                continue
-
-            try:
-                turn_order = int(data.get("turn_order", len(srt.segments)))
-            except (TypeError, ValueError):
-                turn_order = len(srt.segments)
-
-            segment = SrtSegment(
-                src_lang=self.src_lang,
-                tgt_lang=self.tgt_lang,
-                src_text="",
-                translation="",
-                speaker=self._speaker_from_turn(data),
-                start_time=float(start_time),
-                end_time=float(last_word_end),
-                idx=len(srt.segments),
+            srt.segments.append(
+                SrtSegment(
+                    src_lang=self.src_lang,
+                    tgt_lang=self.tgt_lang,
+                    src_text="",
+                    translation="",
+                    speaker=self._dominant_speaker(seg["speakers"]),
+                    start_time=start_time,
+                    end_time=end_time,
+                    idx=len(srt.segments),
+                )
             )
-            srt.segments.append(segment)
-            turn_to_segment[turn_order] = segment
-
-        for revision in speaker_revisions:
-            try:
-                turn_order = int(revision.get("turn_order"))
-            except (TypeError, ValueError):
-                continue
-            segment = turn_to_segment.get(turn_order)
-            if not segment:
-                continue
-            speaker = revision.get("speaker_label")
-            if not speaker:
-                words = revision.get("words") or []
-                if isinstance(words, list):
-                    speaker = self._speaker_from_words(
-                        [word for word in words if isinstance(word, dict)]
-                    )
-            if speaker:
-                segment.speaker = str(speaker)
 
         self.srt = srt
         return srt
 
+    # ------------------------------------------------------------------- entry
     def get_speaker_segments(
         self, audio_path: str, webhook_url: str | None = None
     ) -> SrtScript:  # noqa: ARG002
-        logger.info("Processing audio file with AssemblyAI Universal VAD: %s", audio_path)
-        return self.messages_to_srt(self._stream_messages(audio_path))
+        logger.info("Processing audio file with AssemblyAI async VAD: %s", audio_path)
+        try:
+            import wave
+
+            with wave.open(audio_path, "rb") as wf:
+                audio_seconds = wf.getnframes() / float(wf.getframerate() or 16000)
+        except Exception:  # pragma: no cover - best-effort duration for poll budget
+            audio_seconds = 0.0
+
+        upload_url = self._upload(audio_path)
+        transcript_id = self._create_transcript(upload_url)
+        body = self._poll(transcript_id, audio_seconds)
+        return self._build_srt(body)
 
 
 __all__ = ["AssemblyAIUniversalVAD"]
