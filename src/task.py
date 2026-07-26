@@ -22,7 +22,7 @@ from src.memory.basic_rag import BasicRAG
 from src.memory.direct_search_RAG import TavilySearchRAG
 from src.output_render import DEFAULT_SUBTITLE_FONT_CANDIDATES, build_subtitle_filter
 from src.translators.translator import Translator
-from src.vision.gpt_vision_agent import GptVisionAgent, CLIPVisionAgent
+from src.vision.gpt_vision_agent import GptVisionAgent
 from src.audio.audio_agent import (
     GeminiAudioAgent,
     WhisperAudioAgent,
@@ -172,6 +172,10 @@ class Task:
             else:
                 self.task_logger.info("Using OPENAI_API_KEY from environment variable.")
                 self.oai_api_key = getenv("OPENAI_API_KEY")
+            if not self.oai_api_key:
+                raise ValueError(
+                    "OPENAI_API_KEY is not set. Export it or provide it in the task config."
+                )
         elif self.api_source == "azure":
             self.task_logger.info("Using Azure OpenAI API")
             if "AZURE_OPENAI_API_KEY" in task_cfg:
@@ -184,6 +188,14 @@ class Task:
                     "Using AZURE_OPENAI_API_KEY from environment variable."
                 )
                 self.oai_api_key = getenv("AZURE_OPENAI_API_KEY")
+            if not self.oai_api_key:
+                raise ValueError(
+                    "AZURE_OPENAI_API_KEY is not set. Export it or provide it in the task config."
+                )
+        else:
+            raise ValueError(
+                f"Unsupported api_source: {self.api_source!r}. Use 'openai' or 'azure'."
+            )
         self.task_logger.info(
             f"{self.source_lang} -> {self.target_lang} task in {self.domain}"
         )
@@ -199,14 +211,23 @@ class Task:
         for key in self.post_setting:
             self.task_logger.info(f"{key}: {self.post_setting[key]}")
 
-        # init openai client
+        # init openai client with a bounded per-request timeout so a hung
+        # connection stalls one worker for minutes, not the SDK default 10.
+        request_timeout = float(getenv("VIDOVE_OPENAI_TIMEOUT", "180"))
+        client_max_retries = int(getenv("VIDOVE_OPENAI_MAX_RETRIES", "2"))
         if self.api_source == "openai":
-            self.client = OpenAI(api_key=self.oai_api_key)
+            self.client = OpenAI(
+                api_key=self.oai_api_key,
+                timeout=request_timeout,
+                max_retries=client_max_retries,
+            )
         elif self.api_source == "azure":
             self.client = AzureOpenAI(
                 api_key=self.oai_api_key,
                 azure_endpoint=getenv("AZURE_OPENAI_ENDPOINT"),
                 api_version="2024-05-01-preview",
+                timeout=request_timeout,
+                max_retries=client_max_retries,
             )
 
         # init memory module
@@ -243,16 +264,7 @@ class Task:
         # initialize vision agent
         self.vision_agent = None
         if self.vision_setting["enable_vision"]:
-            if self.vision_setting["vision_model"] == "CLIP":
-                self.vision_agent = CLIPVisionAgent(
-                    model_name=self.vision_setting["vision_model"],
-                    model_path=self.vision_setting["model_path"]
-                    if self.vision_setting["model_path"]
-                    else None,
-                    frame_per_seg=self.vision_setting["frame_per_seg"],
-                    cache_dir=self.vision_setting["frame_cache_dir"],
-                )
-            elif self.vision_setting["vision_model"] in ("gpt-4o", "gpt-4o-mini"):
+            if self.vision_setting["vision_model"] in ("gpt-4o", "gpt-4o-mini"):
                 self.vision_agent = GptVisionAgent(
                     model_name=self.vision_setting["vision_model"],
                     model_path=None,
@@ -378,6 +390,11 @@ class Task:
         """
         Handles the VAD module to convert audio to speaker segments.
         """
+        if self.audio_agent is None:
+            raise RuntimeError(
+                "Audio processing is disabled (audio.enable_audio=False) but this task "
+                "type requires ASR. Enable audio in the task config or use an SRT input."
+            )
         self.SRT_Script = self.audio_agent.segment_audio(
             self.audio_path, f"{self.task_local_dir}/.cache/audio"
         )
@@ -612,38 +629,32 @@ class Task:
         self.script_input = self.SRT_Script.get_source_only()
         pass
 
-    def update_translation_progress(self, new_progress):
-        """
-        (UNUSED)
-        Updates the progress (%) of the translation process.
-        """
-        if self.progress == TaskStatus.TRANSLATING:
-            self.progress = TaskStatus.TRANSLATING.value[0], new_progress
-
     # Module 3: perform srt translation
     def translation(self):
         """
         Handles the translation of the SRT script.
         """
+        self.status = TaskStatus.TRANSLATING
         self.task_logger.info(
             "---------------------Start Translation--------------------"
         )
         self.translator.set_srt(self.SRT_Script)
-        # Parallel translation is controlled globally by num_workers: > 1 enables parallel
+        # Parallelism is controlled globally by num_workers (1 = sequential)
         max_retries = self.translation_setting.get("max_retries", 2)
         use_history = self.translation_setting.get("use_history", True)
-        if isinstance(self.num_workers, int) and self.num_workers > 1:
-            self.task_logger.info(
-                f"Using parallel translation controlled by num_workers={self.num_workers}; retries={max_retries}, use_history={use_history}"
-            )
-            self.translator.translate_parallel(
-                max_workers=self.num_workers,
-                max_retries=max_retries,
-                use_history=use_history,
-            )
-        else:
-            self.task_logger.info("Using sequential translation (num_workers <= 1)")
-            self.translator.translate()
+        max_workers = (
+            self.num_workers
+            if isinstance(self.num_workers, int) and self.num_workers > 0
+            else 1
+        )
+        self.task_logger.info(
+            f"Translating with num_workers={max_workers}; retries={max_retries}, use_history={use_history}"
+        )
+        self.translator.translate_parallel(
+            max_workers=max_workers,
+            max_retries=max_retries,
+            use_history=use_history,
+        )
 
     # Module 4: perform srt post process steps
     def postprocess(self):
@@ -707,6 +718,7 @@ class Task:
                 model_name=self.editor_setting.get("model", "gpt-5-mini"),
                 user_instruction=combined_instruction,
                 num_workers=self.num_workers,
+                batch_size=self.editor_setting.get("batch_size", 8),
                 usage_log_path=self.usage_log_path,
                 task_id=self.task_id,
             )
@@ -826,7 +838,20 @@ class Task:
         )
         return final_res
 
-    def run_pipeline(self, pre_load_asr_model=None):
+    def _run_optional_stage(self, stage_name, stage_fn):
+        """Run a post-translation polish stage; never let it destroy the finished translation."""
+        try:
+            stage_fn()
+        except Exception as e:
+            self.task_logger.error(
+                f"{stage_name} failed: {e}; continuing with the unpolished translation."
+            )
+            self.agent_history_logger.info(
+                '{"role": "pipeline_coordinator", "message": "%s failed; continuing without it."}'
+                % stage_name
+            )
+
+    def run_pipeline(self):
         """
         Executes the entire pipeline process for the task.
         """
@@ -840,8 +865,10 @@ class Task:
         self.translation()
 
         self.postprocess()
-        self.proofread()
-        self.editor()
+        # Proofreading and editing refine an already complete translation; a
+        # failure there must not throw away the work done so far.
+        self._run_optional_stage("Proofreading", self.proofread)
+        self._run_optional_stage("Editing", self.editor)
         self.result = self.output_render()
         self.agent_history_logger.info(
             '{"role": "pipeline_coordinator", "message": "ViDove pipeline execution completed successfully!"}'
@@ -857,7 +884,7 @@ class YoutubeTask(Task):
 
         # self.model = model
 
-    def run(self, pre_load_asr_model=None):
+    def run(self):
         self.task_logger.info(f"Youtube URL: {self.youtube_url}")
         self.task_logger.info(f"Video Resolution: {self.video_resolution}")
         video_download_path = f"{self.task_local_dir}/task_{self.task_id}.mp4"
@@ -926,7 +953,7 @@ class YoutubeTask(Task):
         self.task_logger.info(f" Audio File Dir: {self.audio_path}")
         self.task_logger.info(" Data Prep Complete. Start pipeline")
 
-        super().run_pipeline(pre_load_asr_model)
+        super().run_pipeline()
 
 
 class AudioTask(Task):
@@ -937,11 +964,11 @@ class AudioTask(Task):
         self.audio_path = audio_path
         self.video_path = None
 
-    def run(self, pre_load_asr_model=None):
+    def run(self):
         self.task_logger.info(f"Video File Dir: {self.video_path}")
         self.task_logger.info(f"Audio File Dir: {self.audio_path}")
         self.task_logger.info("Data Prep Complete. Start pipeline")
-        super().run_pipeline(pre_load_asr_model)
+        super().run_pipeline()
 
 
 class VideoTask(Task):
@@ -954,12 +981,7 @@ class VideoTask(Task):
         shutil.copyfile(video_path, new_video_path)
         self.video_path = new_video_path
 
-        # if self.video_path is not None and self.vision_agent is not None:
-        #     self.visual_cues = self.vision_agent.analyze_video(self.video_path)
-        # else:
-        #     self.visual_cues = None
-
-    def run(self, pre_load_asr_model=None):
+    def run(self):
         self.task_logger.info("using ffmpeg to extract audio (16k mono WAV)")
         subprocess.run(
             [
@@ -984,7 +1006,7 @@ class VideoTask(Task):
         self.task_logger.info(f" Video File Dir: {self.video_path}")
         self.task_logger.info(f" Audio File Dir: {self.audio_path}")
         self.task_logger.info("Data Prep Complete. Start pipeline")
-        super().run_pipeline(pre_load_asr_model)
+        super().run_pipeline()
 
 
 class SRTTask(Task):
@@ -1020,8 +1042,8 @@ class SRTTask(Task):
         # SRT inputs already contain the source transcript, so audio/VAD and
         # visual-cue stages must be skipped.
         self.translation()
-        self.proofread()
-        self.editor()
+        self._run_optional_stage("Proofreading", self.proofread)
+        self._run_optional_stage("Editing", self.editor)
         self.result = self.output_render()
         self.agent_history_logger.info(
             '{"role": "pipeline_coordinator", "message": "ViDove SRT-only pipeline execution completed successfully!"}'

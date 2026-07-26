@@ -43,7 +43,7 @@ class SessionConfig(BaseModel):
     translation_use_history: bool = Field(default=True, alias="translation.use_history", description="Include recent translation history in each request")
     translation_max_retries: int = Field(default=1, alias="translation.max_retries", description="Max retries per chunk for transient API errors")
     # Audio is always enabled, agent selection is required
-    audio_audio_agent: Literal["GeminiAudioAgent", "WhisperAudioAgent", "QwenAudioAgent", "GPT4oAudioAgent"] = Field(default="WhisperAudioAgent", alias="audio.audio_agent", description="Audio agent for transcription (always enabled)")
+    audio_audio_agent: Literal["GeminiAudioAgent", "WhisperAudioAgent", "Qwen3ASRAudioAgent", "GPT4oAudioAgent"] = Field(default="WhisperAudioAgent", alias="audio.audio_agent", description="Audio agent for transcription (always enabled)")
     audio_model_path: Optional[str] = Field(default=None, alias="audio.model_path")
     audio_VAD_provider: Literal["assemblyai", "pyannote_api", "pyannote_local"] = Field(default="assemblyai", alias="audio.VAD_provider")
     audio_VAD_model: str = Field(default="universal-3-5-pro", alias="audio.VAD_model")
@@ -52,7 +52,7 @@ class SessionConfig(BaseModel):
     audio_src_lang: str = Field(default="EN", alias="audio.src_lang")
     audio_tgt_lang: str = Field(default="ZH", alias="audio.tgt_lang")
     vision_enable_vision: bool = Field(default=False, alias="vision.enable_vision")
-    vision_vision_model: Literal["CLIP", "gpt-4o", "gpt-4o-mini"] = Field(default="gpt-4o", alias="vision.vision_model")
+    vision_vision_model: Literal["gpt-4o", "gpt-4o-mini"] = Field(default="gpt-4o", alias="vision.vision_model")
     vision_model_path: str = Field(default="./ViDove/vision_model/clip-vit-base-patch16", alias="vision.model_path")
     vision_frame_cache_dir: str = Field(default="./cache", alias="vision.frame_cache_dir")
     vision_frame_per_seg: int = Field(default=4, alias="vision.frame_per_seg")

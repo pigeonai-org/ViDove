@@ -24,7 +24,7 @@ MEMORY:
 
 audio:
   enable_audio: True
-  audio_agent: WhisperAudioAgent # clip or other vLLMs
+  audio_agent: WhisperAudioAgent # GeminiAudioAgent | WhisperAudioAgent | Qwen3ASRAudioAgent | GPT4oAudioAgent
   model_path:  # replace it with your own model path
   VAD_provider: assemblyai # assemblyai, pyannote_api, or pyannote_local
   VAD_model: universal-3-5-pro # pyannote/speaker-diarization-3.1 or API for pyannote

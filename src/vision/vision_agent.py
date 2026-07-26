@@ -23,12 +23,6 @@ class VisionAgent(ABC):
         self.usage_log_path = None
         self.load_model()
 
-    def log(self, message):
-        if self.logger:
-            self.logger.info(message)
-        else:
-            print(message)
-
     def load_model(self):
         # load model from model_path
         # here we can load pretrained CLIP model, pretrained vLLM model, or other models from huggingface

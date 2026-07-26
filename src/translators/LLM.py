@@ -14,20 +14,18 @@ from src.openai_responses import (
 )
 
 class LLM(AbsApiModel):
-    def __init__(self, client:AzureOpenAI|OpenAI, model_name, system_prompt:PromptTemplate, temp=0.15, enable_rag = False, task_id: str | None = None, usage_log_path: str | None = None) -> None:
+    def __init__(self, client:AzureOpenAI|OpenAI, model_name, system_prompt:PromptTemplate, task_id: str | None = None, usage_log_path: str | None = None) -> None:
         super().__init__()
         self.client = client
         self.model_name = normalize_text_model(model_name)
         self.system_prompt = system_prompt
-        self.history = []
-        self.temp = temp
         # usage logging
         self.task_id = task_id
         self.usage_log_path = usage_log_path
         self._call_index = 0
         self._usage_lock = threading.Lock()
 
-    def send_request(self, input, ):
+    def send_request(self, input):
         text, response = create_response_text(
             self.client,
             model=self.model_name,

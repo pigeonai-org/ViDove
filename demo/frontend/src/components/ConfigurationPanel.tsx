@@ -89,9 +89,7 @@ const CONFIG_FIELDS: ConfigField[] = [
       { value: 'gpt-5.2', label: 'GPT-5.2' },
       { value: 'gpt-5.3-chat-latest', label: 'GPT-5.3 Chat Latest' },
       { value: 'gpt-5.4', label: 'GPT-5.4' },
-      { value: 'Assistant', label: 'Assistant' },
-      { value: 'Multiagent', label: 'Multiagent' },
-      { value: 'RAG', label: 'RAG' }
+      { value: 'Multiagent', label: 'Multiagent' }
     ]
   },
   {
@@ -224,7 +222,6 @@ const CONFIG_FIELDS: ConfigField[] = [
     description: 'Vision model for visual content analysis',
     category: 'Vision',
     options: [
-      { value: 'CLIP', label: 'CLIP' },
       { value: 'gpt-4o', label: 'GPT-4o Vision' },
       { value: 'gpt-4o-mini', label: 'GPT-4o Mini Vision' }
     ]

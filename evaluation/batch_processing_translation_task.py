@@ -57,7 +57,7 @@ def process_video(video_path_str, output_dir, task_cfg, logger):
         task = Task.fromVideoFile(video_path, task_id, task_dir, task_cfg)
         
         # Run task (we don't need ASR model preloading for batch processing)
-        task.run(None)
+        task.run()
         
         # Get original filename (without extension)
         original_filename = Path(video_path).stem

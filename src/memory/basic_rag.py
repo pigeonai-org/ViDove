@@ -1,4 +1,5 @@
 from logging import Logger
+from time import sleep
 from typing import List
 import csv
 import os
@@ -11,8 +12,6 @@ from llama_index.core import (
     VectorStoreIndex,
 )
 from llama_index.core.node_parser import SentenceSplitter
-from llama_index.core.schema import NodeWithScore, QueryBundle
-from llama_index.core.retrievers import BaseRetriever
 from llama_index.embeddings.cohere import CohereEmbedding
 
 CO_API_KEY = os.getenv("CO_API_KEY", None)
@@ -108,20 +107,6 @@ class CSVParser:
         
         return documents
     
-    @staticmethod
-    def parse_single_csv(file_path: str, encoding: str = 'utf-8') -> List[Document]:
-        """
-        Parse a single CSV file and return a list of Documents.
-        
-        Args:
-            file_path: Path to the CSV file
-            encoding: File encoding (default: utf-8)
-            
-        Returns:
-            List of Document objects, one per CSV row
-        """
-        return CSVParser.parse_csv_files(os.path.dirname(file_path), encoding)
-
 class BasicRAG(AbsApiRAG):
     def __init__(
         self,
@@ -131,9 +116,11 @@ class BasicRAG(AbsApiRAG):
         # is_azure: bool = False,
     ) -> None:
         super().__init__()
-        # if is_azure:
-        #     self.embeddings = AzureOpenAIEmbedding(model=embedding_name)
-        # else:
+        if not CO_API_KEY:
+            raise ValueError(
+                "CO_API_KEY is required for the knowledge base (Cohere embeddings). "
+                "Set the environment variable or disable MEMORY features in the task config."
+            )
         self.embeddings = CohereEmbedding(model_name=embedding_name, api_key=CO_API_KEY)
         self.domain = domain
         self.index = None
@@ -210,8 +197,9 @@ class BasicRAG(AbsApiRAG):
             #     storage_context = StorageContext.from_defaults(persist_dir=persist_dir)
             #     index = load_index_from_storage(storage_context)        
         self.index = index
+        self.num_retrievals = num_retrievals
         self.retriever = index.as_retriever(similarity_top_k=num_retrievals)
-        
+
         self.loaded = True
         self.logger.info(f"Model loaded with window retrieval (window_size={window_size})")
 
@@ -224,51 +212,22 @@ class BasicRAG(AbsApiRAG):
             use_window_retrieval: Whether to use window retrieval for adjacent nodes
         """
         if self.retriever is None:
-            self.load_knowledge_base()
+            self.logger.error(
+                "Knowledge base is not loaded; call load_knowledge_base first. Returning no context."
+            )
+            return []
 
         if query is None or not isinstance(query, str) or not query.strip():
             self.logger.error("Empty or invalid query provided to retrieve_relevant_nodes.")
             return []
-        
-        ret = self.retriever.retrieve(query)
-        return ret
 
-    def add_csv_to_index(self, csv_file_path: str, encoding: str = 'utf-8'):
-        """
-        Add CSV data to the index. Each row becomes a separate document.
-        
-        Args:
-            csv_file_path: Path to the CSV file
-            encoding: File encoding (default: utf-8)
-        """
-        if self.index is None:
-            self.load_knowledge_base()
-
-        # Parse the CSV file
-        csv_documents = CSVParser.parse_single_csv(csv_file_path, encoding)
-        
-        if not csv_documents:
-            self.logger.warning(f"No data found in CSV file: {csv_file_path}")
-            return
-        
-        self.logger.info(f"Adding {len(csv_documents)} CSV rows to index")
-        
-        # Convert Documents to nodes and insert
-        nodes = []
-        for doc in csv_documents:
-            # For CSV, we don't chunk since each row is already a logical unit
-            from llama_index.core.schema import TextNode
-            node = TextNode(
-                text=doc.text,
-                metadata=doc.metadata
-            )
-            nodes.append(node)
-        
-        self.index.insert_nodes(nodes)
-
-        # Update the retrievers
-        self.retriever = self.index.as_retriever(similarity_top_k=5)
-        self.logger.info(f"Successfully added {len(nodes)} CSV rows to index")
+        try:
+            return self.retriever.retrieve(query)
+        except Exception as e:
+            # Retrieval requires an embedding API round-trip; degrade instead of
+            # killing the pipeline when the provider is unavailable.
+            self.logger.error(f"Knowledge retrieval failed: {e}. Returning no context.")
+            return []
 
     def add_to_index(self, text_or_texts, chunk_size=50, chunk_overlap=5):
         """
@@ -280,8 +239,11 @@ class BasicRAG(AbsApiRAG):
             chunk_overlap: Overlap between chunks (default: 5).
         """
         if self.index is None:
-            self.load_knowledge_base()
-        
+            self.logger.error(
+                "Knowledge base is not loaded; call load_knowledge_base first. Skipping add_to_index."
+            )
+            return
+
         # Normalize input to a list of Documents
         if isinstance(text_or_texts, str):
             documents = [Document(text=text_or_texts)]
@@ -299,7 +261,10 @@ class BasicRAG(AbsApiRAG):
                 break  # Exit loop if successful
             except Exception as e:
                 self.logger.error(f"{i}: Error adding to index: {e}. Retrying...")
+                sleep(min(10.0, 1.0 + i * 2))
                 continue
 
         # Update the retrievers
-        self.retriever = self.index.as_retriever(similarity_top_k=5)
+        self.retriever = self.index.as_retriever(
+            similarity_top_k=getattr(self, "num_retrievals", 5)
+        )

@@ -55,12 +55,6 @@ class ProofreaderAgent:
         """Set the agent history logger from task"""
         self.agent_history_logger = logger
 
-    def set_usage_log_path(self, path: Optional[str]):
-        self.usage_log_path = path
-
-    def set_task_id(self, task_id: Optional[str]):
-        self.task_id = task_id
-
     def _record_usage(
         self,
         *,
@@ -137,6 +131,19 @@ class ProofreaderAgent:
             pass
         return text
 
+    def _retrieve_nodes_text(self, rag, query: str) -> str:
+        """Retrieve knowledge nodes as plain text; degrade to empty on failure."""
+        if rag is None or not query.strip():
+            return "None"
+        try:
+            nodes = rag.retrieve_relevant_nodes(query)
+            texts = [n.text for n in nodes if getattr(n, "text", None)]
+            return "\n".join(texts) if texts else "None"
+        except Exception as e:
+            if self.logger:
+                self.logger.warning(f"Proofreader knowledge retrieval failed: {e}")
+            return "None"
+
     def build_batch_prompt(self, batch: List[Tuple[int, str, str]]) -> str:
         segment_block = []
         for idx, src, trans in batch:
@@ -146,28 +153,15 @@ class ProofreaderAgent:
                                     """)
         segments_text = "\n".join(segment_block)
 
-        local_ctx = []
-        
-        for b in batch:
-            local_ctx.append("\n".join(
-                [n.text for n in self.local_knowledge.retrieve_relevant_nodes(b[1]) if n.text]
-            ) if self.local_knowledge else "None")
-        
-        # DEBUG
-        if self.logger:
-            self.logger.info('sentences in batch:')
-            self.logger.info(" ".join(s for _, s, _ in batch))
-            self.logger.info(f"Local context for batch: {local_ctx}") if self.logger else None
+        batch_text = " ".join(s for _, s, _ in batch)
+        local_ctx = self._retrieve_nodes_text(self.local_knowledge, batch_text)
+        web_ctx = self._retrieve_nodes_text(self.web_search, batch_text)
+
+        if self.verbose > 1 and self.logger:
             self.logger.info(f"Local context for batch: {local_ctx}")
 
-        web_ctx = "\n".join(
-            n.text for n in self.web_search.retrieve_relevant_nodes(
-                " ".join(s for _, s, _ in batch)
-            )
-        ) if self.web_search else "None"
-
         return f"""You are a translation proofreader. Below are {len(batch)} subtitle segments.
-                Some are full sentences, some are fragments. Give **specific advice** for each one, 
+                Some are full sentences, some are fragments. Give **specific advice** for each one,
                 but do not treat each segment separatly you need information across segment.
 
                 Return suggestions in this format:
@@ -254,16 +248,29 @@ class ProofreaderAgent:
                     if self.logger:
                         self.logger.info(f"Added suggestion for segment {idx}")
 
-        # Build batches
+        # Build batches; a failed batch only loses its own suggestions.
         batches = [segments[i:i + self.batch_size] for i in range(0, len(segments), self.batch_size)]
         if self.num_workers == 1:
             for b in batches:
-                process_batch(b)
+                try:
+                    process_batch(b)
+                except Exception as e:
+                    if self.logger:
+                        self.logger.error(
+                            f"Proofreading batch starting at segment {b[0][0]} failed: {e}; skipping."
+                        )
         else:
             with ThreadPoolExecutor(max_workers=self.num_workers) as ex:
-                futures = [ex.submit(process_batch, b) for b in batches]
-                for _ in as_completed(futures):
-                    pass
+                future_map = {ex.submit(process_batch, b): b for b in batches}
+                for fut in as_completed(future_map):
+                    b = future_map[fut]
+                    try:
+                        fut.result()
+                    except Exception as e:
+                        if self.logger:
+                            self.logger.error(
+                                f"Proofreading batch starting at segment {b[0][0]} failed: {e}; skipping."
+                            )
 
         if self.agent_history_logger:
             try:
@@ -273,4 +280,3 @@ class ProofreaderAgent:
                 }))
             except Exception:
                 pass
-                    

@@ -6,16 +6,16 @@ from logging import Logger
 from llama_index.core.schema import Document
 from tavily import TavilyClient
 
-from ..memory.basic_rag import BasicRAG
+from ..memory.abs_api_RAG import AbsApiRAG
 
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 
-# Load to local store, 
+# Load to local store,
 # 1. refactor the retrieve_relevant_nodes function, if one of the similarity is less than 0.2 threhold, then web search
 # 2. after the websearch, store all the results to local store
 
 
-class TavilySearchRAG(BasicRAG):
+class TavilySearchRAG(AbsApiRAG):
     def __init__(
         self,
         logger: Logger,
@@ -23,14 +23,26 @@ class TavilySearchRAG(BasicRAG):
         tavily_api_key=TAVILY_API_KEY,
         max_results=5,
     ) -> None:
-        super().__init__(logger=logger, domain=domain)
+        super().__init__()
+        if not tavily_api_key:
+            raise ValueError(
+                "TAVILY_API_KEY is required when MEMORY.enable_web_search is on. "
+                "Set the environment variable or disable web search in the task config."
+            )
         self.domain = domain
         self.tavily_client = TavilyClient(tavily_api_key)
         self.logger = logger
         self.max_results = max_results
 
+    def load_knowledge_base(self, persist_dir=None, data_dir=None, num_retrievals=5):
+        # Web search needs no local index.
+        return None
+
+    def add_to_index(self, text_or_texts, chunk_size=50, chunk_overlap=5) -> None:
+        # Web search results are not persisted locally.
+        return None
+
     def retrieve_relevant_nodes(self, query: str, use_window_retrieval=True) -> list[Document]:
-        #added this function for testing
         # Note: use_window_retrieval is ignored for web search as it doesn't apply
         if not isinstance(query, str) or not query.strip():
             self.logger.error("Empty or invalid query provided to Tavily search.")

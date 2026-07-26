@@ -96,12 +96,11 @@ class AudioConfig(BaseModel):
     audio_agent: Literal[
         "GeminiAudioAgent",
         "WhisperAudioAgent",
-        "QwenAudioAgent",
         "Qwen3ASRAudioAgent",
         "GPT4oAudioAgent",
     ] = Field(
         default="GeminiAudioAgent",
-        description="Audio agent: GeminiAudioAgent, WhisperAudioAgent, QwenAudioAgent, Qwen3ASRAudioAgent, GPT4oAudioAgent",
+        description="Audio agent: GeminiAudioAgent, WhisperAudioAgent, Qwen3ASRAudioAgent, GPT4oAudioAgent",
     )
     model_path: Optional[str] = Field(
         default=None, description="Model path, replace with your own model path"
@@ -147,8 +146,8 @@ class VisionConfig(BaseModel):
     enable_vision: bool = Field(
         default=True, description="Whether to enable vision processing"
     )
-    vision_model: Literal["CLIP", "gpt-4o", "gpt-4o-mini"] = Field(
-        default="gpt-4o", description="Vision model: CLIP or gpt-4o"
+    vision_model: Literal["gpt-4o", "gpt-4o-mini"] = Field(
+        default="gpt-4o", description="Vision model: gpt-4o or gpt-4o-mini"
     )
     model_path: str = Field(
         default="./ViDove/vision_model/clip-vit-base-patch16",
@@ -264,6 +263,10 @@ class EditorConfig(BaseModel):
         default=5,
         description="Editor history length, number of sentences to be provided as history",
     )
+    batch_size: int = Field(
+        default=8,
+        description="Number of consecutive segments edited per LLM request",
+    )
 
     @field_validator("model", mode="before")
     @classmethod
@@ -347,9 +350,6 @@ class TaskConfig(BaseModel):
     api_source: Optional[str] = Field(
         default=None, description="API source: openai or azure"
     )
-    is_assistant: Optional[bool] = Field(
-        default=None, description="Whether it is assistant mode"
-    )
 
     @model_validator(mode="before")
     @classmethod
@@ -396,73 +396,6 @@ class TaskConfig(BaseModel):
         import yaml
 
         return yaml.dump(self.model_dump(), default_flow_style=False, allow_unicode=True)
-
-    def to_flat_dict(self) -> dict:
-        """Convert to flattened dictionary format for web interface"""
-        flat_dict: dict = {}
-        config_dict = self.model_dump()
-
-        # Top-level fields
-        flat_dict["source_lang"] = config_dict["source_lang"]
-        flat_dict["target_lang"] = config_dict["target_lang"]
-        flat_dict["domain"] = config_dict["domain"]
-        flat_dict["num_workers"] = config_dict["num_workers"]
-
-        # Flatten nested configurations
-        for section_name, section_data in config_dict.items():
-            if isinstance(section_data, dict) and section_name not in [
-                "source_lang",
-                "target_lang",
-                "domain",
-                "instructions",
-                "api_source",
-                "is_assistant",
-                "num_workers",
-            ]:
-                for field_name, field_value in section_data.items():
-                    flat_dict[f"{section_name}.{field_name}"] = field_value
-
-        # Handle special cases
-        if config_dict.get("instructions"):
-            flat_dict["instructions"] = config_dict["instructions"]
-        if config_dict.get("api_source"):
-            flat_dict["api_source"] = config_dict["api_source"]
-        if config_dict.get("is_assistant") is not None:
-            flat_dict["is_assistant"] = config_dict["is_assistant"]
-
-        return flat_dict
-
-    @classmethod
-    def from_flat_dict(cls, flat_dict: dict) -> "TaskConfig":
-        """Create TaskConfig from flattened dictionary format"""
-        nested_dict = {}
-
-        # Handle top-level fields
-        for key in [
-            "source_lang",
-            "target_lang",
-            "domain",
-            "instructions",
-            "api_source",
-            "is_assistant",
-            "num_workers",
-        ]:
-            if key in flat_dict:
-                nested_dict[key] = flat_dict[key]
-
-        # Group flattened fields back into sections
-        sections = {}
-        for key, value in flat_dict.items():
-            if "." in key:
-                section, field = key.split(".", 1)
-                if section not in sections:
-                    sections[section] = {}
-                sections[section][field] = value
-
-        # Add sections to nested dict
-        nested_dict.update(sections)
-
-        return cls(**nested_dict)
 
 
 # Convenience functions

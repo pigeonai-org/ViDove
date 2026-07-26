@@ -61,7 +61,8 @@ class APIPyannoteVAD(VAD):
             presign_endpoint = "https://api.pyannote.ai/v1/media/input"
             body = {"url": media_input_url}
             resp = requests.post(
-                presign_endpoint, json=body, headers=self._auth_headers_json()
+                presign_endpoint, json=body, headers=self._auth_headers_json(),
+                timeout=60,
             )
             try:
                 resp.raise_for_status()
@@ -78,6 +79,7 @@ class APIPyannoteVAD(VAD):
                     presigned,
                     data=file_handle,
                     headers={"Content-Type": "application/octet-stream"},
+                    timeout=600,
                 )
                 try:
                     put_resp.raise_for_status()
@@ -99,7 +101,8 @@ class APIPyannoteVAD(VAD):
         if webhook_url:
             job_body["webhook"] = webhook_url
         response = requests.post(
-            jobs_endpoint, json=job_body, headers=self._auth_headers_json()
+            jobs_endpoint, json=job_body, headers=self._auth_headers_json(),
+            timeout=60,
         )
         response.raise_for_status()
         job_data = response.json()
@@ -129,6 +132,7 @@ class APIPyannoteVAD(VAD):
             status_resp = requests.get(
                 poll_endpoint,
                 headers={"Authorization": f"Bearer {self.api_token}"},
+                timeout=60,
             )
 
             if status_resp.status_code == 404:
@@ -263,6 +267,12 @@ def create_vad(
     """Factory helper returning the appropriate VAD provider implementation."""
     normalized_model = (model_name_or_path or "").strip()
     normalized_provider = (provider or "").strip().lower()
+
+    if not normalized_model and not normalized_provider:
+        raise ValueError(
+            "audio.VAD_model is empty. Set it to 'API' (pyannote hosted API), "
+            "a pyannote/* model path, or configure audio.VAD_provider."
+        )
 
     if not normalized_provider:
         model_key = normalized_model.lower()

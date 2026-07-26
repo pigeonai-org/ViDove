@@ -68,9 +68,7 @@ CONFIGURATION_SCHEMA = {
             "gpt-5.2",
             "gpt-5.3-chat-latest",
             "gpt-5.4",
-            "Assistant",
             "Multiagent",
-            "RAG",
         ],
         default="gpt-5",
         description="LLM model for translation"
@@ -94,7 +92,7 @@ CONFIGURATION_SCHEMA = {
     ),
     "audio.audio_agent": ConfigurationValue(
         type="select",
-        options=["GeminiAudioAgent", "WhisperAudioAgent", "QwenAudioAgent", "GPT4oAudioAgent"],
+        options=["GeminiAudioAgent", "WhisperAudioAgent", "Qwen3ASRAudioAgent", "GPT4oAudioAgent"],
         default="WhisperAudioAgent",
         description="Audio processing agent for transcription"
     ),
@@ -145,7 +143,7 @@ CONFIGURATION_SCHEMA = {
     ),
     "vision.vision_model": ConfigurationValue(
         type="select",
-        options=["CLIP", "gpt-4o", "gpt-4o-mini"],
+        options=["gpt-4o", "gpt-4o-mini"],
         default="gpt-4o",
         description="Vision model for visual content analysis"
     ),
