@@ -40,7 +40,12 @@ class TestPreprocess(unittest.TestCase):
         srt.dict = self.form_dict(self.en_dict_test, self.zh_dict_test)
         srt.correct_with_force_term()
         trans = srt.segments[0].source_text
-        assert trans[:-10] == "the 虫族 player send 刺蛇 to the" and trans[-9:-7] in {"锻炉", "BF"} and trans[-2:] in {"工程站", "BE"}
+        assert trans.startswith("the 虫族 player send 刺蛇 to the ")
+        assert any(
+            trans.endswith(f"{forge} and {engineering_bay}")
+            for forge in {"锻炉", "BF"}
+            for engineering_bay in {"工程站", "BE"}
+        )
 
 if __name__ == "__main__":
     unittest.main()

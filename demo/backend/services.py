@@ -21,8 +21,17 @@ from models import ChatMessage, SessionConfig, TaskStatus
 from config import CONFIGURATION_SCHEMA
 
 
-# OpenAI client
-client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# OpenAI client (lazy so a missing key breaks chat requests, not app boot)
+_client = None
+
+
+def get_openai_client() -> AsyncOpenAI:
+    global _client
+    if _client is None:
+        _client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    return _client
+
+
 ASSISTANT_CHAT_MODEL = os.getenv("ASSISTANT_CHAT_MODEL", "gpt-5-mini")
 
 
@@ -96,7 +105,7 @@ Remember: NO markdown, NO code blocks, ONLY the JSON object."""
             {"role": msg.role, "content": msg.content} for msg in messages
         ]
 
-        response = await client.responses.create(
+        response = await get_openai_client().responses.create(
             model=ASSISTANT_CHAT_MODEL,
             instructions=system_prompt,
             input=input_history,
@@ -523,15 +532,25 @@ def determine_file_type(file_extension: str) -> Optional[Literal["video", "audio
 def get_result_file_path(task_id: str) -> Optional[Path]:
     """Get the path to the result file for a given task ID"""
     results_dir = Path(__file__).parent / "results"
-    
+
     if not results_dir.exists():
         return None
-    
-    # Look for files with the task_id in the filename
+
+    # Results are stored in a per-task subdirectory; fall back to legacy
+    # flat files with the task_id prefix.
+    task_dir = results_dir / task_id
+    if task_dir.is_dir():
+        for file_path in sorted(task_dir.glob(f"{task_id}_*")):
+            if file_path.is_file():
+                return file_path
+        for file_path in sorted(task_dir.iterdir()):
+            if file_path.is_file():
+                return file_path
+
     for file_path in results_dir.glob(f"{task_id}_*"):
         if file_path.is_file():
             return file_path
-    
+
     return None
 
 

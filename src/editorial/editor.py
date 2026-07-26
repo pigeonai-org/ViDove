@@ -1,4 +1,5 @@
-from typing import Callable, Dict, Optional, List
+from typing import Dict, List, Optional, Tuple
+import re
 from src.SRT.srt import SrtScript
 from src.memory.abs_api_RAG import AbsApiRAG
 from src.openai_responses import (
@@ -27,6 +28,7 @@ class EditorAgent:
         model_name: str = DEFAULT_TEXT_MODEL,
         user_instruction: Optional[str] = None,
         num_workers: int = 4,
+        batch_size: int = 8,
         usage_log_path: Optional[str] = None,
         task_id: Optional[str] = None,
     ):
@@ -38,10 +40,9 @@ class EditorAgent:
         self.model_name = normalize_text_model(model_name)
         self.user_instruction = user_instruction
         self.num_workers = max(1, int(num_workers))
+        self.batch_size = max(1, int(batch_size))
         # Initialize agent history logger - will be set by task
         self.agent_history_logger = None
-        # Optional post-edit handlers registry
-        self.handlers: Dict[str, Callable] = {}
         # Lock for thread-safe writes
         self._lock = Lock()
         # Usage logging context
@@ -50,15 +51,6 @@ class EditorAgent:
 
     def set_agent_history_logger(self, logger):
         self.agent_history_logger = logger
-
-    def register_handler(self, name: str, func: Callable):
-        self.handlers[name] = func
-
-    def set_usage_log_path(self, path: Optional[str]):
-        self.usage_log_path = path
-
-    def set_task_id(self, task_id: Optional[str]):
-        self.task_id = task_id
 
     def _record_usage(
         self,
@@ -96,92 +88,90 @@ class EditorAgent:
         except Exception:
             pass
 
-    def _snapshot_translations(self) -> List[str]:
-        return [seg.translation for seg in self.srt.segments]
-
-    def build_prompt(
-        self,
-        idx: int,
-        src_text: str,
-        translation: str,
-        base_translations: Optional[List[str]] = None,
-    ) -> str:
-        seg = self.srt.segments[idx]
-        suggestion = getattr(seg, "suggestion", None)
-        visual_ctx = getattr(seg, "visual_cues", None)
-        visual_ctx = "\n".join(visual_ctx) if visual_ctx else "None"
-        audio_ctx = getattr(seg, "audio_cues", None)
-        audio_ctx = "\n".join(audio_ctx) if audio_ctx else "None"
-
-        translations = (
-            base_translations if base_translations is not None else self._snapshot_translations()
-        )
-        n = len(translations)
-        prev_indices = range(max(0, idx - self.history_len), idx)
-        next_indices = range(idx + 1, min(n, idx + self.history_len + 1))
-        prev = [translations[i] for i in prev_indices]
-        past = [translations[i] for i in next_indices]
-        prev_translation_history = "\n".join(prev) if prev else "None"
-        past_translation_history = "\n".join(past) if past else "None"
-
-        ltm = []
-        if self.memory:
+    def _log_history(self, message: str) -> None:
+        if self.agent_history_logger:
             try:
-                nodes = self.memory.retrieve_relevant_nodes(translation)
-                ltm = [n.text for n in nodes if getattr(n, "text", None)]
-            except Exception:
-                ltm = []
-        ltm = "\n".join(ltm) if ltm else "None"
-
-        if self.user_instruction and self.agent_history_logger:
-            try:
-                user_instruction_str = self.user_instruction.replace("\n", "; ")
                 self.agent_history_logger.info(
-                    json.dumps(
-                        {
-                            "role": "editor",
-                            "message": f"I received the following user instruction: {user_instruction_str}",
-                        }
-                    )
+                    json.dumps({"role": "editor", "message": message})
                 )
             except Exception:
                 pass
 
+    def _snapshot_translations(self) -> List[str]:
+        return [seg.translation for seg in self.srt.segments]
+
+    def _retrieve_long_term_memory(self, query: str) -> str:
+        if not self.memory or not query.strip():
+            return "None"
+        try:
+            nodes = self.memory.retrieve_relevant_nodes(query)
+            ltm = [n.text for n in nodes if getattr(n, "text", None)]
+            return "\n".join(ltm) if ltm else "None"
+        except Exception as e:
+            if self.logger:
+                self.logger.warning(f"Editor memory retrieval failed: {e}")
+            return "None"
+
+    def build_batch_prompt(
+        self,
+        batch: List[Tuple[int, str, str]],
+        base_translations: List[str],
+    ) -> str:
+        n = len(base_translations)
+        first_idx = batch[0][0]
+        last_idx = batch[-1][0]
+
+        segment_blocks = []
+        for idx, src_text, translation in batch:
+            seg = self.srt.segments[idx]
+            suggestion = getattr(seg, "suggestion", None)
+            visual_ctx = getattr(seg, "visual_cues", None)
+            visual_ctx = "\n".join(visual_ctx) if visual_ctx else "None"
+            audio_ctx = getattr(seg, "audio_cues", None)
+            audio_ctx = "\n".join(audio_ctx) if audio_ctx else "None"
+            segment_blocks.append(
+                f"Segment {idx}:\n"
+                f"Source text: {src_text}\n"
+                f"Translated text: {translation}\n"
+                f"Proofreader suggestion: {suggestion if suggestion else 'None'}\n"
+                f"Visual cues: {visual_ctx}\n"
+                f"Audio cues: {audio_ctx}\n"
+            )
+        segments_text = "\n".join(segment_blocks)
+
+        prev_indices = range(max(0, first_idx - self.history_len), first_idx)
+        next_indices = range(last_idx + 1, min(n, last_idx + self.history_len + 1))
+        prev = [base_translations[i] for i in prev_indices]
+        upcoming = [base_translations[i] for i in next_indices]
+        prev_translation_history = "\n".join(prev) if prev else "None"
+        next_translation_history = "\n".join(upcoming) if upcoming else "None"
+
+        ltm = self._retrieve_long_term_memory(
+            " ".join(translation for _, _, translation in batch)
+        )
+
         return f"""You are an Editor ensuring overall translation quality and coherence,
                 aligning the translation with the original video content in domain `{self.srt.domain}`, you must ensure the term and style are aligned with the domain's language.
-        
-                Segment index: {idx}
-                Source text:
-                {src_text}
 
-                Translated text:
-                {translation}
+                Below are {len(batch)} consecutive subtitle segments. For each one, revise the translated text for accuracy, fluency, and coherence across segments.
 
-                Here is a provided suggestion for each segment, which may or may not useful for your revision, you may use the suggestion only if necessary (for example, term correctness).
-                Note that the suggestion may not be accurate, the proofreader has less information comparing to you, so you need to double check before making revision.
-                The proofreader may return "UNCLEAR" if they are not sure about the translation, they will specify the location and you need to check with other information provided to you to solve for unclear.
-                If there is no suggestions, you may ignore this part, but still check with other modality context and long-term memory for correctness and coherence.
-                Suggestion:
-                                {suggestion if suggestion else "No suggestion provided."}
-                
+                Proofreader suggestions may or may not be useful; use them only if necessary (for example, term correctness).
+                The proofreader has less information than you, so double check before making a revision.
+                The proofreader may return "UNCLEAR" if they are not sure about the translation; check the other information provided to you to resolve it.
+                The source text might not be accurate; check the visual/audio cues if provided.
+
                 Your edit will also follow the following instruction if provided:
                 User instruction:
-                {self.user_instruction if self.user_instruction else "No user instruction provided."}                
-                
-                --- Multimodal Context (Short-Term Memory) ---
-                Visual cues:
-                You may use visual cues from the video to improve translation or make corrections, the source text might not be accurate, you need to check with the video context if provided:
-                {visual_ctx}
+                {self.user_instruction if self.user_instruction else "No user instruction provided."}
 
-                Audio cues:
-                {audio_ctx}
+                --- Segments to edit ---
+                {segments_text}
 
-                Translation context:
-                You will be provided with the previous and next 5 segments' translations, which may help you understand the context and make corrections:
-                Previous translation history (up to 5 segments):
+                --- Translation context ---
+                Previous translation history:
                 {prev_translation_history}
-                Past translation history (up to 5 segments):
-                {past_translation_history}
+                Upcoming translation history:
+                {next_translation_history}
 
                 --- Long-Term Memory ---
                 Long-term memory provides broader context and domain-specific knowledge, you may use it to improve translation or make corrections:
@@ -196,14 +186,17 @@ class EditorAgent:
                 6. To ensure the fluency in {self.srt.tgt_lang}, you do not have to ensure translation be word by word accurate, but be sure to convey the same information.
 
                 --- Important ---
-                Directly return the revised content only."""
+                Return EXACTLY one line per segment, in this format and nothing else:
+                Segment {first_idx}: <revised translation>
+                Segment {first_idx + 1 if len(batch) > 1 else first_idx}: <revised translation>
+                ...
+                Each revised translation must be on a single line. Do not add explanations."""
 
     def send_request(self, prompt: str, phrase_index: Optional[int] = None) -> str:
         text, resp = create_response_text(
             self.client,
             model=self.model_name,
             input_value=prompt,
-            max_output_tokens=3000,
         )
         # Best-effort usage logging
         try:
@@ -223,107 +216,117 @@ class EditorAgent:
             pass
         return text
 
+    @staticmethod
+    def _parse_batch_response(content: str) -> Dict[int, str]:
+        """Parse 'Segment <idx>: <text>' blocks into {idx: text}.
+
+        Lines that do not start a new segment are treated as continuations of
+        the current one, so wrapped revisions are not silently truncated.
+        """
+        edits: Dict[int, str] = {}
+        if not content:
+            return edits
+        current_idx: Optional[int] = None
+        current_lines: List[str] = []
+
+        def flush():
+            if current_idx is not None:
+                text = "\n".join(current_lines).strip()
+                if text:
+                    edits[current_idx] = text
+
+        for line in content.splitlines():
+            match = re.match(r"\s*Segment\s+(\d+)\s*[:：]\s*(.*)", line)
+            if match:
+                flush()
+                current_idx = int(match.group(1))
+                current_lines = [match.group(2).strip()]
+            elif current_idx is not None:
+                current_lines.append(line.strip())
+        flush()
+        return edits
+
     def srt_iterator(self):
         for idx, seg in enumerate(self.srt.segments):
             yield idx, seg.src_text, seg.translation
 
     def edit_all(self) -> Dict[int, str]:
-        if self.agent_history_logger:
-            try:
-                self.agent_history_logger.info(
-                    json.dumps(
-                        {
-                            "role": "editor",
-                            "message": "Time to sprinkle some editorial magic. Let us make it smooth as butter!",
-                        }
-                    )
-                )
-            except Exception:
-                pass
+        self._log_history(
+            "Time to sprinkle some editorial magic. Let us make it smooth as butter!"
+        )
+        if self.user_instruction:
+            self._log_history(
+                "I received the following user instruction: "
+                + self.user_instruction.replace("\n", "; ")
+            )
 
         snapshot_translations = self._snapshot_translations()
         results: Dict[int, str] = {}
 
-        def worker(item):
-            idx, src, trans = item
-            prompt = self.build_prompt(
-                idx, src, trans, base_translations=snapshot_translations
-            )
-            edits = self.send_request(prompt, phrase_index=idx).strip()
-            return idx, edits
-
         items = list(self.srt_iterator())
-        if self.num_workers == 1:
-            for item in items:
-                idx, edits = worker(item)
-                with self._lock:
-                    self.srt.segments[idx].translation = edits
-                    results[idx] = edits
-                if self.logger:
-                    self.logger.info(f"Edited segment {idx}: {edits}")
-                if self.agent_history_logger:
-                    try:
-                        self.agent_history_logger.info(
-                            json.dumps(
-                                {
-                                    "role": "editor",
-                                    "message": f"Edited segment {idx}: {edits}",
-                                }
-                            )
+        batches = [
+            items[i : i + self.batch_size]
+            for i in range(0, len(items), self.batch_size)
+        ]
+
+        def apply_edits(batch, edits: Dict[int, str]):
+            for idx, _, original in batch:
+                revised = edits.get(idx, "").strip()
+                if not revised:
+                    # Keep the existing translation rather than blanking it out.
+                    if self.logger:
+                        self.logger.warning(
+                            f"Editor returned no revision for segment {idx}; keeping original."
                         )
-                    except Exception:
-                        pass
+                    continue
+                with self._lock:
+                    self.srt.segments[idx].translation = revised
+                    results[idx] = revised
+                if self.logger:
+                    self.logger.info(f"Edited segment {idx}: {revised}")
+                self._log_history(f"Edited segment {idx}: {revised}")
+
+        def process_batch(batch):
+            prompt = self.build_batch_prompt(batch, snapshot_translations)
+            phrase_index = batch[0][0] if batch else None
+            content = self.send_request(prompt, phrase_index=phrase_index)
+            edits = self._parse_batch_response(content)
+            batch_indices = {idx for idx, _, _ in batch}
+            unknown = set(edits) - batch_indices
+            if unknown and self.logger:
+                self.logger.warning(
+                    f"Editor response labeled segments {sorted(unknown)} outside batch "
+                    f"{sorted(batch_indices)}; those lines are ignored."
+                )
+            apply_edits(batch, edits)
+
+        if self.num_workers == 1 or len(batches) == 1:
+            for batch in batches:
+                try:
+                    process_batch(batch)
+                except Exception as e:
+                    if self.logger:
+                        self.logger.error(
+                            f"Editing batch starting at segment {batch[0][0]} failed: {e}; keeping originals."
+                        )
+                    self._log_history(f"Editing batch failed, keeping originals: {e}")
         else:
             with ThreadPoolExecutor(max_workers=self.num_workers) as ex:
-                future_map = {ex.submit(worker, item): item[0] for item in items}
+                future_map = {ex.submit(process_batch, b): b for b in batches}
                 for fut in as_completed(future_map):
-                    idx = future_map[fut]
+                    batch = future_map[fut]
                     try:
-                        i, edits = fut.result()
+                        fut.result()
                     except Exception as e:
                         if self.logger:
-                            self.logger.error(f"Editing segment {idx} failed: {e}")
-                        if self.agent_history_logger:
-                            try:
-                                self.agent_history_logger.info(
-                                    json.dumps(
-                                        {
-                                            "role": "editor",
-                                            "message": f"Editing segment {idx} failed: {e}",
-                                        }
-                                    )
-                                )
-                            except Exception:
-                                pass
-                        continue
-                    with self._lock:
-                        self.srt.segments[i].translation = edits
-                        results[i] = edits
-                    if self.logger:
-                        self.logger.info(f"Edited segment {i}: {edits}")
-                    if self.agent_history_logger:
-                        try:
-                            self.agent_history_logger.info(
-                                json.dumps(
-                                    {
-                                        "role": "editor",
-                                        "message": f"Edited segment {i}: {edits}",
-                                    }
-                                )
+                            self.logger.error(
+                                f"Editing batch starting at segment {batch[0][0]} failed: {e}; keeping originals."
                             )
-                        except Exception:
-                            pass
+                        self._log_history(
+                            f"Editing batch failed, keeping originals: {e}"
+                        )
 
-        if self.agent_history_logger:
-            try:
-                self.agent_history_logger.info(
-                    json.dumps(
-                        {
-                            "role": "editor",
-                            "message": "All done! These lines are now as polished as my morning coffee mug.",
-                        }
-                    )
-                )
-            except Exception:
-                pass
+        self._log_history(
+            "All done! These lines are now as polished as my morning coffee mug."
+        )
         return results

@@ -1,19 +1,32 @@
 import json
+import logging
 import os
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+from time import sleep
 from uuid import uuid4
 from openai import OpenAI
 
 from src.audio.ASR import ASR
 from src.audio.audio_prompt import (
-    AUDIO_ANALYZE_PROMPT,
     AUDIO_TRANSCRIBE_PROMPT,
     AUDIO_TRANSCRIBE_PROMPT_WITH_VISUAL_CUES,
 )
 from src.audio.VAD import VAD
 from src.audio.vad_agent import create_vad
+
+logger = logging.getLogger(__name__)
+
+
+def _audio_duration_secs(audio_path, default: float = 10.0) -> float:
+    """Best-effort clip duration in seconds."""
+    try:
+        from pydub import AudioSegment
+
+        return len(AudioSegment.from_file(audio_path)) / 1000.0
+    except Exception:
+        return default
 
 
 class AudioAgent(ABC):
@@ -93,7 +106,10 @@ class AudioAgent(ABC):
 
     def segment_audio(self, audio_path, cache_dir):
         if not self.VAD_model:
-            raise ValueError("VAD is not initialized for this audio agent")
+            raise ValueError(
+                "VAD is not initialized for this audio agent. "
+                "Configure audio.VAD_model (and src_lang/tgt_lang) in the task config."
+            )
         self.segments = self.VAD_model.get_speaker_segments(audio_path)
         VAD.clip_audio_and_save(self.segments, audio_path, cache_dir)
         return self.segments
@@ -116,10 +132,6 @@ class AudioAgent(ABC):
     def transcribe(self, audio_path, visual_cues=None):
         pass
 
-    @abstractmethod
-    def analyze_audio(self, audio_path):
-        pass
-
     def transcribe_batch(
         self, items: list[dict], max_workers: int = 4
     ) -> dict[int, list[dict]]:
@@ -140,9 +152,28 @@ class AudioAgent(ABC):
                 idx = futures[fut]
                 try:
                     results[idx] = fut.result() or []
-                except Exception:
+                except Exception as e:
+                    logger.error(
+                        "Transcription failed for segment %s: %s; leaving it empty.",
+                        idx,
+                        e,
+                    )
                     results[idx] = []
         return results
+
+    @staticmethod
+    def _seconds_to_srt_time(secs: float) -> str:
+        """Convert seconds to SRT timestamp format HH:MM:SS,mmm"""
+        if secs is None or secs < 0:
+            secs = 0.0
+        total_ms = int(round(float(secs) * 1000))
+        ms = total_ms % 1000
+        total_s = total_ms // 1000
+        s = total_s % 60
+        total_m = total_s // 60
+        m = total_m % 60
+        h = total_m // 60
+        return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
 class GPT4oAudioAgent(AudioAgent):
@@ -160,15 +191,6 @@ class GPT4oAudioAgent(AudioAgent):
         self.model_name = normalized
 
         self.client = OpenAI()
-
-    def segment_audio(self, audio_path, cache_dir):
-        # Prefer VAD segmentation when configured; otherwise create a single placeholder segment
-        if self.VAD_model:
-            return super().segment_audio(audio_path, cache_dir)
-
-    def analyze_audio(self, audio_path):
-        # Not implemented for GPT4o transcription agent
-        return None
 
     def transcribe(self, audio_path, visual_cues=None):
         """
@@ -199,27 +221,22 @@ class GPT4oAudioAgent(AudioAgent):
                 text = response.get("text")
             else:
                 text = str(response)
-            # duration for end timestamp
-            from pydub import AudioSegment
-
-            seg_audio = AudioSegment.from_file(audio_path)
-            duration_secs = len(seg_audio) / 1000.0
+            duration_secs = _audio_duration_secs(audio_path)
 
             usage = getattr(response, "usage", None)
             pt = getattr(usage, "prompt_tokens", None) if usage else None
             ct = getattr(usage, "output_tokens", None) if usage else None
             tt = getattr(usage, "total_tokens", None) if usage else None
-            if hasattr(self, "_record_usage"):
-                self._record_usage(
-                    provider="openai",
-                    model=self.model_name,
-                    category="audio",
-                    prompt_tokens=pt,
-                    completion_tokens=ct,
-                    total_tokens=tt,
-                    phrase_index=None,
-                    extra={"duration_secs": duration_secs, "agent": "audio"},
-                )
+            self._record_usage(
+                provider="openai",
+                model=self.model_name,
+                category="audio",
+                prompt_tokens=pt,
+                completion_tokens=ct,
+                total_tokens=tt,
+                phrase_index=None,
+                extra={"duration_secs": duration_secs, "agent": "audio"},
+            )
 
             return [
                 {
@@ -229,24 +246,8 @@ class GPT4oAudioAgent(AudioAgent):
                 }
             ]
         except Exception as e:
-            print("Error occurred while transcribing:", e)
+            logger.error("Error occurred while transcribing %s: %s", audio_path, e)
             return []
-
-    # Removed legacy chunking helpers; VAD already splits inputs for the API.
-
-    def _seconds_to_srt_time(self, secs: float) -> str:
-        if secs is None:
-            secs = 0.0
-        if secs < 0:
-            secs = 0.0
-        total_ms = int(round(float(secs) * 1000))
-        ms = total_ms % 1000
-        total_s = total_ms // 1000
-        s = total_s % 60
-        total_m = total_s // 60
-        m = total_m % 60
-        h = total_m // 60
-        return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
 class WhisperAudioAgent(AudioAgent):
@@ -256,17 +257,6 @@ class WhisperAudioAgent(AudioAgent):
 
     def load_model(self):
         self.ASR_model = ASR.create(self.model_name)
-
-    def segment_audio(self, audio_path, cache_dir):
-        """Create speaker segments and clip per-segment audio.
-
-        - If VAD is configured, use it to segment and clip the original audio into
-            cache_dir (each segment will have segment.audio_path set).
-        """
-        return super().segment_audio(audio_path, cache_dir)
-
-    def analyze_audio(self, audio_path):
-        pass  # No specific analysis for classic agent, just return empty result
 
     def _parse_srt_to_segments(self, srt_text: str):
         # Convert SRT string to list of dicts with 'start','end','text' (time strings HH:MM:SS,mmm)
@@ -306,31 +296,6 @@ class WhisperAudioAgent(AudioAgent):
                 i += 1
         return segments
 
-    def _srt_time_to_seconds(self, s: str) -> float:
-        # HH:MM:SS,mmm
-        try:
-            # Handle dot or comma for milliseconds
-            s = s.replace(".", ",")
-            hh, mm, rest = s.split(":")
-            ss, ms = rest.split(",")
-            return int(hh) * 3600 + int(mm) * 60 + int(ss) + int(ms) / 1000.0
-        except Exception:
-            return 0.0
-
-    def _seconds_to_srt_time(self, secs: float) -> str:
-        if secs is None:
-            secs = 0.0
-        if secs < 0:
-            secs = 0.0
-        total_ms = int(round(float(secs) * 1000))
-        ms = total_ms % 1000
-        total_s = total_ms // 1000
-        s = total_s % 60
-        total_m = total_s // 60
-        m = total_m % 60
-        h = total_m // 60
-        return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
-
     def transcribe(self, audio_path, visual_cues=None):
         # Transcribe the given (per-VAD) audio clip with Whisper ASR.
         # Return SRT-like segments with HH:MM:SS,mmm timestamps relative to this clip.
@@ -343,10 +308,6 @@ class WhisperAudioAgent(AudioAgent):
         result = self.ASR_model.get_transcript(audio_path, source_lang=src_lang)
         # If this path uses OpenAI Whisper API under the hood, record per-minute usage
         try:
-            from pydub import AudioSegment
-
-            seg_audio = AudioSegment.from_file(audio_path)
-            duration_secs = len(seg_audio) / 1000.0
             self._record_usage(
                 provider="openai",
                 model="whisper-large-v3",
@@ -354,7 +315,10 @@ class WhisperAudioAgent(AudioAgent):
                 prompt_tokens=None,
                 completion_tokens=None,
                 total_tokens=None,
-                extra={"duration_secs": duration_secs, "agent": "audio"},
+                extra={
+                    "duration_secs": _audio_duration_secs(audio_path, default=0.0),
+                    "agent": "audio",
+                },
             )
         except Exception:
             pass
@@ -402,24 +366,6 @@ class Qwen3ASRAudioAgent(AudioAgent):
             asr_options=asr_options,
             system_prompt=system_prompt,
         )
-
-    def analyze_audio(self, audio_path):
-        # ASR-only agent; no separate audio analysis endpoint.
-        return None
-
-    def _seconds_to_srt_time(self, secs: float) -> str:
-        if secs is None:
-            secs = 0.0
-        if secs < 0:
-            secs = 0.0
-        total_ms = int(round(float(secs) * 1000))
-        ms = total_ms % 1000
-        total_s = total_ms // 1000
-        s = total_s % 60
-        total_m = total_s // 60
-        m = total_m % 60
-        h = total_m // 60
-        return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
     def _build_init_prompt(self, visual_cues=None):
         base_prompt = (self.audio_config or {}).get("qwen_asr_system_prompt", "").strip()
@@ -470,14 +416,7 @@ class Qwen3ASRAudioAgent(AudioAgent):
         if not transcript:
             return []
 
-        duration_secs = 0.0
-        try:
-            from pydub import AudioSegment
-
-            seg_audio = AudioSegment.from_file(audio_path)
-            duration_secs = len(seg_audio) / 1000.0
-        except Exception:
-            duration_secs = 10.0
+        duration_secs = _audio_duration_secs(audio_path)
 
         usage = getattr(self.ASR_model, "last_usage", {}) or {}
         self._record_usage(
@@ -493,121 +432,9 @@ class Qwen3ASRAudioAgent(AudioAgent):
         return self._normalize_segments(transcript, duration_secs)
 
 
-class QwenAudioAgent(AudioAgent):
-    def __init__(self, model_name="Qwen/Qwen2-Audio-7B-Instruct"):
-        super().__init__(model_name)
-
-    def load_model(self):
-        from transformers import AutoProcessor, Qwen2AudioForConditionalGeneration
-
-        self.processor = AutoProcessor.from_pretrained(self.model_name)
-        self.model = Qwen2AudioForConditionalGeneration.from_pretrained(
-            self.model_name, device_map="auto"
-        )
-
-    def transcribe(self, audio_path, visual_cues=None):
-        import librosa
-        import torch
-
-        audios = [
-            librosa.load(audio_path, sr=self.processor.feature_extractor.sampling_rate)[
-                0
-            ]
-        ]
-
-        conversation = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "audio", "audio_url": audio_path},
-                    {
-                        "type": "text",
-                        "text": AUDIO_TRANSCRIBE_PROMPT_WITH_VISUAL_CUES.format(
-                            visual_cues=visual_cues
-                        )
-                        if visual_cues
-                        else AUDIO_TRANSCRIBE_PROMPT,
-                    },
-                ],
-            }
-        ]
-        text = self.processor.apply_chat_template(
-            conversation, add_generation_prompt=True, tokenize=False
-        )
-
-        inputs = self.processor(
-            text=text, audios=audios, return_tensors="pt", padding=True
-        )
-        # Move all tensors to CUDA while preserving the BatchEncoding structure
-        for key, value in inputs.items():
-            if isinstance(value, torch.Tensor):
-                inputs[key] = value.to("cuda")
-
-        generate_ids = self.model.generate(**inputs, max_length=5000)
-        generate_ids = generate_ids[:, inputs.input_ids.size(1) :]
-
-        response = self.processor.batch_decode(
-            generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False
-        )[0]
-        return response
-
-    def analyze_audio(self, audio_path):
-        import librosa
-        import torch
-
-        audios = [
-            librosa.load(audio_path, sr=self.processor.feature_extractor.sampling_rate)[
-                0
-            ]
-        ]
-
-        conversation = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "audio", "audio_url": audio_path},
-                    {"type": "text", "text": AUDIO_ANALYZE_PROMPT},
-                ],
-            }
-        ]
-        text = self.processor.apply_chat_template(
-            conversation, add_generation_prompt=True, tokenize=False
-        )
-
-        inputs = self.processor(
-            text=text, audios=audios, return_tensors="pt", padding=True
-        )
-        for key, value in inputs.items():
-            if isinstance(value, torch.Tensor):
-                inputs[key] = value.to("cuda")
-
-        generate_ids = self.model.generate(**inputs, max_length=5000)
-        generate_ids = generate_ids[:, inputs.input_ids.size(1) :]
-
-        response = self.processor.batch_decode(
-            generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False
-        )[0]
-        return response
-
-
 class GeminiAudioAgent(AudioAgent):
     def __init__(self, model_name="gemini-3-flash-preview", audio_config: dict = None):
         super().__init__(model_name, audio_config)
-
-    def _seconds_to_srt_time(self, secs: float) -> str:
-        """Convert seconds to SRT timestamp format HH:MM:SS,mmm"""
-        if secs is None:
-            secs = 0.0
-        if secs < 0:
-            secs = 0.0
-        total_ms = int(round(float(secs) * 1000))
-        ms = total_ms % 1000
-        total_s = total_ms // 1000
-        s = total_s % 60
-        total_m = total_s // 60
-        m = total_m % 60
-        h = total_m // 60
-        return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
     def load_model(self):
         from google import genai
@@ -619,32 +446,22 @@ class GeminiAudioAgent(AudioAgent):
             )
         self.model = genai.Client(api_key=api_key)
 
-    def parse_response(self, response, parsing_retries=5):
-        for retry in range(parsing_retries):
-            try:
-                # Check if response is wrapped in code block markers
-                if "```json" in response:
-                    # Extract the actual JSON content from between the code block markers
-                    json_content = (
-                        response.split("```json", 1)[1].split("```", 1)[0].strip()
-                    )
-                    gemini_results = json.loads(json_content)
-                    return gemini_results
-                else:
-                    # If no code block markers, try parsing directly
-                    gemini_results = json.loads(response)
-                    return gemini_results
-
-            except Exception as e:
-                if retry < parsing_retries - 1:
-                    print(
-                        f"Failed to parse response (attempt {retry + 1}/{parsing_retries}): {str(e)}"
-                    )
-                    print("Retrying with new response...")
-                    continue
-                else:
-                    print(f"Failed to parse response after {parsing_retries} attempts")
-                    return None
+    @staticmethod
+    def parse_response(response):
+        """Parse a JSON payload from the model output; returns None on failure."""
+        if not response:
+            return None
+        try:
+            if "```json" in response:
+                # Extract the actual JSON content from between the code block markers
+                json_content = (
+                    response.split("```json", 1)[1].split("```", 1)[0].strip()
+                )
+                return json.loads(json_content)
+            return json.loads(response)
+        except Exception as e:
+            logger.warning("Failed to parse Gemini response as JSON: %s", e)
+            return None
 
     def _normalize_timestamp(self, time_str, audio_duration_secs):
         if not time_str:
@@ -661,9 +478,7 @@ class GeminiAudioAgent(AudioAgent):
         except ValueError:
             pass
 
-        # Standardize separators
-        # Replace non-digit chars (except : and .) with :
-        # But actually simple replacement of separators to : is safer
+        # Standardize separators to ':' before splitting
         normalized = time_str.replace(",", ":").replace(".", ":")
 
         # Filter out empty strings and non-digits
@@ -683,26 +498,14 @@ class GeminiAudioAgent(AudioAgent):
             total_secs = hh * 3600 + mm * 60 + ss + ms / 1000.0
 
         elif len(parts) == 3:
-            # Ambiguous: HH:MM:SS vs MM:SS:mmm
-            # We try MM:SS:mmm first as it is more precise for ASR segments usually
-            # val_ms_patt: MM:SS:mmm
+            # Ambiguous: HH:MM:SS vs MM:SS:mmm.
+            # Prefer MM:SS:mmm unless HH:MM:SS fits the clip duration better.
             val_ms_based = parts[0] * 60 + parts[1] + parts[2] / 1000.0
-
-            # val_hms_patt: HH:MM:SS
             val_hms_based = parts[0] * 3600 + parts[1] * 60 + parts[2]
-
-            # Heuristic: Check against duration
-            # If val_hms_based is within duration + margin, and val_ms_based is tiny relative to content?
-            # Or if val_hms_based > duration, it must be val_ms_based?
 
             if val_hms_based > audio_duration_secs * 1.5:
                 total_secs = val_ms_based
             elif val_ms_based <= audio_duration_secs:
-                # If both are valid, MM:SS:mmm is preferred standard for 3-part ASR tokens if decimals implied
-                # But if it looks like integers? 01:20:30.
-                # Usually milliseconds are 3 digits.
-                # If last part is < 1000, likely ms.
-                # But seconds are < 60.
                 total_secs = val_ms_based
             else:
                 total_secs = val_hms_based
@@ -720,7 +523,7 @@ class GeminiAudioAgent(AudioAgent):
         total_secs = max(0.0, min(total_secs, audio_duration_secs))
         return self._seconds_to_srt_time(total_secs)
 
-    def transcribe(self, audio_path, visual_cues=None):
+    def transcribe(self, audio_path, visual_cues=None, max_attempts=5):
         if self.agent_history_logger:
             self.agent_history_logger.info(
                 '{"role": "audio_agent", "message": "Audio loaded, let me give it a good ol\' chomp... chomp chomp! 🎧"}'
@@ -730,14 +533,7 @@ class GeminiAudioAgent(AudioAgent):
             audio_data = audio.read()
 
         # Get audio duration for timestamp validation
-        audio_duration_secs = 0.0
-        try:
-            from pydub import AudioSegment
-
-            seg_audio = AudioSegment.from_file(audio_path)
-            audio_duration_secs = len(seg_audio) / 1000.0
-        except Exception:
-            audio_duration_secs = 10.0  # fallback duration
+        audio_duration_secs = _audio_duration_secs(audio_path)
 
         from google.genai import types
 
@@ -757,105 +553,74 @@ class GeminiAudioAgent(AudioAgent):
             )
         ]
 
-        resp = None
-        for retry in range(5):
-            if resp is None:
+        for attempt in range(max_attempts):
+            try:
                 response = self.model.models.generate_content(
                     model=self.model_name,
                     contents=contents,
                 )
-                # Parse content
-                raw_resp = self.parse_response(response.text)
+            except Exception as e:
+                logger.warning(
+                    "Gemini transcription request failed (attempt %d/%d): %s",
+                    attempt + 1,
+                    max_attempts,
+                    e,
+                )
+                sleep(min(10.0, 1.0 + attempt * 2))
+                continue
 
-                # Normalize timestamps in the response
-                if raw_resp and isinstance(raw_resp, list):
-                    for seg in raw_resp:
-                        if isinstance(seg, dict):
-                            if "start" in seg:
-                                seg["start"] = self._normalize_timestamp(
-                                    seg["start"], audio_duration_secs
-                                )
-                            if "end" in seg:
-                                seg["end"] = self._normalize_timestamp(
-                                    seg["end"], audio_duration_secs
-                                )
-                resp = raw_resp
+            # Best-effort usage logging
+            try:
+                meta = getattr(response, "usage_metadata", None)
+                pt = getattr(meta, "prompt_token_count", None) if meta else None
+                ct = getattr(meta, "candidates_token_count", None) if meta else None
+                tt = getattr(meta, "total_token_count", None) if meta else None
+                self._record_usage(
+                    provider="gemini",
+                    model=self.model_name,
+                    category="audio",
+                    prompt_tokens=pt,
+                    completion_tokens=ct,
+                    total_tokens=tt,
+                    extra={"duration_secs": audio_duration_secs, "agent": "audio"},
+                )
+            except Exception:
+                pass
 
-                # Best-effort usage logging via base
-                try:
-                    meta = getattr(response, "usage_metadata", None)
-                    pt = getattr(meta, "prompt_token_count", None) if meta else None
-                    ct = getattr(meta, "candidates_token_count", None) if meta else None
-                    tt = getattr(meta, "total_token_count", None) if meta else None
-                    self._record_usage(
-                        provider="gemini",
-                        model=self.model_name,
-                        category="audio",
-                        prompt_tokens=pt,
-                        completion_tokens=ct,
-                        total_tokens=tt,
-                        extra=(
-                            {"duration_secs": audio_duration_secs, "agent": "audio"}
-                            if audio_duration_secs is not None
-                            else {"agent": "audio"}
-                        ),
-                    )
-                except Exception:
-                    pass
-            else:
+            raw_resp = self.parse_response(getattr(response, "text", None))
+            if isinstance(raw_resp, dict):
+                # Some responses wrap the array, e.g. {"segments": [...]}
+                raw_resp = raw_resp.get("segments")
+            if isinstance(raw_resp, list):
+                for seg in raw_resp:
+                    if isinstance(seg, dict):
+                        if "start" in seg:
+                            seg["start"] = self._normalize_timestamp(
+                                seg["start"], audio_duration_secs
+                            )
+                        if "end" in seg:
+                            seg["end"] = self._normalize_timestamp(
+                                seg["end"], audio_duration_secs
+                            )
                 if self.agent_history_logger:
                     self.agent_history_logger.info(
                         '{"role": "audio_agent", "message": "Transcription done! If I missed a beat, blame the waveform, not me 😜"}'
                     )
-                return resp
+                return raw_resp
+
+            logger.warning(
+                "Gemini transcription returned unparseable output (attempt %d/%d); retrying.",
+                attempt + 1,
+                max_attempts,
+            )
 
         if self.agent_history_logger:
             self.agent_history_logger.info(
-                '{"role": "audio_agent", "message": "Oops, 5 tries and still no luck. Even the best of us have off days!"}'
+                '{"role": "audio_agent", "message": "Oops, no luck after retries. Even the best of us have off days!"}'
             )
-        # Fallback plain log
-        try:
-            print("[GeminiAudioAgent] Failed to transcribe audio after 5 retries.")
-        except Exception:
-            pass
-        return resp
-
-    def analyze_audio(self, audio_path):
-        if self.agent_history_logger:
-            self.agent_history_logger.info(
-                '{"role": "audio_agent", "message": "Analyzing audio... let me put on my sonic goggles! 🥽"}'
-            )
-
-        with open(audio_path, "rb") as audio:
-            audio_data = audio.read()
-
-        from google.genai import types
-
-        contents = [
-            types.Content(
-                role="user",
-                parts=[
-                    types.Part.from_text(text=AUDIO_ANALYZE_PROMPT),
-                    types.Part.from_bytes(data=audio_data, mime_type="audio/wav"),
-                ],
-            )
-        ]
-
-        response = self.model.models.generate_content(
-            model=self.model_name,
-            contents=contents,
+        logger.error(
+            "[GeminiAudioAgent] Failed to transcribe %s after %d attempts.",
+            audio_path,
+            max_attempts,
         )
-        result = self.parse_response(response.text)
-        if self.agent_history_logger:
-            self.agent_history_logger.info(
-                '{"role": "audio_agent", "message": "Audio analysis complete! If I missed a note, it was jazz."}'
-            )
-        return result
-
-
-if __name__ == "__main__":
-    agent = QwenAudioAgent()
-    visual_cues = "a man named lowko is talking about the game of starcraft"
-    print(agent.transcribe("C:\\Work\\GitRepos\\task.mp3"))
-    print(agent.transcribe("C:\\Work\\GitRepos\\task.mp3", visual_cues))
-    print(agent.analyze_audio("C:\\Work\\GitRepos\\task.mp3"))
+        return []

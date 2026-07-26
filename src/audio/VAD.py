@@ -36,13 +36,6 @@ class VAD(ABC):
         raise NotImplementedError
 
     @staticmethod
-    def load_audio(audio_path: str) -> AudioSegment:
-        audio = AudioSegment.from_file(audio_path)
-        audio = audio.set_channels(1)  # Mono
-        audio = audio.set_frame_rate(16000)  # 16kHz
-        return audio
-
-    @staticmethod
     def _audiosegment_to_wav_bytes(segment: AudioSegment) -> bytes:
         buffer = io.BytesIO()
         with wave.open(buffer, "wb") as wf:
@@ -59,20 +52,6 @@ class VAD(ABC):
             wf.setsampwidth(segment.sample_width)
             wf.setframerate(segment.frame_rate)
             wf.writeframes(segment.raw_data)
-
-    def _seconds_to_srt_time(self, secs: float) -> str:
-        if secs is None:
-            secs = 0.0
-        if secs < 0:
-            secs = 0.0
-        total_ms = int(round(float(secs) * 1000))
-        ms = total_ms % 1000
-        total_s = total_ms // 1000
-        s = total_s % 60
-        total_m = total_s // 60
-        m = total_m % 60
-        h = total_m // 60
-        return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
     @staticmethod
     def _ms_to_filename_time(ms: int) -> str:

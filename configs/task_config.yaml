@@ -24,7 +24,7 @@ MEMORY:
 
 audio:
   enable_audio: True
-  audio_agent: GeminiAudioAgent # clip or other vLLMs
+  audio_agent: GeminiAudioAgent # GeminiAudioAgent | WhisperAudioAgent | Qwen3ASRAudioAgent | GPT4oAudioAgent
   model_path:  # replace it with your own model path
   VAD_provider: assemblyai # assemblyai, pyannote_api, or pyannote_local
   VAD_model: universal-3-5-pro # pyannote/speaker-diarization-3.1 or API for pyannote
@@ -71,6 +71,7 @@ editor:
   model: gpt-5-mini
   editor_context_window: 10 # number of sentences to be provided as context for the editor(previous and next {n} sentences)
   history_length: 5 # number of sentences to be provided as history for the editor(previous {n} sentences)
+  batch_size: 8 # number of consecutive segments edited per LLM request
 
 # output type that user receive
 output_type: 

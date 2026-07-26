@@ -70,13 +70,6 @@ def parse_args():
         required=False,
     )
     parser.add_argument(
-        "--is_assistant",
-        help="is assistant mode",
-        default=False,
-        type=bool,
-        required=False,
-    )
-    parser.add_argument(
         "--task_cfg",
         help="task config path",
         default="./configs/task_config.yaml",
@@ -121,14 +114,8 @@ if __name__ == "__main__":
         local_dir.mkdir(parents=False, exist_ok=False)
 
     # Check API source from azure or openai
-    if launch_cfg["api_source"] == "openai":
-        if task_config:
-            task_config.api_source = "openai"
-        task_cfg["api_source"] = "openai"
-    elif launch_cfg["api_source"] == "azure":
-        if task_config:
-            task_config.api_source = "azure"
-        task_cfg["api_source"] = "azure"
+    if launch_cfg["api_source"] in ("openai", "azure"):
+        task_cfg["api_source"] = launch_cfg["api_source"]
 
     # get task id
     task_id = str(uuid4())
@@ -137,20 +124,6 @@ if __name__ == "__main__":
     task_dir = local_dir.joinpath(f"task_{task_id}")
     task_dir.mkdir(parents=False, exist_ok=False)
     task_dir.joinpath("results").mkdir(parents=False, exist_ok=False)
-
-    # add is_assistant to task_config
-    if task_config:
-        task_config.is_assistant = args.is_assistant
-    task_cfg["is_assistant"] = args.is_assistant
-
-    # disable spell check and term correct for assistant mode
-    if args.is_assistant:
-        if task_config:
-            task_config.pre_process.spell_check = False
-            task_config.pre_process.term_correct = False
-        task_cfg["pre_process"]["spell_check"] = False
-        task_cfg["pre_process"]["term_correct"] = False
-        print("🔧 Assistant mode: Spell checking and term correction disabled")
 
     # Task create
     if args.link is not None:
@@ -188,4 +161,9 @@ if __name__ == "__main__":
 
     # add task to the status queue
     print(f"🚀 Starting task execution: {task_id}")
-    task.run()
+    try:
+        task.run()
+    except Exception as e:
+        print(f"❌ Task {task_id} failed: {e}")
+        print(f"   Log file: {task.log_dir}")
+        raise

@@ -27,7 +27,7 @@ export interface SessionConfig {
   'translation.use_history': boolean;
   'translation.max_retries': number;
   'audio.enable_audio': boolean;
-  'audio.audio_agent': "GeminiAudioAgent" | "WhisperAudioAgent" | "QwenAudioAgent" | "GPT4oAudioAgent";
+  'audio.audio_agent': "GeminiAudioAgent" | "WhisperAudioAgent" | "Qwen3ASRAudioAgent" | "GPT4oAudioAgent";
   'audio.model_path': string | null;
   'audio.VAD_provider': "assemblyai" | "pyannote_api" | "pyannote_local";
   'audio.VAD_model': string;
@@ -36,7 +36,7 @@ export interface SessionConfig {
   'audio.src_lang': string;
   'audio.tgt_lang': string;
   'vision.enable_vision': boolean;
-  'vision.vision_model': "CLIP" | "gpt-4o" | "gpt-4o-mini";
+  'vision.vision_model': "gpt-4o" | "gpt-4o-mini";
   'vision.model_path': string;
   'vision.frame_cache_dir': string;
   'vision.frame_per_seg': number;

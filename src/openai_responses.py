@@ -1,7 +1,13 @@
+import logging
+import random
+from time import sleep
 from typing import Any, Optional
 
+import openai
 from openai import AzureOpenAI
 
+
+logger = logging.getLogger(__name__)
 
 LEGACY_OPENAI_TEXT_MODEL_MAP = {
     "gpt-3.5-turbo": "gpt-5-mini",
@@ -27,6 +33,14 @@ SUPPORTED_OPENAI_TEXT_MODELS = (
 
 DEFAULT_TEXT_MODEL = "gpt-5-mini"
 
+# Errors that are worth retrying: rate limits, connection issues, timeouts, 5xx.
+TRANSIENT_OPENAI_ERRORS = (
+    openai.RateLimitError,
+    openai.APIConnectionError,
+    openai.APITimeoutError,
+    openai.InternalServerError,
+)
+
 
 def normalize_text_model(model_name: Optional[str], default: str = DEFAULT_TEXT_MODEL) -> str:
     candidate = (model_name or default).strip()
@@ -41,12 +55,6 @@ def normalize_text_model(model_name: Optional[str], default: str = DEFAULT_TEXT_
 
 def provider_for_client(client: Any) -> str:
     return "azure-openai" if isinstance(client, AzureOpenAI) else "openai"
-
-
-def model_supports_temperature(model_name: Optional[str]) -> bool:
-    candidate = (model_name or "").strip().lower()
-    normalized = LEGACY_OPENAI_TEXT_MODEL_MAP.get(candidate, candidate)
-    return not normalized.startswith("gpt-5")
 
 
 def _usage_field(container: Any, key: str) -> Any:
@@ -97,19 +105,41 @@ def create_response_text(
     model: str,
     input_value: Any,
     instructions: Optional[str] = None,
-    temperature: Optional[float] = None,
     max_output_tokens: Optional[int] = None,
+    max_attempts: int = 3,
 ) -> tuple[str, Any]:
+    """Create a Responses API completion with retry on transient failures.
+
+    Rate limits, connection errors, timeouts, and 5xx responses are retried
+    with exponential backoff (on top of the SDK's own low-level retries).
+    Non-transient errors (e.g. BadRequestError) propagate to the caller.
+    """
     request: dict[str, Any] = {
         "model": model,
         "input": input_value,
     }
     if instructions:
         request["instructions"] = instructions
-    if temperature is not None and model_supports_temperature(model):
-        request["temperature"] = temperature
     if max_output_tokens is not None:
         request["max_output_tokens"] = max_output_tokens
 
-    response = client.responses.create(**request)
-    return get_response_text(response), response
+    last_error: Exception | None = None
+    for attempt in range(max(1, max_attempts)):
+        try:
+            response = client.responses.create(**request)
+            return get_response_text(response), response
+        except TRANSIENT_OPENAI_ERRORS as e:
+            last_error = e
+            backoff = min(30.0, 2.0 ** attempt) + random.random()
+            logger.warning(
+                "Transient OpenAI error on %s (attempt %d/%d): %s. Retrying in %.1fs",
+                model,
+                attempt + 1,
+                max_attempts,
+                e,
+                backoff,
+            )
+            sleep(backoff)
+
+    assert last_error is not None
+    raise last_error

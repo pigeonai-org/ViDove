@@ -61,7 +61,7 @@
 - [10/09/25] Our paper has been accepted by [EMNLP 2025 Demo](https://aclanthology.org/2025.emnlp-demos.17/)!
 - [09/07/25] 🔥**ViDove V1.0.0:** We are happy to release ViDove V1.0.0 and our paper on arXiv： [ViDove: A Translation Agent System with Multimodal Context and Memory-Augmented Reasoning](https://arxiv.org/abs/2507.07306)
 - [03/03/24]  We are happy to tell you that you could try to use RAG-boosted translation by selecting specific domain assistant in the UI under the translation section.
-- [12/20]🔥**ViDove V0.1 Released**: We are happy to release our initial version of ViDove: End-to-end Video Translation Toolkit. 
+- [12/20]🔥**ViDove V0.1 Released**: We are happy to release our initial version of ViDove: End-to-end Video Translation Toolkit.
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 ## Join Us
@@ -139,36 +139,36 @@ For detailed Docker deployment guide, see the [Docker Deployment Doc](doc/DOCKER
    ```sh
    # Install uv package manager
    curl -LsSf https://astral.sh/uv/install.sh | sh
-   
+
    # Install core dependencies (optimized for API-based workflow)
    uv sync
-   
+
    # Activate virtual environment
    source .venv/bin/activate  # Unix/macOS
    # or: .venv\Scripts\activate  # Windows
    ```
-   
+
    **Optional Features** (install only what you need):
    ```sh
    # For local Whisper models (instead of OpenAI API)
    uv sync --extra audio-local
-   
+
    # For local speaker diarization (instead of Pyannote API)
    uv sync --extra audio-advanced
-   
+
    # For CLIP vision features
    uv sync --extra vision
-   
+
    # For Streamlit/Gradio UI
    uv sync --extra ui
-   
+
    # For evaluation tools
    uv sync --extra evaluation
-   
+
    # Install everything
    uv sync --extra all
    ```
-   
+
    **Note**: Core dependencies are optimized for API-based workflows (OpenAI Whisper API, AssemblyAI Universal VAD, GPT-4 Vision). Pyannote API and local model alternatives remain available.
 4. Enter your API keys in bash
 
@@ -217,13 +217,9 @@ For detailed Docker deployment guide, see the [Docker Deployment Doc](doc/DOCKER
     ```sh
     python3 entries/run.py --srt_file path/to/subtitles.srt
     ```
-  - Assistant mode (disables spell check and term correction automatically):
-    ```sh
-    python3 entries/run.py --link "your_youtube_link" --is_assistant True
-    ```
   - Terminal Usage:
     ```sh
-    usage: run.py [-h] [--link LINK] [--video_file VIDEO_FILE] [--audio_file AUDIO_FILE] [--srt_file SRT_FILE] [--is_assistant IS_ASSISTANT] [--launch_cfg LAUNCH_CFG] [--task_cfg TASK_CFG]
+    usage: run.py [-h] [--link LINK] [--video_file VIDEO_FILE] [--audio_file AUDIO_FILE] [--srt_file SRT_FILE] [--launch_cfg LAUNCH_CFG] [--task_cfg TASK_CFG]
 
     options:
       -h, --help            show this help message and exit
@@ -254,12 +250,12 @@ For detailed Docker deployment guide, see the [Docker Deployment Doc](doc/DOCKER
 
 ### Quick Start with Streamlit User Interface
   ```sh
-  streamlit run entries/app.py 
+  streamlit run entries/app.py
   ```
 
 ### Configs
   Use "--launch_cfg" and "--task_cfg" in run.py to change launch or task configuration
-  - configs/local_launch.yaml 
+  - configs/local_launch.yaml
     ```yaml
     # launch config for local environment
     local_dump: ./local_dump # change local dump dir here
@@ -267,7 +263,7 @@ For detailed Docker deployment guide, see the [Docker Deployment Doc](doc/DOCKER
     api_source: openai # openai or azure
     ```
   - configs/task_config.yaml
-    
+
     copy and change this config for different configuration
     ```yaml
     # configuration for each task
@@ -296,7 +292,7 @@ For detailed Docker deployment guide, see the [Docker Deployment Doc](doc/DOCKER
 
     audio:
       enable_audio: True
-      audio_agent: WhisperAudioAgent # GeminiAudioAgent | WhisperAudioAgent | QwenAudioAgent | GPT4oAudioAgent
+      audio_agent: WhisperAudioAgent # GeminiAudioAgent | WhisperAudioAgent | Qwen3ASRAudioAgent | GPT4oAudioAgent
       model_path:  # replace it with your own model path
       VAD_provider: assemblyai # assemblyai | pyannote_api | pyannote_local
       VAD_model: universal-3-5-pro # use API for legacy pyannote API configs
@@ -312,16 +308,16 @@ For detailed Docker deployment guide, see the [Docker Deployment Doc](doc/DOCKER
       model_path: ./ViDove/vision_model/clip-vit-base-patch16 # replace it with your own model path
       frame_cache_dir: ./cache # should be cleared after task finished
       frame_per_seg: 4 # number of frames extracted from segment
-      
+
     # pre-process module config
-    pre_process: 
+    pre_process:
       sentence_form: True
       spell_check: False
       term_correct: True
 
     # Translation module config
     translation:
-      model: gpt-4o # gpt-4 | gpt-4o-mini | gpt-4o | Assistant | Multiagent | RAG | gpt-5 | gpt-5-mini
+      model: gpt-5 # gpt-5 | gpt-5-mini | gpt-5.2 | Multiagent
       chunk_size: 2000
       use_history: True     # include recent translation history per request
       max_retries: 1        # retries per chunk for transient API errors
@@ -332,7 +328,7 @@ For detailed Docker deployment guide, see the [Docker Deployment Doc](doc/DOCKER
       check_len_and_split: True
       remove_trans_punctuation: True
 
-    proofreader: 
+    proofreader:
       enable_proofreading: True
       window_size: 5 # number of sentences per proofreading chunk
       short_term_memory_len: 5 # maximum number of sentences stored in short term memory
@@ -346,7 +342,7 @@ For detailed Docker deployment guide, see the [Docker Deployment Doc](doc/DOCKER
       user_instruction: none # none | formal | casual | technical
 
     # output type that user receive
-    output_type: 
+    output_type:
       subtitle: srt
       video: False
       bilingual: True
@@ -417,13 +413,13 @@ If you find ViDove useful for your research or applications, please cite our pap
 
 ```bibtex
 @misc{lu2025vidovetranslationagentmultimodal,
-      title={ViDove: A Translation Agent System with Multimodal Context and Memory-Augmented Reasoning}, 
+      title={ViDove: A Translation Agent System with Multimodal Context and Memory-Augmented Reasoning},
       author={Yichen Lu and Wei Dai and Jiaen Liu and Ching Wing Kwok and Zongheng Wu and Xudong Xiao and Ao Sun and Sheng Fu and Jianyuan Zhan and Yian Wang and Takatomo Saito and Sicheng Lai},
       year={2025},
       eprint={2507.07306},
       archivePrefix={arXiv},
       primaryClass={cs.AI},
-      url={https://arxiv.org/abs/2507.07306}, 
+      url={https://arxiv.org/abs/2507.07306},
 }
 ```
 
@@ -501,7 +497,7 @@ Use this space to list resources you find helpful and would like to give credit 
 * [GitHub Pages](https://pages.github.com)
 * [Font Awesome](https://fontawesome.com)
 * [React Icons](https://react-icons.github.io/react-icons/search)
-* 
+*
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p> -->
 
