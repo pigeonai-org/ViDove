@@ -25,6 +25,8 @@
     <!-- ·
     <a href="https://pigeonai.club/">🌐 Demo</a> -->
     ·
+    <a href="https://huggingface.co/datasets/StarPigeon/DoveBench">🎬 DoveBench</a>
+    ·
     <a href="https://github.com/pigeonai-org/ViDove/issues">🐛 Report Bug</a>
     ·
     <a href="https://github.com/pigeonai-org/ViDove/issues">💡 Request Feature</a>
@@ -358,7 +360,7 @@ DoveBench is an open benchmark for long-form video automatic subtitling introduc
 - Metrics: BLEU, BLEURT, SubER, SubSONAR, sCOMET (see Experiments)
 - Categories: Includes specialized domains (e.g., StarCraft II) for domain adaptation analysis
 
-DoveBench is available at [https://huggingface.co/spaces/StarPigeon/ViDove](https://huggingface.co/spaces/StarPigeon/ViDove)
+DoveBench is available at [https://huggingface.co/datasets/StarPigeon/DoveBench](https://huggingface.co/datasets/StarPigeon/DoveBench)
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
